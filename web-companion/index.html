@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#050608" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Personal AI</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<main class="shell">
+<header><div><small>PERSONAL AI</small><h1>Your intelligence, with you.</h1></div><span class="status">● Web companion</span></header>
+<nav><button class="active" data-page="home">Home</button><button data-page="memory">Memory</button><button data-page="control">Control</button><button data-page="dashboard">Dashboard</button></nav>
+<section id="home" class="page active">
+<div class="core" aria-label="Neural Pulse Core"><i></i><i></i><i></i><div class="core-center"><span>PERSONAL</span><b>Listening when you need me</b></div></div>
+<div class="mode"><span>Observe</span><span>Suggest</span><span class="selected">Ask</span><span>Act</span></div>
+<div class="cards"><article><small>THINGS NEED YOU</small><strong>0</strong><p>Approvals will appear here when your trusted Personal AI runtime is connected.</p></article><article><small>HANDLED FOR YOU</small><strong>—</strong><p>Private activity stays unavailable until a secure runtime is paired.</p></article></div>
+</section>
+<section id="memory" class="page"><h2>Second Brain</h2><p class="muted">Memory Graph · Memory Tree · Timeline</p><div class="panel"><b>Private by design</b><p>Your memories are not stored in this public web build. When secure pairing is enabled, this page will request scoped data from your trusted Personal AI runtime.</p></div></section>
+<section id="control" class="page"><h2>Control</h2><div class="panel"><b>Ask before acting</b><p>High-impact actions remain permission-gated. This web companion cannot directly access your desktop, files, microphone history, secrets, or local devices.</p></div><div class="panel"><b>Device status</b><p>iPhone web companion · Unpaired</p></div></section>
+<section id="dashboard" class="page"><h2>Dashboard</h2><div class="stats"><article><small>MEMORY</small><b>Private</b></article><article><small>DEVICES</small><b>Unpaired</b></article><article><small>SECURITY</small><b>Protected</b></article><article><small>VOICE</small><b>Web ready</b></article></div></section>
+<footer><form id="ask"><input id="prompt" aria-label="Ask Personal AI" autocomplete="off" placeholder="Ask Personal AI anything…"/><button type="submit">↑</button></form><div class="footline"><span>Mic ◌</span><span>Memory ◌</span><span>Devices ◌</span><span>Ask before acting</span></div></footer>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
