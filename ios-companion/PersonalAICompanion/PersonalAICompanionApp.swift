@@ -1,15 +1,40 @@
 import SwiftUI
 import UserNotifications
+import UIKit
+
+final class CompanionAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application:UIApplication,didFinishLaunchingWithOptions launchOptions:[UIApplication.LaunchOptionsKey:Any]?=nil)->Bool {
+        UNUserNotificationCenter.current().delegate=self
+        UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]) { granted,_ in
+            if granted { DispatchQueue.main.async { application.registerForRemoteNotifications() } }
+        }
+        return true
+    }
+    func application(_ application:UIApplication,didRegisterForRemoteNotificationsWithDeviceToken deviceToken:Data) {
+        let token=deviceToken.map { String(format:"%02x",$0) }.joined()
+        UserDefaults.standard.set(token,forKey:"personal_ai_apns_token")
+        NotificationCenter.default.post(name:.personalAIAPNSToken,object:token)
+    }
+    func application(_ application:UIApplication,didFailToRegisterForRemoteNotificationsWithError error:Error) {
+        NotificationCenter.default.post(name:.personalAIAPNSError,object:error.localizedDescription)
+    }
+    func userNotificationCenter(_ center:UNUserNotificationCenter,willPresent notification:UNNotification,withCompletionHandler completionHandler:@escaping (UNNotificationPresentationOptions)->Void) {
+        completionHandler([.banner,.sound,.badge])
+    }
+}
+
+extension Notification.Name {
+    static let personalAIAPNSToken=Notification.Name("personalAIAPNSToken")
+    static let personalAIAPNSError=Notification.Name("personalAIAPNSError")
+}
 
 @main
 struct PersonalAICompanionApp: App {
+    @UIApplicationDelegateAdaptor(CompanionAppDelegate.self) private var appDelegate
     @StateObject private var store = CompanionStore()
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        BackgroundCoordinator.shared.register { }
-        UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]) { _,_ in }
-    }
+    init() { BackgroundCoordinator.shared.register { } }
 
     var body: some Scene {
         WindowGroup {
@@ -25,31 +50,27 @@ struct PersonalAICompanionApp: App {
                         }
                     }
                     Section("Secure pairing") {
-                        TextField("Pairing token from desktop",text:$store.pairingToken)
-                            .textInputAutocapitalization(.never)
+                        TextField("Pairing token from desktop",text:$store.pairingToken).textInputAutocapitalization(.never)
                         TextField("6-digit code",text:$store.pairingCode).keyboardType(.numberPad)
                         Button("Pair iPhone") { Task { await store.pair() } }
                     }
                     Section("Connection") {
                         LabeledContent("Status",value:store.status)
                         LabeledContent("Channel",value:store.connected ? "Connected" : "Offline")
-                        HStack {
-                            Button("Connect") { store.connect() }
-                            Button("Disconnect",role:.cancel) { store.disconnect() }
-                        }
+                        HStack { Button("Connect") { store.connect() }; Button("Disconnect",role:.cancel) { store.disconnect() } }
                     }
                     Section("Voice") {
                         Toggle("Active voice session",isOn:Binding(get:{store.voiceActive},set:{ value in Task { await store.setVoiceActive(value) }}))
-                        Text("Background audio is used only while an active voice session is running. Ordinary device connectivity follows iOS lifecycle rules.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Background audio is used only while an active voice session is running. Ordinary device connectivity follows iOS lifecycle rules.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Section("Notifications") {
+                        Text("The app registers an APNs device token and sends it to the authenticated Personal AI device channel. Server-side APNs delivery can use this registration in a later push-provider stage.").font(.caption).foregroundStyle(.secondary)
                     }
                     Section("Security") {
-                        Text("Device ID and bearer token are stored in the iPhone Keychain with this-device-only protection.")
-                            .font(.caption)
+                        Text("Device ID and bearer token are stored in the iPhone Keychain with this-device-only protection.").font(.caption)
                         Button("Forget this iPhone",role:.destructive) { store.forgetDevice() }
                     }
-                }
-                .navigationTitle("Personal AI")
+                }.navigationTitle("Personal AI")
             }
             .onAppear { if store.deviceID != nil { store.connect() } }
             .onChange(of:scenePhase) { _,phase in
