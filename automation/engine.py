@@ -44,7 +44,11 @@ class AutomationEngine:
         self.default_retries = max(0, int(default_retries))
         self._stop = threading.Event()
         self._thread = None
-        self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='personal-ai-workflow')
+        # Keep orchestration workers separate from timed agent-step workers.
+        # A workflow worker may block waiting for a prompt future; sharing one
+        # pool can therefore starve the very prompt future it is waiting on.
+        self._workflow_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='personal-ai-workflow')
+        self._step_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='personal-ai-workflow-step')
         self._run_locks: dict[str, threading.Lock] = {}
         self._init_db()
         self._recover_interrupted_runs()
@@ -139,15 +143,7 @@ class AutomationEngine:
     # ------------------------------------------------------------------
     # P2.4 workflows
     # ------------------------------------------------------------------
-    def create_workflow(
-        self,
-        title: str,
-        trigger: dict,
-        steps: list[dict],
-        *,
-        next_run_at: str | None = None,
-        interval_seconds: int | None = None,
-    ):
+    def create_workflow(self, title: str, trigger: dict, steps: list[dict], *, next_run_at: str | None = None, interval_seconds: int | None = None):
         trigger = dict(trigger or {})
         trigger_type = str(trigger.get('type', 'event'))
         if trigger_type not in {'event', 'schedule', 'manual'}:
@@ -167,16 +163,7 @@ class AutomationEngine:
             con.execute(
                 '''INSERT INTO workflows(id,title,trigger_json,steps_json,enabled,paused,next_run_at,interval_seconds,created_at,updated_at,last_run_at)
                    VALUES(?,?,?,?,1,0,?,?,?,?,NULL)''',
-                (
-                    workflow_id,
-                    str(title),
-                    json.dumps(trigger),
-                    json.dumps(normalized),
-                    next_run_at,
-                    interval_seconds,
-                    stamp,
-                    stamp,
-                ),
+                (workflow_id, str(title), json.dumps(trigger), json.dumps(normalized), next_run_at, interval_seconds, stamp, stamp),
             )
         self._emit('workflow.created', workflow_id=workflow_id, title=title)
         return workflow_id
@@ -271,7 +258,7 @@ class AutomationEngine:
                 (run_id, workflow_id, json.dumps(trigger_payload or {}), json.dumps(run_context, default=str), stamp, stamp),
             )
         if background:
-            self._pool.submit(self._continue_run, run_id)
+            self._workflow_pool.submit(self._continue_run, run_id)
         else:
             self._continue_run(run_id)
         return run_id
@@ -299,44 +286,18 @@ class AutomationEngine:
                 try:
                     result = self._execute_workflow_step(run_id, step, context)
                 except ConfirmationRequired as approval:
-                    self._update_run(
-                        run_id,
-                        status='waiting_approval',
-                        current_step=index,
-                        context_json=json.dumps(context, default=str),
-                        completed_steps_json=json.dumps(completed, default=str),
-                        pending_approval_id=approval.approval_id,
-                    )
-                    self._emit(
-                        'workflow.approval_required',
-                        run_id=run_id,
-                        workflow_id=workflow['id'],
-                        approval_id=approval.approval_id,
-                        tool=approval.tool_name,
-                    )
+                    self._update_run(run_id, status='waiting_approval', current_step=index, context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str), pending_approval_id=approval.approval_id)
+                    self._emit('workflow.approval_required', run_id=run_id, workflow_id=workflow['id'], approval_id=approval.approval_id, tool=approval.tool_name)
                     return
                 except Exception as exc:
                     rollback = self._rollback(workflow, completed, context)
-                    self._update_run(
-                        run_id,
-                        status='failed',
-                        error=str(exc),
-                        context_json=json.dumps(context, default=str),
-                        completed_steps_json=json.dumps(completed, default=str),
-                        result_json=json.dumps({'rollback': rollback}, default=str),
-                        completed_at=now(),
-                    )
+                    self._update_run(run_id, status='failed', error=str(exc), context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str), result_json=json.dumps({'rollback': rollback}, default=str), completed_at=now())
                     self._emit('workflow.failed', run_id=run_id, workflow_id=workflow['id'], error=str(exc), rollback=rollback)
                     return
                 completed.append({'step': index, 'kind': step['kind'], 'result': result})
                 context[f'step_{index + 1}'] = result
                 index += 1
-                self._update_run(
-                    run_id,
-                    current_step=index,
-                    context_json=json.dumps(context, default=str),
-                    completed_steps_json=json.dumps(completed, default=str),
-                )
+                self._update_run(run_id, current_step=index, context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str))
                 self._emit('workflow.step.completed', run_id=run_id, workflow_id=workflow['id'], step=index, kind=step['kind'])
             result = {'completed_steps': completed, 'context': context}
             self._update_run(run_id, status='completed', result_json=json.dumps(result, default=str), completed_at=now())
@@ -369,7 +330,7 @@ class AutomationEngine:
         last_error = None
         for attempt in range(retries + 1):
             cancel_event = threading.Event()
-            future = self._pool.submit(self.executor.chat, prompt, cancel_event=cancel_event)
+            future = self._step_pool.submit(self.executor.chat, prompt, cancel_event=cancel_event)
             try:
                 reply = future.result(timeout=timeout)
                 return {'reply': reply, 'attempt': attempt + 1}
@@ -402,7 +363,7 @@ class AutomationEngine:
             raise PermissionError('run is not waiting for this approval')
         result = self.executor.approve(approval_id)
         self._update_run(run_id, status='queued', pending_approval_id=None)
-        self._pool.submit(self._continue_run, run_id, approved_result=result)
+        self._workflow_pool.submit(self._continue_run, run_id, approved_result=result)
         return {'run_id': run_id, 'approval_id': approval_id, 'resumed': True}
 
     def reject_run(self, run_id: str, approval_id: str):
@@ -470,25 +431,23 @@ class AutomationEngine:
 
     def stop(self):
         self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=max(1.0, self.poll_seconds + 0.5))
+        self._workflow_pool.shutdown(wait=False, cancel_futures=True)
+        self._step_pool.shutdown(wait=False, cancel_futures=True)
 
     def _loop(self):
         while not self._stop.wait(self.poll_seconds):
             if self.executor:
                 with self._con() as con:
-                    due = con.execute(
-                        'SELECT * FROM automations WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at',
-                        (now(),),
-                    ).fetchall()
+                    due = con.execute('SELECT * FROM automations WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at', (now(),)).fetchall()
                 for row in due:
                     self._run_one(row)
             self._run_due_workflows()
 
     def _run_due_workflows(self):
         with self._con() as con:
-            rows = con.execute(
-                'SELECT * FROM workflows WHERE enabled=1 AND paused=0 AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at',
-                (now(),),
-            ).fetchall()
+            rows = con.execute('SELECT * FROM workflows WHERE enabled=1 AND paused=0 AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at', (now(),)).fetchall()
         for row in rows:
             workflow_id = row['id']
             self.run_workflow(workflow_id, trigger_payload={'type': 'schedule'}, background=True)
@@ -522,12 +481,6 @@ class AutomationEngine:
             with self._con() as con:
                 if row['interval_seconds']:
                     next_at = datetime.fromtimestamp(now_ts() + row['interval_seconds'], timezone.utc).isoformat()
-                    con.execute(
-                        'UPDATE automations SET last_run_at=?,next_run_at=?,last_result_json=? WHERE id=?',
-                        (now(), next_at, json.dumps(result), row['id']),
-                    )
+                    con.execute('UPDATE automations SET last_run_at=?,next_run_at=?,last_result_json=? WHERE id=?', (now(), next_at, json.dumps(result), row['id']))
                 else:
-                    con.execute(
-                        'UPDATE automations SET last_run_at=?,enabled=0,last_result_json=? WHERE id=?',
-                        (now(), json.dumps(result), row['id']),
-                    )
+                    con.execute('UPDATE automations SET last_run_at=?,enabled=0,last_result_json=? WHERE id=?', (now(), json.dumps(result), row['id']))
