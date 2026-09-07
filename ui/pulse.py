@@ -11,8 +11,10 @@ from PyQt6.QtWidgets import QWidget
 class PulseWidget(QWidget):
     """Personal AI Home V1 living neural field.
 
-    The core is a broken, asymmetric lattice rather than a ring. Motion is
-    semantic: each state changes flow, density, direction or connectivity.
+    The core is deliberately open, asymmetric and non-mechanical. It behaves
+    like a living constellation of memory/context paths instead of a ring,
+    orb, reactor or loading spinner. State motion expresses what the AI is
+    doing while preserving one continuous identity.
     """
 
     STATE_ALIASES = {
@@ -43,18 +45,18 @@ class PulseWidget(QWidget):
         "background": 0.006,
     }
     STATE_ENERGY = {
-        "idle": 0.38,
-        "active": 0.52,
-        "listening": 0.74,
-        "understanding": 0.66,
-        "thinking": 0.92,
-        "memory": 0.84,
-        "knowledge": 0.80,
-        "acting": 0.86,
-        "speaking": 0.78,
-        "approval": 0.31,
-        "error": 0.47,
-        "background": 0.18,
+        "idle": 0.50,
+        "active": 0.62,
+        "listening": 0.82,
+        "understanding": 0.76,
+        "thinking": 1.00,
+        "memory": 0.94,
+        "knowledge": 0.88,
+        "acting": 0.94,
+        "speaking": 0.88,
+        "approval": 0.38,
+        "error": 0.54,
+        "background": 0.23,
     }
     STATE_AMPLITUDE = {
         "idle": 0.014,
@@ -71,30 +73,49 @@ class PulseWidget(QWidget):
         "background": 0.007,
     }
 
+    # Stable irregular neural constellation. The outer nodes are intentionally
+    # not connected as a perimeter so the silhouette never becomes an oval.
     CORE_NODES = (
-        (-0.28, -0.02),
-        (-0.18, -0.24),
-        (0.00, -0.31),
-        (0.22, -0.19),
-        (0.31, 0.00),
-        (0.20, 0.24),
-        (-0.03, 0.29),
-        (-0.27, 0.16),
-        (-0.10, -0.05),
-        (0.08, -0.08),
-        (0.12, 0.10),
-        (-0.10, 0.12),
+        (-0.27, -0.10),
+        (-0.19, -0.27),
+        (-0.05, -0.19),
+        (0.12, -0.26),
+        (0.26, -0.14),
+        (0.19, -0.02),
+        (0.28, 0.14),
+        (0.09, 0.24),
+        (-0.07, 0.18),
+        (-0.24, 0.25),
+        (-0.21, 0.04),
+        (-0.08, -0.04),
+        (0.05, 0.03),
+        (0.15, 0.10),
+        (-0.02, 0.30),
+        (0.00, -0.32),
+        (-0.32, 0.10),
+        (0.30, -0.02),
     )
     CORE_EDGES = (
-        (0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7),
-        (0, 8), (1, 8), (8, 9), (2, 9), (9, 3), (9, 10), (10, 4),
-        (10, 5), (10, 11), (11, 6), (11, 7), (8, 11),
+        (0, 2), (0, 10),
+        (1, 2), (1, 11), (1, 15),
+        (2, 11), (2, 12), (2, 3),
+        (3, 12), (3, 4),
+        (4, 5), (4, 17),
+        (5, 12), (5, 13), (5, 17),
+        (6, 13), (6, 7),
+        (7, 13), (7, 8), (7, 14),
+        (8, 12), (8, 14), (8, 9),
+        (9, 10), (9, 14),
+        (10, 11), (10, 16),
+        (11, 12), (12, 13),
     )
+    # Open filaments give the field a heartbeat-like flow without enclosing it.
     FLOW_PATHS = (
-        ((-0.34, 0.02), (-0.38, -0.19), (-0.14, -0.34), (0.02, -0.29)),
-        ((-0.08, -0.30), (0.12, -0.39), (0.35, -0.24), (0.31, -0.03)),
-        ((0.31, 0.02), (0.34, 0.17), (0.18, 0.33), (0.02, 0.28)),
-        ((-0.05, 0.30), (-0.23, 0.35), (-0.35, 0.19), (-0.27, 0.08)),
+        ((-0.34, -0.06), (-0.22, -0.17), (-0.10, -0.14), (0.04, -0.04)),
+        ((-0.16, -0.34), (-0.07, -0.24), (0.08, -0.12), (0.22, -0.18)),
+        ((0.31, -0.19), (0.24, -0.08), (0.10, 0.03), (0.20, 0.19)),
+        ((0.25, 0.25), (0.12, 0.19), (-0.02, 0.08), (-0.18, 0.18)),
+        ((-0.30, 0.28), (-0.22, 0.16), (-0.08, 0.05), (0.05, 0.13)),
     )
 
     def __init__(self, parent=None):
@@ -103,7 +124,7 @@ class PulseWidget(QWidget):
         self.state = "idle"
         self.reduce_motion = False
         self.memory_labels = ("Project", "Person", "Decision", "Conversation")
-        self.seed = [random.Random(101 + i).uniform(-1.0, 1.0) for i in range(32)]
+        self.seed = [random.Random(101 + i).uniform(-1.0, 1.0) for i in range(48)]
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(16)
@@ -152,22 +173,22 @@ class PulseWidget(QWidget):
             amp *= 0.42
         seed = self.seed[index]
         phase = self.t * (0.62 + (index % 4) * 0.07) + seed * 2.4
-        breath = 1.0 + math.sin(self.t * 0.72 + index * 0.17) * amp * 0.33
-        dx = math.sin(phase) * width * amp * 0.075
-        dy = math.cos(phase * 0.83) * height * amp * 0.080
+        breath = 1.0 + math.sin(self.t * 0.72 + index * 0.17) * amp * 0.34
+        dx = math.sin(phase) * width * amp * 0.070
+        dy = math.cos(phase * 0.83) * height * amp * 0.076
         return QPointF(
-            cx + nx * width * 0.82 * breath + dx,
-            cy + ny * height * 0.92 * breath + dy,
+            cx + nx * width * 0.78 * breath + dx,
+            cy + ny * height * 0.88 * breath + dy,
         )
 
-    def _curve_between(self, a, b, index):
+    def _curve_between(self, a, b, index, bend_scale=1.0):
         mx = (a.x() + b.x()) * 0.5
         my = (a.y() + b.y()) * 0.5
         vx = b.x() - a.x()
         vy = b.y() - a.y()
         length = max(1.0, math.hypot(vx, vy))
         direction = -1.0 if index % 2 else 1.0
-        bend = (8.0 + (index % 5) * 3.0) * direction
+        bend = (8.0 + (index % 5) * 3.0) * direction * bend_scale
         control = QPointF(mx - vy / length * bend, my + vx / length * bend)
         path = QPainterPath(a)
         path.quadTo(control, b)
@@ -177,22 +198,22 @@ class PulseWidget(QWidget):
         energy = self.STATE_ENERGY[self.state]
         amp = self.STATE_AMPLITUDE[self.state] * (0.42 if self.reduce_motion else 1.0)
         for index, template in enumerate(self.FLOW_PATHS):
-            phase = self.t * (0.34 + index * 0.025) + self.seed[20 + index]
+            phase = self.t * (0.34 + index * 0.025) + self.seed[24 + index]
             points = []
             for point_index, (nx, ny) in enumerate(template):
-                wave_x = math.sin(phase + point_index * 1.2) * width * amp * 0.10
-                wave_y = math.cos(phase * 0.9 + point_index) * height * amp * 0.11
+                wave_x = math.sin(phase + point_index * 1.2) * width * amp * 0.085
+                wave_y = math.cos(phase * 0.9 + point_index) * height * amp * 0.095
                 points.append(
                     QPointF(
-                        cx + nx * width * 0.82 + wave_x,
-                        cy + ny * height * 0.92 + wave_y,
+                        cx + nx * width * 0.78 + wave_x,
+                        cy + ny * height * 0.88 + wave_y,
                     )
                 )
             path = QPainterPath(points[0])
             path.cubicTo(points[1], points[2], points[3])
-            alpha = int((72 - index * 7) * energy)
-            pen = QPen(QColor(primary.red(), primary.green(), primary.blue(), max(12, alpha)))
-            pen.setWidthF(1.10 if index < 2 else 0.90)
+            alpha = int((82 - index * 5) * energy)
+            pen = QPen(QColor(primary.red(), primary.green(), primary.blue(), max(16, alpha)))
+            pen.setWidthF(1.12 if index in (1, 3) else 0.88)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
@@ -202,122 +223,151 @@ class PulseWidget(QWidget):
         points = [self._node_position(cx, cy, width, height, i) for i in range(len(self.CORE_NODES))]
         self._draw_flow_paths(painter, cx, cy, width, height, primary)
 
+        active_phase = int(self.t * 1.45) % 4
         for edge_index, (source, target) in enumerate(self.CORE_EDGES):
-            alpha = int((34 + (edge_index % 4) * 8) * energy)
-            if self.state in ("thinking", "understanding") and edge_index % 3 == int(self.t * 1.3) % 3:
-                alpha += 34
-            pen = QPen(QColor(primary.red(), primary.green(), primary.blue(), min(145, max(9, alpha))))
-            pen.setWidthF(0.70 + (edge_index % 3) * 0.12)
+            alpha = int((88 + (edge_index % 4) * 15) * energy)
+            width_boost = 0.0
+            if self.state in ("thinking", "understanding") and edge_index % 4 == active_phase:
+                alpha += 58
+                width_boost = 0.38
+            pen = QPen(
+                QColor(
+                    primary.red(),
+                    primary.green(),
+                    primary.blue(),
+                    min(188, max(16, alpha)),
+                )
+            )
+            pen.setWidthF(0.72 + (edge_index % 3) * 0.12 + width_boost)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(self._curve_between(points[source], points[target], edge_index))
 
-        count = 8 if self.state == "background" else len(points)
+        count = 11 if self.state == "background" else len(points)
         for index, point in enumerate(points[:count]):
-            alpha = int((56 + (index % 4) * 12) * energy)
+            alpha = int((104 + (index % 4) * 18) * energy)
+            radius = 1.45 + (index % 3) * 0.36
+            if self.state == "thinking" and index % 4 == active_phase:
+                alpha = min(220, alpha + 72)
+                radius += 1.25
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 24))
+                painter.drawEllipse(point, radius + 6.0, radius + 6.0)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), max(10, alpha)))
-            radius = 1.5 + (index % 3) * 0.35
-            if self.state == "thinking" and index % 4 == int(self.t * 1.7) % 4:
-                radius += 1.0
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), max(18, alpha)))
             painter.drawEllipse(point, radius, radius)
 
     def _draw_listening(self, painter, cx, cy, width, height, primary):
         if self.state != "listening":
             return
-        targets = (1, 3, 5, 7)
-        origins = ((0.12, -0.48), (0.46, -0.04), (0.10, 0.48), (-0.46, 0.08))
+        targets = (0, 4, 6, 9)
+        origins = ((-0.36, -0.20), (0.36, -0.22), (0.37, 0.20), (-0.36, 0.22))
         for i, (target_index, (ox, oy)) in enumerate(zip(targets, origins)):
-            progress = (self.t * 0.38 + i * 0.17) % 1.0
             target = self._node_position(cx, cy, width, height, target_index)
             origin = QPointF(cx + ox * width, cy + oy * height)
-            sx = origin.x() + (target.x() - origin.x()) * progress
-            sy = origin.y() + (target.y() - origin.y()) * progress
-            alpha = int(94 * (1.0 - progress * 0.45))
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), alpha), 0.95))
-            painter.drawLine(QPointF(sx, sy), target)
+            progress = (self.t * 0.30 + i * 0.19) % 1.0
+            # Intake strokes contract toward the lattice. They remain short and
+            # curved instead of becoming screen-spanning technical spokes.
+            sx = origin.x() + (target.x() - origin.x()) * progress * 0.35
+            sy = origin.y() + (target.y() - origin.y()) * progress * 0.35
+            start = QPointF(sx, sy)
+            path = self._curve_between(start, target, i + 40, bend_scale=1.75)
+            alpha = int(122 * (1.0 - progress * 0.34))
+            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), alpha), 1.05))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 86))
+            painter.drawEllipse(start, 1.8, 1.8)
 
     def _draw_thinking(self, painter, cx, cy, width, height, primary):
         if self.state not in ("understanding", "thinking"):
             return
-        signal_count = 5 if self.state == "thinking" else 3
+        signal_count = 9 if self.state == "thinking" else 5
         for i in range(signal_count):
             edge_index = (i * 3 + int(self.t * 2.0)) % len(self.CORE_EDGES)
             source_index, target_index = self.CORE_EDGES[edge_index]
             a = self._node_position(cx, cy, width, height, source_index)
             b = self._node_position(cx, cy, width, height, target_index)
-            q = (self.t * 0.22 + i * 0.19) % 1.0
+            q = (self.t * 0.23 + i * 0.115) % 1.0
             x = a.x() + (b.x() - a.x()) * q
             y = a.y() + (b.y() - a.y()) * q
+            point = QPointF(x, y)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 118))
-            painter.drawEllipse(QPointF(x, y), 2.0, 2.0)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 34))
+            painter.drawEllipse(point, 6.0, 6.0)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 176))
+            painter.drawEllipse(point, 2.35, 2.35)
 
     def _draw_memory(self, painter, cx, cy, width, height, primary):
         if self.state != "memory":
             return
-        source_nodes = (1, 3, 5, 7)
-        anchors = ((-0.40, -0.34), (0.42, -0.28), (0.40, 0.34), (-0.42, 0.32))
+        source_nodes = (1, 4, 6, 9)
+        anchors = ((-0.30, -0.25), (0.32, -0.20), (0.31, 0.25), (-0.31, 0.24))
         font = QFont()
-        font.setPointSizeF(8.5)
+        font.setPointSizeF(8.2)
         painter.setFont(font)
         for index, (source_index, (ax, ay)) in enumerate(zip(source_nodes, anchors)):
             source = self._node_position(cx, cy, width, height, source_index)
             endpoint = QPointF(cx + ax * width, cy + ay * height)
-            mx = (source.x() + endpoint.x()) * 0.5
-            my = (source.y() + endpoint.y()) * 0.5
-            path = QPainterPath(source)
-            path.quadTo(QPointF(mx + (index - 1.5) * 8.0, my), endpoint)
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 92), 0.95))
+            path = self._curve_between(source, endpoint, index + 60, bend_scale=2.0)
+            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 118), 1.02))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 158))
-            painter.drawEllipse(endpoint, 2.8, 2.8)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 188))
+            painter.drawEllipse(endpoint, 2.7, 2.7)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 26))
+            painter.drawEllipse(endpoint, 7.0, 7.0)
             label = self.memory_labels[index % len(self.memory_labels)]
-            painter.setPen(QColor(primary.red(), primary.green(), primary.blue(), 132))
-            tx = 10 if ax >= 0 else -74
-            painter.drawText(int(endpoint.x() + tx), int(endpoint.y() - 7), label)
+            painter.setPen(QColor(primary.red(), primary.green(), primary.blue(), 148))
+            tx = 10 if ax >= 0 else -70
+            painter.drawText(int(endpoint.x() + tx), int(endpoint.y() - 6), label)
 
     def _draw_knowledge(self, painter, cx, cy, width, height, primary):
         if self.state != "knowledge":
             return
-        for i, target_index in enumerate((1, 2, 3)):
-            source = QPointF(width * (0.18 + i * 0.32), height * 0.03)
+        sources = ((-0.25, -0.34), (0.00, -0.39), (0.27, -0.32))
+        for i, (source_xy, target_index) in enumerate(zip(sources, (1, 15, 4))):
+            source = QPointF(cx + source_xy[0] * width, cy + source_xy[1] * height)
             target = self._node_position(cx, cy, width, height, target_index)
-            path = QPainterPath(source)
-            path.cubicTo(
-                QPointF(source.x(), source.y() + height * 0.11),
-                QPointF(target.x(), target.y() - height * 0.13),
-                target,
-            )
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 70), 0.9))
+            path = self._curve_between(source, target, i + 70, bend_scale=1.8)
+            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 92), 0.95))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
 
     def _draw_action(self, painter, cx, cy, width, height, primary):
         if self.state != "acting":
             return
-        start = self._node_position(cx, cy, width, height, 4)
-        end = QPointF(width * 0.91, height * 0.40)
-        painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 116), 1.15))
-        painter.drawLine(start, end)
+        start = self._node_position(cx, cy, width, height, 17)
+        end = QPointF(start.x() + width * 0.105, start.y() - height * 0.035)
+        path = self._curve_between(start, end, 80, bend_scale=1.5)
+        painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 148), 1.20))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 166))
-        painter.drawEllipse(end, 3.1, 3.1)
+        painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 190))
+        painter.drawEllipse(end, 3.0, 3.0)
 
     def _draw_speaking(self, painter, cx, cy, width, height, primary):
         if self.state != "speaking":
             return
-        source_indices = (2, 3, 4, 5, 6)
-        for i, source_index in enumerate(source_indices):
+        source_indices = (3, 4, 17, 6, 7)
+        angles = (-1.22, -0.68, -0.05, 0.58, 1.10)
+        for i, (source_index, angle) in enumerate(zip(source_indices, angles)):
             source = self._node_position(cx, cy, width, height, source_index)
-            angle = -1.00 + i * 0.50
-            reach = 0.18 + 0.025 * math.sin(self.t * 2.4 + i)
+            reach = width * (0.072 + 0.009 * math.sin(self.t * 2.3 + i))
             end = QPointF(
-                source.x() + math.cos(angle) * width * reach,
-                source.y() + math.sin(angle) * height * reach * 0.58,
+                source.x() + math.cos(angle) * reach,
+                source.y() + math.sin(angle) * height * 0.095,
             )
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 58 + i * 10), 0.9))
-            painter.drawLine(source, end)
+            path = self._curve_between(source, end, i + 90, bend_scale=1.35)
+            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 92 + i * 9), 0.96))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 82))
+            painter.drawEllipse(end, 1.7, 1.7)
 
     def paintEvent(self, _):
         painter = QPainter(self)
@@ -327,22 +377,22 @@ class PulseWidget(QWidget):
         primary, secondary = self._palette()
         energy = self.STATE_ENERGY[self.state]
 
-        glow = QRadialGradient(QPointF(cx, cy), min(width, height) * 0.48)
+        glow = QRadialGradient(QPointF(cx, cy), min(width, height) * 0.45)
         glow.setColorAt(
             0,
-            QColor(primary.red(), primary.green(), primary.blue(), int(24 * energy)),
+            QColor(primary.red(), primary.green(), primary.blue(), int(34 * energy)),
         )
         glow.setColorAt(
-            0.52,
-            QColor(secondary.red(), secondary.green(), secondary.blue(), int(10 * energy)),
+            0.42,
+            QColor(secondary.red(), secondary.green(), secondary.blue(), int(16 * energy)),
         )
         glow.setColorAt(1, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(glow)
         painter.drawEllipse(
             QPointF(cx, cy),
-            min(width, height) * 0.45,
-            min(width, height) * 0.34,
+            min(width, height) * 0.43,
+            min(width, height) * 0.33,
         )
 
         self._draw_lattice(painter, cx, cy, width, height, primary)
