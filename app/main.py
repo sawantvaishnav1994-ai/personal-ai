@@ -22,6 +22,7 @@ from memory.vector_store import VectorStore
 from models.router import ModelRouter
 from notifications.apns import APNsProvider
 from proactive.engine import AttentionRelevanceEngine
+from qualification.program import P3QualificationProgram
 from qualification.voice import VoiceQualificationRecorder
 from recovery.backup import BackupService
 from security.vault import SecretVault
@@ -122,6 +123,9 @@ def build_runtime():
         settings.data_dir / 'voice-qualification.sqlite3',
         events=events,
     )
+    p3_qualification = P3QualificationProgram(
+        settings.data_dir / 'p3-qualification.sqlite3',
+    )
     wake_phrase = WakePhraseGate(
         events,
         phrases=(str(preferences.get('wake_phrase', 'Hey Personal')),),
@@ -151,6 +155,7 @@ def build_runtime():
         'vault': vault,
         'voice': voice,
         'voice_qualification': voice_qualification,
+        'p3_qualification': p3_qualification,
         'wake_phrase': wake_phrase,
         'apns': apns,
         'telemetry': telemetry,
@@ -159,6 +164,7 @@ def build_runtime():
         'computer': capability_objects.get('computer'),
         'primary_continuity_thread_id': primary_thread_id,
     }
+    p3_qualification.runtime = runtime
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
