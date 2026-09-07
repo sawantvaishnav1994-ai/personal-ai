@@ -25,6 +25,9 @@ class SecretVault:
     def delete(self,name:str):
         with self.lock:self._data.pop(name,None); self._save()
     def names(self):return sorted(self._data)
+    def rotate_password(self,new_password:str):
+        with self.lock:
+            self._password=new_password.encode(); self._salt=secrets.token_bytes(16); self._save()
     def rotate_root_key(self):
         if self._password:raise RuntimeError('vault is password-backed')
         with self.lock:
