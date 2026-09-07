@@ -13,4 +13,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: pip check
+      - run: python -m compileall -q app agent automation browser core dashboard desktop devices integrations memory models security server tools ui updates vision voice
       - run: pytest -q
