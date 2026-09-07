@@ -14,6 +14,9 @@ class DeviceRegistry:
                 id TEXT PRIMARY KEY,name TEXT NOT NULL,platform TEXT NOT NULL,
                 salt TEXT NOT NULL,token_hash TEXT NOT NULL,created_at TEXT NOT NULL,
                 last_seen_at TEXT,revoked INTEGER NOT NULL DEFAULT 0)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS device_metadata(
+                device_id TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,updated_at TEXT NOT NULL,
+                PRIMARY KEY(device_id,key),FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE)''')
 
     def _con(self):
         c=sqlite3.connect(self.path); c.row_factory=sqlite3.Row; return c
@@ -31,6 +34,15 @@ class DeviceRegistry:
             ok=verify_secret(token,row["salt"],row["token_hash"])
             if ok: c.execute("UPDATE devices SET last_seen_at=? WHERE id=?",(now(),device_id))
             return ok
+
+    def set_metadata(self,device_id:str,key:str,value:str):
+        with self._con() as c:
+            if not c.execute("SELECT 1 FROM devices WHERE id=? AND revoked=0",(device_id,)).fetchone():return False
+            c.execute("INSERT INTO device_metadata(device_id,key,value,updated_at) VALUES(?,?,?,?) ON CONFLICT(device_id,key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",(device_id,key,value,now()))
+            return True
+
+    def metadata(self,device_id:str):
+        with self._con() as c:return {r['key']:r['value'] for r in c.execute("SELECT key,value FROM device_metadata WHERE device_id=?",(device_id,))}
 
     def revoke(self,device_id:str)->bool:
         with self._con() as c:
