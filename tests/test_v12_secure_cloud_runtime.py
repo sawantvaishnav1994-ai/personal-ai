@@ -1,5 +1,4 @@
 from __future__ import annotations
-import time
 from pathlib import Path
 from cloud_runtime.security import CloudSessionStore,OwnerAuthenticator
 from cloud_runtime.relay import SecureCloudRelay
@@ -15,7 +14,7 @@ class FakeExecutor:
     def approve(self,approval_id):return 'approved'
     def reject(self,approval_id):return 'rejected'
 class FakeEvents:
-    def subscribe(self,*args):pass
+    def subscribe(self,*args):return lambda:None
     def emit(self,*args,**kwargs):pass
 
 def relay(tmp_path):
@@ -58,13 +57,18 @@ def test_emergency_stop_blocks_commands_and_approvals(tmp_path):
     assert r.set_emergency_stop('bad',False).status==401
     assert r.set_emergency_stop('x'*40,False).payload['emergency_stop'] is False
 
+def test_event_bus_unsubscribe_stops_delivery():
+    from core.events import EventBus
+    bus=EventBus();seen=[];unsubscribe=bus.subscribe('state',seen.append);bus.emit('state',state='thinking');unsubscribe();bus.emit('state',state='idle')
+    assert len(seen)==1 and seen[0]['state']=='thinking'
+
 def test_web_companion_never_embeds_privileged_secret():
     root=Path(__file__).resolve().parents[1];text=(root/'web-companion'/'app.js').read_text()+(root/'web-companion'/'index.html').read_text()
     forbidden=['OPENAI_API_KEY','PERSONAL_AI_CLOUD_OWNER_SECRET','device-secret','APPLE_TEAM_ID','PRIVATE_KEY_B64']
     assert all(x not in text for x in forbidden)
     assert 'sessionStorage' in text
     assert 'localStorage' not in text
-    assert '/cloud/command' in text and '/cloud/memory/search' in text and '/cloud/emergency-stop' in text
+    assert '/cloud/command' in text and '/cloud/memory/search' in text and '/cloud/emergency-stop' in text and '/cloud/events' in text
 
 def test_cloud_runtime_defaults_fail_closed():
     from core.config import Settings
