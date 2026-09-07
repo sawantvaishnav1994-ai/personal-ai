@@ -15,7 +15,7 @@ def create_app(executor,settings,*,device_registry=None,device_gateway=None,seco
         host=request.client.host if request.client else ''
         if host not in {'127.0.0.1','::1'}:raise HTTPException(403,'Local-only operation')
     @app.get('/health')
-    def health():return {'ok':True,'service':'personal-ai','version':'v8'}
+    def health():return {'ok':True,'service':'personal-ai','version':'v9'}
     @app.post('/pair/start')
     def pair_start(request:Request):require_loopback(request);o=pairing.create();return {'token':o.token,'code':o.code,'expires_at':o.expires_at}
     @app.post('/pair/confirm')
@@ -44,8 +44,8 @@ def create_app(executor,settings,*,device_registry=None,device_gateway=None,seco
             while True:
                 msg=await ws.receive_json()
                 if msg.get('type')=='push_registration' and msg.get('provider')=='apns' and msg.get('token'):
-                    device_registry.set_metadata(device_id,'apns_token',str(msg['token']))
-                    if msg.get('environment'):device_registry.set_metadata(device_id,'apns_environment',str(msg['environment']))
+                    device_registry.set_metadata(device_id,'push.apns.token',str(msg['token']).strip())
+                    if msg.get('environment'):device_registry.set_metadata(device_id,'push.apns.environment',str(msg['environment']).strip().lower())
                 if device_gateway:device_gateway.receive(device_id,msg)
                 if msg.get('type') not in {'result'}:await ws.send_json({'type':'ack','message_id':msg.get('message_id')})
         except WebSocketDisconnect:pass
