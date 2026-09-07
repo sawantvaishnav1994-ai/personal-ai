@@ -11,21 +11,12 @@ targets:
     type: application
     platform: iOS
     sources: [PersonalAICompanion]
+    info:
+      path: PersonalAICompanion/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.personal.companion.ios
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Personal AI
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: Personal AI uses the microphone only while you actively use voice mode.
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Personal AI connects securely to your paired Personal AI computer on your local network.
-        INFOPLIST_KEY_UIBackgroundModes: "audio fetch processing"
-        INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers: "ai.personal.companion.refresh"
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         CODE_SIGN_ENTITLEMENTS: PersonalAICompanion/PersonalAICompanion.entitlements
-    entitlements:
-      path: PersonalAICompanion/PersonalAICompanion.entitlements
-      properties:
-        aps-environment: development
   PersonalAICompanionTests:
     type: bundle.unit-test
     platform: iOS
