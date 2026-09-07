@@ -1,7 +1,8 @@
 from __future__ import annotations
+import asyncio,json,queue
 from fastapi import FastAPI,HTTPException,Header,WebSocket,WebSocketDisconnect,Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse,JSONResponse
+from fastapi.responses import HTMLResponse,JSONResponse,StreamingResponse
 from pydantic import BaseModel
 from core.security import PairingManager
 from cloud_runtime import CloudSessionStore,OwnerAuthenticator,SecureCloudRelay
@@ -82,6 +83,31 @@ def create_app(executor,settings,*,device_registry=None,device_gateway=None,seco
     @app.get('/cloud/status')
     def cloud_status(authorization:str|None=Header(default=None)):
         relay,session=cloud_auth(authorization,'status:read');return result(relay.status(session))
+    @app.get('/cloud/events')
+    async def cloud_events(request:Request,authorization:str|None=Header(default=None)):
+        relay,session=cloud_auth(authorization,'status:read');events=runtime.get('events') if runtime else None
+        if not events:raise HTTPException(503,'Event stream unavailable')
+        q=queue.Queue(maxsize=32)
+        def push(event):
+            safe={'event':event.get('event')}
+            if 'state' in event:safe['state']=event.get('state')
+            if event.get('event')=='emergency.stop':safe['enabled']=bool(event.get('enabled'))
+            if event.get('event')=='approval.required':safe['approval_id']=event.get('approval_id');safe['tool']=event.get('tool');safe['expires_at']=event.get('expires_at')
+            try:q.put_nowait(safe)
+            except queue.Full:pass
+        unsubs=[events.subscribe(name,push) for name in ('state','emergency.stop','approval.required','approval.approved','approval.rejected')]
+        async def stream():
+            try:
+                initial=relay.status(session).payload
+                yield f"data: {json.dumps({'event':'status',**initial},separators=(',',':'))}\n\n"
+                while not await request.is_disconnected():
+                    try:item=await asyncio.to_thread(q.get,True,15);yield f"data: {json.dumps(item,separators=(',',':'))}\n\n"
+                    except queue.Empty:yield ': keepalive\n\n'
+            finally:
+                for unsub in unsubs:
+                    try:unsub()
+                    except Exception:pass
+        return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
     @app.post('/cloud/approval')
     def cloud_approval(body:ApprovalDecision,authorization:str|None=Header(default=None)):
         relay,session=cloud_auth(authorization,'approval:write',body.nonce);return result(relay.approval(session,body.approval_id,body.decision))
