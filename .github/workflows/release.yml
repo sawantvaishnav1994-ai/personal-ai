@@ -23,6 +23,7 @@ jobs:
             dist/*.dmg
             dist/*.deb
             dist/*.msi
+          if-no-files-found: error
   sign:
     needs: packages
     runs-on: ubuntu-latest
@@ -36,7 +37,15 @@ jobs:
       - name: Sign manifest
         env:
           PERSONAL_AI_RELEASE_PRIVATE_KEY_B64: ${{ secrets.PERSONAL_AI_RELEASE_PRIVATE_KEY_B64 }}
-        run: python updates/release_sign.py --version "${GITHUB_REF_NAME}" --output release-artifacts/manifest.json release-artifacts/*.{msi,dmg,deb}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os,subprocess,sys
+          artifacts=sorted(p for p in Path('release-artifacts').iterdir() if p.suffix.lower() in {'.msi','.dmg','.deb'})
+          if len(artifacts)!=3:
+              raise SystemExit(f'expected 3 release installers, found {len(artifacts)}: {artifacts}')
+          subprocess.check_call([sys.executable,'updates/release_sign.py','--version',os.environ['GITHUB_REF_NAME'],'--output','release-artifacts/manifest.json',*[str(p) for p in artifacts]])
+          PY
       - uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*
