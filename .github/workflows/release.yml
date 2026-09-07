@@ -1,0 +1,51 @@
+name: Signed Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  packages:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - if: runner.os == 'Windows'
+        run: pip install 'cx-Freeze>=8,<9'
+      - run: python packaging/build_installer.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ runner.os }}
+          path: |
+            dist/*.dmg
+            dist/*.deb
+            dist/*.msi
+          if-no-files-found: error
+  sign:
+    needs: packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install cryptography
+      - uses: actions/download-artifact@v4
+        with: {path: release-artifacts, merge-multiple: true}
+      - name: Sign manifest
+        env:
+          PERSONAL_AI_RELEASE_PRIVATE_KEY_B64: ${{ secrets.PERSONAL_AI_RELEASE_PRIVATE_KEY_B64 }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os,subprocess,sys
+          artifacts=sorted(p for p in Path('release-artifacts').iterdir() if p.suffix.lower() in {'.msi','.dmg','.deb'})
+          if len(artifacts)!=3:
+              raise SystemExit(f'expected 3 release installers, found {len(artifacts)}: {artifacts}')
+          subprocess.check_call([sys.executable,'updates/release_sign.py','--version',os.environ['GITHUB_REF_NAME'],'--output','release-artifacts/manifest.json',*[str(p) for p in artifacts]])
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*

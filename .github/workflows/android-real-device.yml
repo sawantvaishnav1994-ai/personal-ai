@@ -1,0 +1,21 @@
+name: Android Real Device
+on:
+  workflow_dispatch:
+jobs:
+  physical-device:
+    runs-on: [self-hosted, android, personal-ai-device]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify attached device
+        working-directory: android-companion
+        run: adb devices -l
+      - name: Run instrumentation on physical device
+        working-directory: android-companion
+        run: gradle connectedDebugAndroidTest --stacktrace
