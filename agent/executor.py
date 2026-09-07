@@ -19,7 +19,12 @@ class AgentExecutor:
         finally:self._observe('agent.turn_ms',turn_start)
     def _chat(self,text,*,confirmed_tools=None):
         if confirmed_tools:raise PermissionError('tool-name approvals are disabled; use the execution-scoped approval flow')
-        self.memory.add_message('user',text);memories=self.second_brain.context(text,6) if self.second_brain else [];history=self.memory.recent_messages(16);context=json.dumps(memories,default=str)[:8000] if memories else ''
+        self.memory.add_message('user',text)
+        if self.second_brain:
+            self.events.emit('state',state='memory')
+            memories=self.second_brain.context(text,6)
+        else:memories=[]
+        history=self.memory.recent_messages(16);context=json.dumps(memories,default=str)[:8000] if memories else ''
         self.events.emit('state',state='thinking');start=time.perf_counter()
         try:plan=self.planner.plan(text,context=context);self._observe('agent.plan_ms',start)
         except Exception:
