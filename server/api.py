@@ -244,17 +244,7 @@ def create_app(
         x_device_id: str | None = Header(default=None),
     ):
         device_id = auth_device(authorization, x_device_id)
-        continuity = runtime.get('continuity') if runtime else None
-        if continuity:
-            thread = continuity.active_for_device(device_id)
-            if thread:
-                continuity.append(thread['id'], device_id=device_id, kind='user_command', payload={'text': body.text})
-        reply = executor.chat(body.text)
-        if continuity:
-            thread = continuity.active_for_device(device_id)
-            if thread:
-                continuity.append(thread['id'], device_id=device_id, kind='assistant_reply', payload={'text': reply})
-        return {'reply': reply}
+        return {'reply': executor.chat(body.text, device_id=device_id)}
 
     # ------------------------------------------------------------------
     # P2 trusted-device capability API
