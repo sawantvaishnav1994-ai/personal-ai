@@ -6,6 +6,7 @@ import threading
 from agent.executor import AgentExecutor
 from automation.engine import AutomationEngine
 from capabilities.benchmark import CapabilityBenchmark
+from capabilities.scenarios import CompetitiveScenarioSuite
 from core.config import settings
 from core.events import EventBus
 from core.preferences import Preferences
@@ -153,8 +154,10 @@ def build_runtime():
         'primary_continuity_thread_id': primary_thread_id,
     }
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
+    scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
-    benchmark_tools.register(tools, benchmark)
+    runtime['capability_scenarios'] = scenarios
+    benchmark_tools.register(tools, benchmark, scenarios)
 
     def append_continuity(kind, text, device_id=None):
         if not text:
