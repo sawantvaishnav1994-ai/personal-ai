@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hmac, hashlib, secrets, time
+import hashlib, hmac, secrets, time
 from dataclasses import dataclass
 
 @dataclass
@@ -27,4 +27,12 @@ class PairingManager:
         return hmac.compare_digest(offer.code, code)
 
 def hash_secret(secret: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", secret.encode(), salt.encode(), 200_000).hex()
+    return hashlib.pbkdf2_hmac("sha256", secret.encode(), salt.encode(), 250_000).hex()
+
+def verify_secret(secret: str, salt: str, expected: str) -> bool:
+    return hmac.compare_digest(hash_secret(secret, salt), expected)
+
+def new_bearer_secret() -> tuple[str,str,str]:
+    token=secrets.token_urlsafe(48)
+    salt=secrets.token_hex(16)
+    return token,salt,hash_secret(token,salt)
