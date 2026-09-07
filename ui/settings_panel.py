@@ -14,14 +14,15 @@ class SettingsPanel(QDialog):
         self.motion=QCheckBox('Reduce motion');self.motion.setChecked(bool(self.prefs.get('reduce_motion')));lay.addWidget(self.motion)
         self.contrast=QCheckBox('High contrast');self.contrast.setChecked(bool(self.prefs.get('high_contrast')));lay.addWidget(self.contrast)
         row=QHBoxLayout();save=QPushButton('Save settings');save.clicked.connect(self.save);backup=QPushButton('Create backup');backup.clicked.connect(self.create_backup);restore=QPushButton('Restore backup…');restore.clicked.connect(self.restore_backup);row.addWidget(save);row.addWidget(backup);row.addWidget(restore);lay.addLayout(row)
-        lay.addWidget(QLabel('Local diagnostics'))
-        self.diagnostics=QPlainTextEdit();self.diagnostics.setReadOnly(True);self.refresh();lay.addWidget(self.diagnostics,1)
-        refresh=QPushButton('Refresh diagnostics');refresh.clicked.connect(self.refresh);lay.addWidget(refresh)
+        lay.addWidget(QLabel('Local diagnostics'));self.diagnostics=QPlainTextEdit();self.diagnostics.setReadOnly(True);self.refresh();lay.addWidget(self.diagnostics,1);refresh=QPushButton('Refresh diagnostics');refresh.clicked.connect(self.refresh);lay.addWidget(refresh)
     def save(self):
-        phrase=self.wake.text().strip() or 'Hey Personal';self.prefs.update(onboarding_complete=True,preferred_name=self.name.text().strip(),wake_phrase=phrase,launch_voice_on_start=self.voice.isChecked(),show_memory_hints=self.hints.isChecked(),reduce_motion=self.motion.isChecked(),high_contrast=self.contrast.isChecked(),autonomy_mode=self.mode.currentText())
-        gate=self.runtime.get('wake_phrase')
+        phrase=self.wake.text().strip() or 'Hey Personal';mode=self.mode.currentText();self.prefs.update(onboarding_complete=True,preferred_name=self.name.text().strip(),wake_phrase=phrase,launch_voice_on_start=self.voice.isChecked(),show_memory_hints=self.hints.isChecked(),reduce_motion=self.motion.isChecked(),high_contrast=self.contrast.isChecked(),autonomy_mode=mode)
+        gate=self.runtime.get('wake_phrase');tools=self.runtime.get('tools')
         if gate:gate.phrase=phrase.lower().strip()
-        QMessageBox.information(self,'Saved','Preferences saved locally.')
+        if tools and hasattr(tools,'set_autonomy_mode'):tools.set_autonomy_mode(mode)
+        parent=self.parent()
+        if parent and hasattr(parent,'pulse') and hasattr(parent.pulse,'set_reduce_motion'):parent.pulse.set_reduce_motion(self.motion.isChecked())
+        QMessageBox.information(self,'Saved','Preferences saved locally. High-contrast changes apply fully after restart; autonomy, wake phrase and reduced motion apply now.')
     def create_backup(self):
         path=self.runtime['backups'].create();QMessageBox.information(self,'Backup created',str(path))
     def restore_backup(self):
@@ -33,5 +34,4 @@ class SettingsPanel(QDialog):
     def refresh(self):
         import json
         telemetry=self.runtime['telemetry'].snapshot();graph=self.runtime['memory'].graph();devices=self.runtime['device_registry'].list();plugins=self.runtime['plugins'].list() if hasattr(self.runtime['plugins'],'list') else []
-        report={'telemetry':telemetry,'memory':{'nodes':len(graph.get('nodes',[])),'edges':len(graph.get('edges',[]))},'devices':len(devices),'plugins':len(plugins),'backup_dir':str(self.runtime['backups'].backup_dir)}
-        self.diagnostics.setPlainText(json.dumps(report,indent=2,default=str))
+        report={'telemetry':telemetry,'memory':{'nodes':len(graph.get('nodes',[])),'edges':len(graph.get('edges',[]))},'devices':len(devices),'plugins':len(plugins),'autonomy':getattr(self.runtime.get('tools'),'autonomy_mode','ask'),'backup_dir':str(self.runtime['backups'].backup_dir)};self.diagnostics.setPlainText(json.dumps(report,indent=2,default=str))
