@@ -1,6 +1,8 @@
 from __future__ import annotations
-import argparse,gc,os,time,psutil,tempfile
+import argparse,gc,os,sys,time,psutil,tempfile
 from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:sys.path.insert(0,str(ROOT))
 from memory.store import MemoryStore
 from automation.conditions import evaluate_condition
 def main():
