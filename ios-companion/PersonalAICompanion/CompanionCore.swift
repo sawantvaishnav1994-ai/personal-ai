@@ -46,8 +46,13 @@ final class CompanionStore: ObservableObject {
         socket.onStatus={ [weak self] text,connected in Task{@MainActor in self?.status=text;self?.connected=connected} }
         socket.commandHandler={ [weak self] message in guard let self else{return ["ok":false,"error":"companion unavailable"]};return await self.handleCommand(message)}
         observers.append(NotificationCenter.default.addObserver(forName:.personalAIAPNSToken,object:nil,queue:.main){[weak self] note in guard let token=note.object as? String else{return};Task{await self?.socket.sendPushRegistration(token)}})
-        observers.append(NotificationCenter.default.addObserver(forName:.personalAIAPNSError,object:nil,queue:.main){[weak self] note in if let text=note.object as? String{self?.status="APNs registration unavailable: \(text)"}})
-        observers.append(NotificationCenter.default.addObserver(forName:.personalAIBackgroundRefresh,object:nil,queue:.main){[weak self]_ in self?.connect()})
+        observers.append(NotificationCenter.default.addObserver(forName:.personalAIAPNSError,object:nil,queue:.main){[weak self] note in
+            guard let text=note.object as? String else{return}
+            Task{@MainActor in self?.status="APNs registration unavailable: \(text)"}
+        })
+        observers.append(NotificationCenter.default.addObserver(forName:.personalAIBackgroundRefresh,object:nil,queue:.main){[weak self]_ in
+            Task{@MainActor in self?.connect()}
+        })
         if deviceID != nil { status="Paired" }
     }
 
@@ -99,8 +104,25 @@ final class DeviceSocket:NSObject {
 }
 
 final class VoiceSession {
-    private let session=AVAudioSession.sharedInstance();var permissionDescription:String{switch session.recordPermission{case .granted:return"granted";case .denied:return"denied";default:return"undetermined"}}
-    func activate()async throws{if session.recordPermission==.undetermined{let granted=await withCheckedContinuation{continuation in session.requestRecordPermission{continuation.resume(returning:$0)}};if !granted{throw CompanionError.badResponse("Microphone permission denied")}};guard session.recordPermission==.granted else{throw CompanionError.badResponse("Microphone permission denied")};try session.setCategory(.playAndRecord,mode:.voiceChat,options:[.allowBluetooth,.defaultToSpeaker]);try session.setActive(true)}
+    private let session=AVAudioSession.sharedInstance()
+    var permissionDescription:String{
+        switch AVAudioApplication.shared.recordPermission{
+        case .granted:return "granted"
+        case .denied:return "denied"
+        default:return "undetermined"
+        }
+    }
+    func activate()async throws{
+        if AVAudioApplication.shared.recordPermission == AVAudioApplication.recordPermission.undetermined {
+            let granted = await AVAudioApplication.requestRecordPermission()
+            if !granted { throw CompanionError.badResponse("Microphone permission denied") }
+        }
+        guard AVAudioApplication.shared.recordPermission == AVAudioApplication.recordPermission.granted else {
+            throw CompanionError.badResponse("Microphone permission denied")
+        }
+        try session.setCategory(.playAndRecord,mode:.voiceChat,options:[.allowBluetoothHFP,.defaultToSpeaker])
+        try session.setActive(true)
+    }
     func deactivate(){try? session.setActive(false,options:.notifyOthersOnDeactivation)}
 }
 
