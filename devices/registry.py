@@ -35,6 +35,9 @@ class DeviceRegistry:
             if ok: c.execute("UPDATE devices SET last_seen_at=? WHERE id=?",(now(),device_id))
             return ok
 
+    def is_active(self,device_id:str)->bool:
+        with self._con() as c:return c.execute("SELECT 1 FROM devices WHERE id=? AND revoked=0",(device_id,)).fetchone() is not None
+
     def set_metadata(self,device_id:str,key:str,value:str):
         with self._con() as c:
             if not c.execute("SELECT 1 FROM devices WHERE id=? AND revoked=0",(device_id,)).fetchone():return False

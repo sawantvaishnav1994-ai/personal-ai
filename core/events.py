@@ -11,6 +11,11 @@ class EventBus:
     def subscribe(self, event: str, callback: Callable[[dict[str,Any]],None]):
         with self._lock:
             self._listeners[event].append(callback)
+        def unsubscribe():
+            with self._lock:
+                listeners=self._listeners.get(event,[])
+                if callback in listeners:listeners.remove(callback)
+        return unsubscribe
 
     def emit(self, event: str, **payload):
         with self._lock:
