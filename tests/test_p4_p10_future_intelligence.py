@@ -1,0 +1,48 @@
+from pathlib import Path
+import pytest
+from future_intelligence.gates import TrustGate
+from future_intelligence.everyday import EverydayIntelligence
+from future_intelligence.deep_brain import LifeGraph
+from future_intelligence.operations import PersonalOperations
+from future_intelligence.multimodal import WorldUnderstanding
+from future_intelligence.sovereignty import HybridIntelligenceRouter,ModelTarget
+from future_intelligence.autonomy import AdvancedAutonomy
+
+
+def test_p4_briefing_and_forgotten_commitments(tmp_path):
+    p=EverydayIntelligence(tmp_path/'daily.sqlite3')
+    p.add('goal','Ship Personal AI',priority=.9);p.add('commitment','Follow up tomorrow',priority=.8)
+    b=p.briefing();assert b['counts']['open']==2;assert len(b['possible_forgotten_commitments'])==1
+
+def test_p5_decision_requires_evidence_for_why(tmp_path):
+    g=LifeGraph(tmp_path/'life.sqlite3');d=g.node('decision','Use iPhone first')
+    empty=g.explain_decision(d);assert empty['answerable'] is False
+    reason=g.node('event','No laptop available');g.relate(d,reason,'decided_because',rationale='physical constraint')
+    assert g.explain_decision(d)['answerable'] is True
+
+def test_p6_is_fail_closed_until_trust_is_proven():
+    gate=TrustGate();ops=PersonalOperations(gate=gate);p=ops.create_plan('Research',[{'kind':'research','instruction':'collect sources'}])
+    assert ops.execute(p['id'])['blocked'] is True
+    gate.record_external_proof('p3.permissions',True,source='trusted-harness');gate.record_external_proof('p3.automation',True,source='trusted-harness')
+    assert ops.execute(p['id'])['started'] is True
+
+def test_consequential_p6_still_requires_approval():
+    gate=TrustGate();gate.record_external_proof('p3.permissions',True,source='harness');gate.record_external_proof('p3.automation',True,source='harness')
+    ops=PersonalOperations(gate=gate);p=ops.create_plan('Send',[{'kind':'send','instruction':'send document','consequential':True}])
+    assert ops.execute(p['id'])['approval_required'] is True
+
+def test_p7_records_source_attributed_observations_only():
+    gate=TrustGate();w=WorldUnderstanding(gate=gate)
+    with pytest.raises(ValueError):w.ingest('camera',{},source='')
+    assert w.ingest('wearable',{'heart_rate':80},source='paired-device')['modality']=='wearable'
+
+def test_p9_privacy_routing_is_gated_and_prefers_local():
+    gate=TrustGate();r=HybridIntelligenceRouter(gate=gate);r.register(ModelTarget('cloud','cloud',False,('chat',),True,1));r.register(ModelTarget('local','local',True,('chat',),True,5))
+    assert r.route(capability='chat')['blocked'] is True
+    gate.record_external_proof('p3.permissions',True,source='harness');gate.record_external_proof('p3.reliability',True,source='harness')
+    assert r.route(capability='chat',sensitivity='secret')['target']['id']=='local'
+
+def test_p10_cannot_self_activate():
+    gate=TrustGate();a=AdvancedAutonomy(gate=gate);agent=a.create_agent('Researcher','research',['web'])
+    result=a.enable_agent(agent['id']);assert result['blocked'] is True
+    with pytest.raises(ValueError):gate.record_external_proof('p3.reliability',True,source='model')
