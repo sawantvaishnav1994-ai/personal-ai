@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#090b10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/iphone/manifest.webmanifest" />
+  <title>Personal AI</title>
+  <style>
+    :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif;background:#090b10;color:#f5f7fb}
+    *{box-sizing:border-box}body{margin:0;min-height:100dvh;background:radial-gradient(circle at 50% 38%,#151b27 0,#090b10 48%,#050608 100%)}
+    main{min-height:100dvh;padding:max(18px,env(safe-area-inset-top)) 20px max(26px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:18px}
+    header{display:flex;justify-content:space-between;align-items:center}.brand{font-weight:700;letter-spacing:.2px}.pill{font-size:12px;padding:7px 10px;border:1px solid #2d3442;border-radius:999px;color:#b9c1d0}
+    .core-wrap{flex:1;display:grid;place-items:center;min-height:300px}.core{width:min(68vw,320px);aspect-ratio:1;position:relative;filter:drop-shadow(0 0 26px rgba(123,156,255,.12))}
+    .arc{position:absolute;inset:12%;border:1px solid rgba(154,180,255,.34);border-left-color:transparent;border-bottom-color:transparent;border-radius:44% 56% 52% 48%;animation:drift 10s linear infinite}.arc:nth-child(2){inset:24%;transform:rotate(73deg);animation-duration:7s;border-color:rgba(173,217,255,.24);border-right-color:transparent}.arc:nth-child(3){inset:34%;transform:rotate(140deg);animation-duration:5s;border-color:rgba(218,228,255,.28);border-top-color:transparent}
+    .core.listening .arc{animation-duration:2.6s}.core.thinking .arc{animation-duration:1.7s}.core.speaking .arc{animation-direction:reverse;animation-duration:2.2s}.dot{position:absolute;left:49%;top:49%;width:8px;height:8px;border-radius:50%;background:#dce7ff;box-shadow:0 0 26px #8da7ff}
+    @keyframes drift{to{transform:rotate(360deg)}}
+    .status{text-align:center;color:#cbd3e1;min-height:24px}.transcript{font-size:22px;line-height:1.3;text-align:center;min-height:58px;padding:0 8px}.reply{font-size:15px;line-height:1.5;text-align:center;color:#aeb7c7;min-height:44px}
+    .controls{display:grid;gap:10px}.row{display:flex;gap:10px}.row>*{flex:1}button,input{font:inherit;border-radius:16px;border:1px solid #303847;background:#121722;color:#f5f7fb;padding:14px 16px}button{font-weight:650}.primary{background:#edf2ff;color:#10131b;border-color:#edf2ff}.danger{background:#241318;border-color:#5c2735;color:#ffd7df}.hidden{display:none}.small{font-size:12px;color:#8791a3;text-align:center}
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="brand">Personal AI</div><div id="devicePill" class="pill">Not enrolled</div></header>
+
+  <section id="enrollPanel" class="controls">
+    <div class="status">Secure owner enrollment</div>
+    <input id="code" type="password" autocomplete="one-time-code" placeholder="Owner enrollment code" />
+    <button id="enroll" class="primary">Enroll this iPhone</button>
+    <div class="small">The enrollment code is used once. Your device credential is stored in a secure HttpOnly cookie.</div>
+  </section>
+
+  <section id="voicePanel" class="hidden">
+    <div class="core-wrap"><div id="core" class="core"><div class="arc"></div><div class="arc"></div><div class="arc"></div><div class="dot"></div></div></div>
+    <div id="status" class="status">Ready</div>
+    <div id="transcript" class="transcript">Tap Start Session, then speak naturally.</div>
+    <div id="reply" class="reply"></div>
+    <div class="controls">
+      <div class="row"><button id="session" class="primary">Start Session</button><button id="listen">Start Listening</button></div>
+      <div class="row"><button id="interrupt" class="danger">Interrupt</button><button id="stopSession">Stop & Report</button></div>
+    </div>
+    <div id="report" class="small"></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id); const core=$('core'); let recognition=null; let sessionActive=false; let speaking=false;
+function setState(s){if(core)core.className='core '+s;$('status').textContent=s.charAt(0).toUpperCase()+s.slice(1)}
+async function api(path,options={}){const r=await fetch('/iphone/api'+path,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});let data={};try{data=await r.json()}catch{}if(!r.ok)throw new Error(data.detail||data.error||('HTTP '+r.status));return data}
+async function check(){try{const s=await api('/status');$('enrollPanel').classList.add('hidden');$('voicePanel').classList.remove('hidden');$('devicePill').textContent='Trusted iPhone';return s}catch{return null}}
+$('enroll').onclick=async()=>{try{await api('/enroll',{method:'POST',body:JSON.stringify({code:$('code').value,name:'Owner iPhone PWA'})});$('code').value='';await check()}catch(e){$('enrollPanel').querySelector('.status').textContent=e.message}}
+function speechRecognition(){const C=window.SpeechRecognition||window.webkitSpeechRecognition;if(!C)return null;const r=new C();r.lang=navigator.language||'en-US';r.interimResults=true;r.continuous=false;r.onstart=()=>{setState('listening')};r.onresult=e=>{let final='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;e.results[i].isFinal?final+=t:interim+=t}$('transcript').textContent=final||interim;if(final)sendTurn(final)};r.onerror=e=>{$('status').textContent='Microphone: '+e.error};r.onend=()=>{if(!speaking&&sessionActive)setState('idle')};return r}
+async function sendTurn(text){try{setState('thinking');const out=await api('/voice/turn',{method:'POST',body:JSON.stringify({transcript:text})});$('reply').textContent=out.reply;speak(out.reply)}catch(e){if(e.message!=='turn_cancelled')$('status').textContent=e.message}}
+function speak(text){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=1;u.onstart=()=>{speaking=true;setState('speaking')};u.onend=()=>{speaking=false;if(sessionActive)setState('listening')};u.onerror=()=>{speaking=false};speechSynthesis.speak(u)}
+async function barge(){const wasSpeaking=speaking;speechSynthesis.cancel();speaking=false;try{await api('/voice/barge',{method:'POST',body:JSON.stringify({speaking:wasSpeaking})})}catch{}recognition=recognition||speechRecognition();if(recognition){try{recognition.start()}catch{}}}
+$('listen').onclick=()=>{if(speaking)barge();else{recognition=recognition||speechRecognition();if(!recognition){$('status').textContent='Speech recognition is unavailable in this browser';return}try{recognition.start()}catch{}}}
+$('interrupt').onclick=barge;
+$('session').onclick=async()=>{try{const env={browser:navigator.userAgent,language:navigator.language,standalone:window.navigator.standalone===true,screen:`${screen.width}x${screen.height}`};const out=await api('/qualification/start',{method:'POST',body:JSON.stringify({environment:env})});sessionActive=true;$('session').disabled=true;$('report').textContent='Evidence session '+out.session_id+' started';$('listen').click()}catch(e){$('report').textContent=e.message}}
+$('stopSession').onclick=async()=>{try{speechSynthesis.cancel();if(recognition)try{recognition.stop()}catch{};const s=await api('/qualification/stop',{method:'POST',body:'{}'});sessionActive=false;$('session').disabled=false;$('report').textContent=`Turns ${s.turns} · Interruptions ${s.barge_trials} · Success ${Math.round((s.barge_success_rate||0)*100)}% · ${s.passed?'PASS':'NOT YET QUALIFIED'}`;setState('idle')}catch(e){$('report').textContent=e.message}}
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/iphone/sw.js').catch(()=>{});check();
+</script>
+</body>
+</html>
