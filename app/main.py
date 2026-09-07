@@ -1,6 +1,5 @@
 from __future__ import annotations
 import sys,threading
-from PyQt6.QtWidgets import QApplication
 from core.config import settings
 from core.events import EventBus
 from core.telemetry import Telemetry
@@ -22,7 +21,6 @@ from security.vault import SecretVault
 from notifications.apns import APNsProvider
 from voice.realtime import RealtimeVoiceSession
 from voice.wake_phrase import WakePhraseGate
-from ui.main_window import MainWindow
 
 def build_runtime():
     events=EventBus();telemetry=Telemetry(settings.data_dir/'telemetry.json');preferences=Preferences(settings.data_dir/'preferences.json');backups=BackupService(settings.data_dir)
@@ -40,6 +38,8 @@ def start_server(rt):
     import uvicorn
     app=create_app(rt['executor'],settings,device_registry=rt['device_registry'],device_gateway=rt['device_gateway'],second_brain=rt['second_brain'],automations=rt['automations'],runtime=rt);uvicorn.run(app,host=settings.control_server_host,port=settings.control_server_port,log_level='warning')
 def main():
+    from PyQt6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
     app=QApplication(sys.argv);app.setApplicationName('Personal AI');rt=build_runtime();rt['automations'].start()
     if settings.control_server_enabled:threading.Thread(target=start_server,args=(rt,),daemon=True).start()
     win=MainWindow(events=rt['events'],executor=rt['executor'],memory=rt['memory'],runtime=rt);win.show()
