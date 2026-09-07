@@ -1,0 +1,9 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-ai"
+version = "0.2.0"
+description = "Independent personal AI assistant"
+requires-python = ">=3.11"
