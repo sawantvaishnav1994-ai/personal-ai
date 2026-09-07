@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Callable, Any
+from core.permissions import PermissionEngine
 
 class Risk(IntEnum):
     READ_ONLY=0
@@ -19,7 +20,9 @@ class Tool:
 
 class ToolRegistry:
     def __init__(self,settings):
-        self.settings=settings; self._tools={}
+        self.settings=settings
+        self.permissions=PermissionEngine(settings.autonomy_mode)
+        self._tools={}
 
     def register(self,t:Tool):
         if t.name in self._tools: raise ValueError(f"Duplicate tool {t.name}")
@@ -31,8 +34,7 @@ class ToolRegistry:
         return "\n".join(f"- {t.name}: {t.description}; risk={t.risk.name}" for t in self._tools.values())
 
     def automatic(self,t:Tool):
-        mode=self.settings.autonomy_mode
-        if mode in {"observe","suggest"}: return False
-        if mode=="ask": return t.risk==Risk.READ_ONLY
-        if mode=="act": return t.risk<=Risk.REVERSIBLE
-        return False
+        return self.permissions.decide(int(t.risk),confirmed=False).allowed
+
+    def authorize(self,t:Tool,confirmed:bool=False):
+        return self.permissions.decide(int(t.risk),confirmed=confirmed)
