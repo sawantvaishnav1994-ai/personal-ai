@@ -27,6 +27,8 @@ class SecureCloudRelay:
     def authenticate(self,token:str,scope:str,nonce:str|None=None):
         s=self.sessions.authenticate(token,scope)
         if not s:return RelayResult(401,{'error':'unauthorized'}),None
+        if not self.device_registry or not self.device_registry.is_active(s.device_id):
+            self.sessions.revoke(s.id);return RelayResult(401,{'error':'device_revoked'}),None
         if not self.rate.allow(s.id):return RelayResult(429,{'error':'rate_limited'}),None
         if nonce is not None and not self.sessions.accept_nonce(s.id,nonce):return RelayResult(409,{'error':'replay_detected'}),None
         return None,s
