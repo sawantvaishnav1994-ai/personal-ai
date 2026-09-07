@@ -18,7 +18,7 @@ class SettingsPanel(QDialog):
     def save(self):
         phrase=self.wake.text().strip() or 'Hey Personal';mode=self.mode.currentText();self.prefs.update(onboarding_complete=True,preferred_name=self.name.text().strip(),wake_phrase=phrase,launch_voice_on_start=self.voice.isChecked(),show_memory_hints=self.hints.isChecked(),reduce_motion=self.motion.isChecked(),high_contrast=self.contrast.isChecked(),autonomy_mode=mode)
         gate=self.runtime.get('wake_phrase');tools=self.runtime.get('tools')
-        if gate:gate.phrase=phrase.lower().strip()
+        if gate:gate.phrases=(phrase,);gate.reset()
         if tools and hasattr(tools,'set_autonomy_mode'):tools.set_autonomy_mode(mode)
         parent=self.parent()
         if parent and hasattr(parent,'pulse') and hasattr(parent.pulse,'set_reduce_motion'):parent.pulse.set_reduce_motion(self.motion.isChecked())
