@@ -13,3 +13,6 @@ mss>=10,<11
 pyttsx3>=2.99,<3
 sounddevice>=0.5,<1
 soundfile>=0.13,<1
+cryptography>=45,<47
+playwright>=1.55,<2
+PyAutoGUI>=0.9.54,<1
