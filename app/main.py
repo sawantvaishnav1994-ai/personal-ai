@@ -23,9 +23,9 @@ from notifications.apns import APNsProvider
 from proactive.engine import AttentionRelevanceEngine
 from recovery.backup import BackupService
 from security.vault import SecretVault
+from tools import benchmark as benchmark_tools
 from tools.builtins import register_builtin_tools
 from tools.registry import ToolRegistry
-from tools import benchmark as benchmark_tools
 from voice.realtime import RealtimeVoiceSession
 from voice.wake_phrase import WakePhraseGate
 
@@ -156,22 +156,43 @@ def build_runtime():
     runtime['benchmark'] = benchmark
     benchmark_tools.register(tools, benchmark)
 
-    def append_continuity(kind, text):
+    def append_continuity(kind, text, device_id=None):
         if not text:
             return
+        source_device = str(device_id or 'desktop')
         try:
+            thread = continuity.active_for_device(source_device)
+            if thread is None:
+                bundle = continuity.resume(source_device)
+                thread = bundle['thread']
             continuity.append(
-                primary_thread_id,
-                device_id='desktop',
+                thread['id'],
+                device_id=source_device,
                 kind=kind,
                 payload={'text': str(text)},
             )
         except Exception:
             pass
 
-    events.subscribe('conversation.user', lambda event: append_continuity('user_message', event.get('text')))
-    events.subscribe('conversation.assistant', lambda event: append_continuity('assistant_message', event.get('text')))
+    events.subscribe(
+        'conversation.user',
+        lambda event: append_continuity('user_message', event.get('text'), event.get('device_id')),
+    )
+    events.subscribe(
+        'conversation.assistant',
+        lambda event: append_continuity('assistant_message', event.get('text'), event.get('device_id')),
+    )
 
+    # Any connector/device/integration can normalize a candidate attention event
+    # through one ingestion contract rather than coupling itself to the UI.
+    events.subscribe(
+        'proactive.ingest',
+        lambda event: proactive.consider(
+            str(event.get('source', 'unknown')),
+            dict(event.get('payload') or {}),
+            context={**context_provider(), **dict(event.get('context') or {})},
+        ),
+    )
     events.subscribe(
         'automation.failed',
         lambda event: proactive.consider(
