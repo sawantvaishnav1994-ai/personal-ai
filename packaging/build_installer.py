@@ -5,6 +5,7 @@ def run(*cmd,cwd=None):subprocess.check_call(list(cmd),cwd=cwd)
 def main():
     root=Path(__file__).resolve().parents[1];dist=root/'dist';run('pyinstaller','--clean',str(root/'packaging/personal_ai.spec'),cwd=root);system=platform.system()
     if system=='Darwin':
+        if os.getenv('PERSONAL_AI_SKIP_DMG','').lower() in {'1','true','yes'}:return
         source=dist/'PersonalAI.app' if (dist/'PersonalAI.app').exists() else dist/'PersonalAI'
         run('hdiutil','create','-volname','Personal AI','-srcfolder',str(source),'-ov','-format','UDZO',str(dist/'PersonalAI.dmg'))
     elif system=='Windows':run('python',str(root/'packaging/setup_cxfreeze.py'),'bdist_msi',cwd=root)
