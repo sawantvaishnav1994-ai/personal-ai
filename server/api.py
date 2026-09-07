@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel
 from core.security import PairingManager
 
@@ -20,11 +20,16 @@ def create_app(executor,settings,*,device_registry=None,device_gateway=None,seco
         token=(authorization or "").removeprefix("Bearer ").strip()
         if not token or not device_registry.authenticate(device_id,token): raise HTTPException(401,"Unauthorized")
 
+    def require_loopback(request:Request):
+        host=request.client.host if request.client else ""
+        if host not in {"127.0.0.1","::1"}: raise HTTPException(403,"Pairing initiation is local-only")
+
     @app.get("/health")
     def health(): return {"ok":True,"service":"personal-ai"}
 
     @app.post("/pair/start")
-    def pair_start():
+    def pair_start(request:Request):
+        require_loopback(request)
         offer=pairing.create(); return {"token":offer.token,"code":offer.code,"expires_at":offer.expires_at}
 
     @app.post("/pair/confirm")
@@ -47,8 +52,10 @@ def create_app(executor,settings,*,device_registry=None,device_gateway=None,seco
         auth_device(authorization,x_device_id); return automations.list() if automations else []
 
     @app.websocket("/device/ws/{device_id}")
-    async def device_ws(ws:WebSocket,device_id:str,token:str):
-        if not device_registry or not device_registry.authenticate(device_id,token):
+    async def device_ws(ws:WebSocket,device_id:str):
+        authorization=ws.headers.get("authorization","")
+        token=authorization.removeprefix("Bearer ").strip()
+        if not device_registry or not token or not device_registry.authenticate(device_id,token):
             await ws.close(code=4401); return
         await ws.accept()
         if device_gateway: device_gateway.connect(device_id,ws)
