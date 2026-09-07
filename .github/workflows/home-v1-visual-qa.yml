@@ -1,0 +1,23 @@
+name: Home V1 Visual QA
+
+on:
+  push:
+    branches:
+      - tuning/home-v1-visual-qa-20260908
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python tools/render_home_v1_qa.py --out visual-qa --emit-idle-base64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: home-v1-visual-qa
+          path: visual-qa/*.png
