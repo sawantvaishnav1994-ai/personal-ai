@@ -4,6 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-ai"
-version = "0.2.0"
+version = "0.3.0"
 description = "Independent personal AI assistant"
 requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
