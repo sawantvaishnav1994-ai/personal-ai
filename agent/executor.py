@@ -63,6 +63,7 @@ class AgentExecutor:
             raise PermissionError('tool-name approvals are disabled; use the execution-scoped approval flow')
         self._check_cancel(cancel_event)
         self.memory.add_message('user', text)
+        self.events.emit('conversation.user', text=text)
         if self.second_brain:
             self.events.emit('state', state='memory')
             memories = self.second_brain.context(text, 6)
@@ -86,6 +87,7 @@ class AgentExecutor:
             self._observe('model.chat_ms', start)
             self._check_cancel(cancel_event)
             self.memory.add_message('assistant', answer)
+            self.events.emit('conversation.assistant', text=answer)
             self.events.emit('state', state='speaking')
             return answer
         execution_id = str(uuid.uuid4())
@@ -248,6 +250,7 @@ class AgentExecutor:
         self._observe('model.chat_ms', start)
         self._check_cancel(cancel_event)
         self.memory.add_message('assistant', answer)
+        self.events.emit('conversation.assistant', text=answer)
         if self.second_brain:
             for candidate in self.second_brain.extract_candidates(text, answer):
                 self.second_brain.remember(candidate)
