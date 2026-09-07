@@ -14,6 +14,7 @@ from core.telemetry import Telemetry
 from devices.continuity import ContinuityService
 from devices.gateway import DeviceGateway
 from devices.registry import DeviceRegistry
+from future_intelligence.program import FutureIntelligenceProgram
 from integrations.plugins import PluginManifestRegistry
 from integrations.runtime import build_integrations
 from memory.second_brain import SecondBrain
@@ -165,6 +166,17 @@ def build_runtime():
         'primary_continuity_thread_id': primary_thread_id,
     }
     p3_qualification.runtime = runtime
+
+    future = FutureIntelligenceProgram(settings.data_dir / 'future-intelligence', runtime=runtime)
+    runtime['future_intelligence'] = future
+    runtime['everyday_intelligence'] = future.everyday
+    runtime['life_graph'] = future.life_graph
+    runtime['personal_operations'] = future.operations
+    runtime['world_understanding'] = future.world
+    runtime['personal_ai_everywhere'] = future.everywhere
+    runtime['hybrid_intelligence'] = future.hybrid
+    runtime['advanced_autonomy'] = future.autonomy
+
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
