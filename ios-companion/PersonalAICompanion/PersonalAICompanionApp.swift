@@ -4,6 +4,7 @@ import UIKit
 
 final class CompanionAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application:UIApplication,didFinishLaunchingWithOptions launchOptions:[UIApplication.LaunchOptionsKey:Any]?=nil)->Bool {
+        BackgroundCoordinator.shared.register { NotificationCenter.default.post(name:.personalAIBackgroundRefresh,object:nil) }
         UNUserNotificationCenter.current().delegate=self
         UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]) { granted,_ in
             if granted { DispatchQueue.main.async { application.registerForRemoteNotifications() } }
@@ -26,6 +27,7 @@ final class CompanionAppDelegate: NSObject, UIApplicationDelegate, UNUserNotific
 extension Notification.Name {
     static let personalAIAPNSToken=Notification.Name("personalAIAPNSToken")
     static let personalAIAPNSError=Notification.Name("personalAIAPNSError")
+    static let personalAIBackgroundRefresh=Notification.Name("personalAIBackgroundRefresh")
 }
 
 @main
@@ -34,19 +36,15 @@ struct PersonalAICompanionApp: App {
     @StateObject private var store = CompanionStore()
     @Environment(\.scenePhase) private var scenePhase
 
-    init() { BackgroundCoordinator.shared.register { } }
-
     var body: some Scene {
         WindowGroup {
             NavigationStack {
                 Form {
                     Section("Personal AI computer") {
-                        TextField("https://your-computer:8766",text:$store.baseURL)
-                            .textInputAutocapitalization(.never).keyboardType(.URL)
+                        TextField("https://your-computer:8766",text:$store.baseURL).textInputAutocapitalization(.never).keyboardType(.URL)
                         Toggle("Allow insecure local development",isOn:$store.allowInsecureDevelopment)
                         if store.allowInsecureDevelopment {
-                            Text("Development only. HTTP/WS exposes pairing and bearer credentials to the local network.")
-                                .font(.caption).foregroundStyle(.orange)
+                            Text("Development only. HTTP/WS exposes pairing and bearer credentials to the local network.").font(.caption).foregroundStyle(.orange)
                         }
                     }
                     Section("Secure pairing") {
@@ -64,7 +62,7 @@ struct PersonalAICompanionApp: App {
                         Text("Background audio is used only while an active voice session is running. Ordinary device connectivity follows iOS lifecycle rules.").font(.caption).foregroundStyle(.secondary)
                     }
                     Section("Notifications") {
-                        Text("The app registers an APNs device token and sends it to the authenticated Personal AI device channel. Server-side APNs delivery can use this registration in a later push-provider stage.").font(.caption).foregroundStyle(.secondary)
+                        Text("The iPhone registers its APNs token and sends it through the authenticated Personal AI device channel. A later APNs provider stage can use this registration for server-initiated background notifications.").font(.caption).foregroundStyle(.secondary)
                     }
                     Section("Security") {
                         Text("Device ID and bearer token are stored in the iPhone Keychain with this-device-only protection.").font(.caption)
