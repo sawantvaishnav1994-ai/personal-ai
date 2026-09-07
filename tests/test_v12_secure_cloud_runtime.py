@@ -8,7 +8,9 @@ class FakeMemory:
     def audit(self,*args):self.audit_rows.append(args)
     def search(self,q,limit=20):return list(self.rows)
 class FakeDevices:
-    def authenticate(self,device_id,token):return device_id=='dev1' and token=='device-secret'
+    def __init__(self):self.active=True
+    def authenticate(self,device_id,token):return self.active and device_id=='dev1' and token=='device-secret'
+    def is_active(self,device_id):return self.active and device_id=='dev1'
 class FakeExecutor:
     def chat(self,text):return 'reply:'+text
     def approve(self,approval_id):return 'approved'
@@ -18,8 +20,8 @@ class FakeEvents:
     def emit(self,*args,**kwargs):pass
 
 def relay(tmp_path):
-    sessions=CloudSessionStore(tmp_path/'sessions.sqlite3',ttl_seconds=60)
-    return SecureCloudRelay(executor=FakeExecutor(),memory=FakeMemory(),second_brain=None,device_registry=FakeDevices(),sessions=sessions,owner=OwnerAuthenticator('x'*40),events=FakeEvents())
+    sessions=CloudSessionStore(tmp_path/'sessions.sqlite3',ttl_seconds=60);devices=FakeDevices()
+    return SecureCloudRelay(executor=FakeExecutor(),memory=FakeMemory(),second_brain=None,device_registry=devices,sessions=sessions,owner=OwnerAuthenticator('x'*40),events=FakeEvents())
 
 def test_session_is_opaque_hashed_and_revocable(tmp_path):
     store=CloudSessionStore(tmp_path/'s.sqlite3',ttl_seconds=60);token,s=store.issue('dev1')
@@ -43,6 +45,12 @@ def test_device_auth_issues_short_session(tmp_path):
     good=r.issue_session('dev1','device-secret');assert good.status==200
     assert 'device-secret' not in str(good.payload)
     assert r.sessions.authenticate(good.payload['session_token'],'ai:chat')
+
+def test_revoked_device_invalidates_existing_cloud_session(tmp_path):
+    r=relay(tmp_path);issued=r.issue_session('dev1','device-secret');token=issued.payload['session_token'];r.device_registry.active=False
+    error,session=r.authenticate(token,'status:read')
+    assert session is None and error.status==401 and error.payload['error']=='device_revoked'
+    assert r.sessions.authenticate(token) is None
 
 def test_memory_scope_filters_sensitive_rows(tmp_path):
     r=relay(tmp_path);issued=r.issue_session('dev1','device-secret');s=r.sessions.authenticate(issued.payload['session_token'],'memory:read')
