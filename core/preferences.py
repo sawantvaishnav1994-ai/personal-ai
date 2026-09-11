@@ -6,7 +6,7 @@ DEFAULTS={
     'onboarding_complete':False,
     'preferred_name':'',
     'wake_phrase':'Hey Personal',
-    'launch_voice_on_start':False,
+    'launch_voice_on_start':True,
     'show_memory_hints':True,
     'reduce_motion':False,
     'high_contrast':False,

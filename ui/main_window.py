@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -41,11 +42,11 @@ class Worker(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Personal AI Home V1.
+    """Personal AI — cinematic Home V1.
 
-    The application keeps one persistent intelligence at the centre of the UI.
-    Dashboard and Main Menu are shortcuts; the rest of the product expands away
-    from Home without turning Home into a card dashboard.
+    The Home screen is the primary environment: one living AI presence, direct
+    speech/text interaction, and lightweight paths to memory, activity, devices
+    and knowledge. Detailed operational pages remain separate from Home.
     """
 
     NAV = (
@@ -54,23 +55,25 @@ class MainWindow(QMainWindow):
         "Memory",
         "Knowledge",
         "Activities",
+        "World",
         "Dashboard",
         "Apps & Tools",
         "Settings",
     )
+    TOP_NAV = ("Home", "Memory", "Knowledge", "Activities", "World")
     STATE_COPY = {
-        "idle": ("Idle", "I am here."),
-        "active": ("Ready", "I am ready."),
-        "listening": ("Listening", "I am listening to you."),
-        "understanding": ("Understanding", "I am interpreting what you mean."),
-        "thinking": ("Thinking", "I am reasoning."),
-        "memory": ("Remembering", "I am recalling relevant memory."),
-        "knowledge": ("Retrieving", "I am retrieving knowledge."),
-        "acting": ("Acting", "I am doing something for you."),
-        "speaking": ("Responding", "I am communicating the result."),
-        "approval": ("Needs approval", "I need your decision before continuing."),
-        "error": ("Interrupted", "Something prevented me from completing this."),
-        "background": ("Background", "I am available without demanding attention."),
+        "idle": ("PERSONAL AI", "Ready"),
+        "active": ("PERSONAL AI", "Listening..."),
+        "listening": ("PERSONAL AI", "Listening..."),
+        "understanding": ("PERSONAL AI", "Understanding..."),
+        "thinking": ("PERSONAL AI", "Thinking..."),
+        "memory": ("PERSONAL AI", "Remembering..."),
+        "knowledge": ("PERSONAL AI", "Retrieving knowledge..."),
+        "acting": ("PERSONAL AI", "Working..."),
+        "speaking": ("PERSONAL AI", "Responding..."),
+        "approval": ("PERSONAL AI", "Needs approval"),
+        "error": ("PERSONAL AI", "Interrupted"),
+        "background": ("PERSONAL AI", "Always available"),
     }
 
     def __init__(self, *, events, executor, memory, runtime=None):
@@ -85,157 +88,21 @@ class MainWindow(QMainWindow):
         self.current_page = "Home"
 
         self.setWindowTitle("Personal AI")
-        self.resize(1380, 860)
-        self.setMinimumSize(1040, 700)
+        self.resize(1600, 920)
+        self.setMinimumSize(1120, 720)
 
-        prefs = self.runtime.get("preferences")
-        high = bool(prefs.get("high_contrast")) if prefs else False
-        muted = "#9badb7" if high else "#71818b"
-        border = "#2b4350" if high else "#17242c"
-
-        self.setStyleSheet(
-            f"""
-            QMainWindow, QWidget {{
-                background: #030405;
-                color: #edf3f6;
-                font-family: Inter, "Segoe UI", Arial;
-            }}
-            QLabel#brand {{
-                color: #d4e0e5;
-                font-size: 14px;
-                font-weight: 700;
-                letter-spacing: 3px;
-            }}
-            QLabel#muted {{
-                color: {muted};
-            }}
-            QLabel#heroState {{
-                color: #eef7fa;
-                font-size: 20px;
-                font-weight: 620;
-            }}
-            QLabel#heroHint {{
-                color: #64757f;
-                font-size: 12px;
-            }}
-            QLabel#attention {{
-                color: #d8cfab;
-                font-size: 12px;
-            }}
-            QLineEdit {{
-                background: transparent;
-                border: 0;
-                padding: 11px 5px;
-                color: #eef5f8;
-                font-size: 15px;
-                selection-background-color: #244656;
-            }}
-            QPushButton {{
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 12px;
-                padding: 9px 13px;
-                color: #92a3ac;
-            }}
-            QPushButton:hover {{
-                background: #0a0f13;
-                color: #edf6fa;
-                border-color: #17252d;
-            }}
-            QPushButton:checked {{
-                background: #0b1217;
-                color: #eef7fa;
-                border-color: #223640;
-            }}
-            QPushButton#navAction {{
-                border: 1px solid #15242c;
-                background: #070b0e;
-                color: #a9b8bf;
-                padding: 8px 14px;
-            }}
-            QPushButton#navAction:hover {{
-                border-color: #29434f;
-                color: #eff8fb;
-            }}
-            QPushButton#send {{
-                background: #dcebef;
-                color: #071015;
-                border: 0;
-                border-radius: 17px;
-                font-weight: 700;
-                min-width: 34px;
-                max-width: 34px;
-                min-height: 34px;
-                max-height: 34px;
-                padding: 0;
-            }}
-            QPushButton#mic {{
-                color: #90a4ae;
-                min-width: 36px;
-                max-width: 36px;
-                min-height: 34px;
-                max-height: 34px;
-                padding: 0;
-            }}
-            QPushButton#indicator {{
-                background: #05080a;
-                border: 1px solid #111c22;
-                border-radius: 14px;
-                padding: 8px 14px;
-                color: #788a94;
-                font-size: 12px;
-            }}
-            QPushButton#indicator:hover {{
-                color: #d5e2e7;
-                border-color: #223640;
-            }}
-            QTextBrowser#homeConversation {{
-                background: rgba(6, 9, 11, 0.72);
-                border: 1px solid #101b21;
-                border-radius: 16px;
-                padding: 10px 14px;
-                color: #cbd7dc;
-            }}
-            QTextBrowser {{
-                background: #05080a;
-                border: 1px solid #131f27;
-                border-radius: 16px;
-                padding: 14px;
-            }}
-            QFrame#composer {{
-                background: #070a0d;
-                border: 1px solid #17252d;
-                border-radius: 22px;
-            }}
-            QFrame#card {{
-                background: #06090b;
-                border: 1px solid {border};
-                border-radius: 16px;
-            }}
-            QFrame#menuDrawer {{
-                background: #05080a;
-                border-left: 1px solid #111b21;
-                border-radius: 18px;
-            }}
-            QLabel#menuCaption {{
-                color: #5f7079;
-                font-size: 10px;
-                font-weight: 700;
-                letter-spacing: 2px;
-            }}
-            """
-        )
+        self._install_theme()
 
         root = QWidget()
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(26, 18, 26, 20)
-        outer.setSpacing(12)
+        outer.setContentsMargins(28, 18, 28, 18)
+        outer.setSpacing(8)
         outer.addLayout(self._build_top_nav())
 
         shell = QHBoxLayout()
         shell.setContentsMargins(0, 0, 0, 0)
-        shell.setSpacing(12)
+        shell.setSpacing(10)
 
         self.stack = QStackedWidget()
         self.pages = {}
@@ -249,11 +116,10 @@ class MainWindow(QMainWindow):
         self.menu_drawer.setMinimumWidth(0)
         self.menu_drawer.setMaximumWidth(0)
         shell.addWidget(self.menu_drawer)
-
         outer.addLayout(shell, 1)
 
         self.menu_anim = QPropertyAnimation(self.menu_drawer, b"maximumWidth", self)
-        self.menu_anim.setDuration(260)
+        self.menu_anim.setDuration(240)
         self.menu_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         self._show_page("Home", close_menu=False)
@@ -261,33 +127,122 @@ class MainWindow(QMainWindow):
         events.subscribe("state", self.on_state)
         events.subscribe("voice.transcript", self._on_voice_transcript)
         events.subscribe("voice.reply", self._on_voice_reply)
-        events.subscribe(
-            "voice.wake",
-            lambda event: self._append_chat(
-                "System",
-                f"Wake phrase detected: {event.get('phrase', 'Hey Personal')}",
-            ),
+        events.subscribe("voice.wake", self._on_voice_wake)
+
+        self.clock_timer = QTimer(self)
+        self.clock_timer.timeout.connect(self._update_clock)
+        self.clock_timer.start(1000)
+        self._update_clock()
+
+        # Continuous voice is the default Personal AI experience. The microphone
+        # button remains available as a manual privacy override, but the user does
+        # not need to click it on every launch.
+        QTimer.singleShot(650, self._ensure_voice_active)
+
+    def _install_theme(self):
+        prefs = self.runtime.get("preferences")
+        high = bool(prefs.get("high_contrast")) if prefs else False
+        muted = "#aeb9ca" if high else "#8290a5"
+        self.setStyleSheet(
+            f"""
+            QMainWindow, QWidget {{
+                background:#02050a;
+                color:#f3f7ff;
+                font-family:Inter, "Segoe UI", Arial;
+            }}
+            QLabel#brand {{font-size:16px;font-weight:650;letter-spacing:5px;color:#f5f8ff;}}
+            QLabel#brandSub {{font-size:10px;color:#66758b;}}
+            QLabel#muted {{color:{muted};}}
+            QLabel#heroTitle {{font-size:28px;font-weight:500;letter-spacing:8px;color:#f4f7ff;}}
+            QLabel#heroState {{font-size:14px;letter-spacing:3px;color:#a8b9d4;}}
+            QLabel#sideTitle {{font-size:26px;font-weight:350;letter-spacing:3px;color:#edf3ff;}}
+            QLabel#sideKicker {{font-size:10px;font-weight:650;letter-spacing:4px;color:#7e8ca4;}}
+            QLabel#quote {{font-size:15px;color:#8e9ab0;}}
+            QLabel#attention {{font-size:12px;color:#e3cc93;}}
+            QLineEdit {{
+                background:transparent;border:0;padding:13px 8px;color:#eef5ff;
+                font-size:15px;selection-background-color:#274a75;
+            }}
+            QPushButton {{
+                background:transparent;border:1px solid transparent;border-radius:15px;
+                padding:9px 14px;color:#9aa9be;
+            }}
+            QPushButton:hover {{background:#07111d;color:#f5f8ff;border-color:#18304a;}}
+            QPushButton:checked {{background:#0a1726;color:#f7fbff;border-color:#315c8d;}}
+            QPushButton#topNav {{font-size:13px;padding:10px 18px;border-radius:18px;}}
+            QPushButton#topNav:checked {{background:#0b1828;border:1px solid #2d5f94;color:#f5f9ff;}}
+            QPushButton#iconButton {{font-size:17px;min-width:30px;max-width:30px;padding:6px;}}
+            QPushButton#mic {{
+                background:#101b2b;border:1px solid #2a4567;border-radius:22px;
+                min-width:44px;max-width:44px;min-height:44px;max-height:44px;
+                color:#d9eaff;font-size:18px;padding:0;
+            }}
+            QPushButton#mic:checked {{background:#102a42;border-color:#58a9ff;color:#ffffff;}}
+            QFrame#composer {{
+                background:rgba(8,15,25,222);border:1px solid #293d5a;border-radius:28px;
+            }}
+            QFrame#feature {{background:transparent;border:0;border-radius:16px;}}
+            QFrame#feature:hover {{background:#060d17;}}
+            QFrame#card {{background:#060b12;border:1px solid #17263a;border-radius:16px;}}
+            QFrame#menuDrawer {{background:#040911;border-left:1px solid #15263a;border-radius:18px;}}
+            QTextBrowser {{background:#050a12;border:1px solid #17263a;border-radius:16px;padding:14px;}}
+            QTextBrowser#homeConversation {{
+                background:rgba(4,9,16,215);border:1px solid #172942;border-radius:16px;
+                padding:10px 14px;color:#d6e0ed;
+            }}
+            """
         )
 
     def _build_top_nav(self):
         nav = QHBoxLayout()
+        nav.setSpacing(7)
+
+        brand_box = QVBoxLayout()
+        brand_box.setSpacing(0)
         brand = QLabel("PERSONAL AI")
         brand.setObjectName("brand")
-        nav.addWidget(brand)
+        sub = QLabel("A Personal AI Operating System")
+        sub.setObjectName("brandSub")
+        brand_box.addWidget(brand)
+        brand_box.addWidget(sub)
+        nav.addLayout(brand_box)
         nav.addStretch(1)
 
-        self.dashboard_btn = QPushButton("Dashboard")
-        self.dashboard_btn.setObjectName("navAction")
-        self.dashboard_btn.setCheckable(True)
-        self.dashboard_btn.clicked.connect(lambda _checked=False: self._show_page("Dashboard"))
-        nav.addWidget(self.dashboard_btn)
+        self.top_buttons = {}
+        icons = {"Home": "⌂", "Memory": "◉", "Knowledge": "▱", "Activities": "⌁", "World": "◎"}
+        for name in self.TOP_NAV:
+            button = QPushButton(f"{icons[name]}  {name}")
+            button.setObjectName("topNav")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, target=name: self._show_page(target))
+            self.top_buttons[name] = button
+            nav.addWidget(button)
 
-        self.menu_btn = QPushButton("Main Menu  ☰")
-        self.menu_btn.setObjectName("navAction")
+        nav.addStretch(1)
+        search = QPushButton("⌕")
+        search.setObjectName("iconButton")
+        search.setToolTip("Search")
+        search.clicked.connect(lambda: self.input.setFocus() if hasattr(self, "input") else None)
+        nav.addWidget(search)
+
+        settings = QPushButton("⚙")
+        settings.setObjectName("iconButton")
+        settings.setToolTip("Settings")
+        settings.clicked.connect(lambda: self._show_page("Settings"))
+        nav.addWidget(settings)
+
+        self.menu_btn = QPushButton("☰")
+        self.menu_btn.setObjectName("iconButton")
         self.menu_btn.setCheckable(True)
         self.menu_btn.clicked.connect(self._toggle_main_menu)
-        nav.addSpacing(6)
         nav.addWidget(self.menu_btn)
+
+        orb = QLabel("✦")
+        orb.setStyleSheet("font-size:22px;color:#7dc5ff;padding:0 8px")
+        nav.addWidget(orb)
+        greeting = QLabel("Good morning,\nLet’s build a better today.")
+        greeting.setObjectName("muted")
+        nav.addWidget(greeting)
         return nav
 
     def _build_main_menu(self):
@@ -295,22 +250,18 @@ class MainWindow(QMainWindow):
         drawer.setObjectName("menuDrawer")
         layout = QVBoxLayout(drawer)
         layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(5)
-
-        caption = QLabel("PERSONAL AI")
-        caption.setObjectName("menuCaption")
-        layout.addWidget(caption)
-        layout.addSpacing(8)
-
+        layout.setSpacing(6)
+        title = QLabel("PERSONAL AI")
+        title.setObjectName("sideKicker")
+        layout.addWidget(title)
         self.menu_buttons = {}
         for name in self.NAV:
             button = QPushButton(name)
             button.setCheckable(True)
             button.setMinimumWidth(220)
-            button.clicked.connect(lambda checked=False, target=name: self._show_page(target))
+            button.clicked.connect(lambda _checked=False, target=name: self._show_page(target))
             self.menu_buttons[name] = button
             layout.addWidget(button)
-
         layout.addStretch(1)
         footer = QLabel("One intelligence · one continuous environment")
         footer.setObjectName("muted")
@@ -321,7 +272,7 @@ class MainWindow(QMainWindow):
     def _toggle_main_menu(self, checked):
         self.menu_anim.stop()
         self.menu_anim.setStartValue(self.menu_drawer.maximumWidth())
-        self.menu_anim.setEndValue(280 if checked else 0)
+        self.menu_anim.setEndValue(270 if checked else 0)
         self.menu_anim.start()
 
     def _close_main_menu(self):
@@ -338,15 +289,15 @@ class MainWindow(QMainWindow):
 
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 18, 12, 12)
+        layout.setContentsMargins(18, 22, 18, 18)
         title = QLabel(name)
-        title.setStyleSheet("font-size:28px;font-weight:650")
+        title.setStyleSheet("font-size:30px;font-weight:600")
         layout.addWidget(title)
         subtitle = QLabel(self._subtitle(name))
         subtitle.setObjectName("muted")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
-        layout.addSpacing(8)
+        layout.addSpacing(14)
 
         if name == "Memory":
             self._memory_content(layout)
@@ -354,21 +305,22 @@ class MainWindow(QMainWindow):
             self._knowledge_content(layout)
         elif name == "Activities":
             self._activities_content(layout)
+        elif name == "World":
+            self._world_content(layout)
         elif name == "Dashboard":
             self._dashboard_content(layout)
         elif name == "Apps & Tools":
             self._apps_tools_content(layout)
         elif name == "Settings":
             self._settings_content(layout)
-
         layout.addStretch(1)
         return page
 
     def _home_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(6, 2, 6, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
         self.needs_label = QLabel("")
         self.needs_label.setObjectName("attention")
@@ -376,322 +328,261 @@ class MainWindow(QMainWindow):
         self.needs_label.setVisible(False)
         layout.addWidget(self.needs_label)
 
+        hero = QGridLayout()
+        hero.setContentsMargins(10, 0, 10, 0)
+        hero.setHorizontalSpacing(14)
+
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(16, 78, 6, 18)
+        left_layout.addWidget(self._label("A more\ncapable you.", "sideTitle"))
+        left_layout.addSpacing(18)
+        for word in ("UNDERSTAND", "REMEMBER", "REASON", "PLAN", "ACT", "WITH YOU"):
+            left_layout.addWidget(self._label(word, "sideKicker"))
+        left_layout.addStretch(1)
+        hero.addWidget(left, 0, 0)
+
         self.pulse = PulseWidget()
-        self.pulse.setMinimumHeight(350)
         prefs = self.runtime.get("preferences")
         if prefs and hasattr(self.pulse, "set_reduce_motion"):
             self.pulse.set_reduce_motion(bool(prefs.get("reduce_motion")))
-        layout.addWidget(self.pulse, 1)
+        hero.addWidget(self.pulse, 0, 1)
 
-        self.state = QLabel("Idle")
-        self.state.setObjectName("heroState")
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(10, 150, 12, 18)
+        right_layout.addStretch(1)
+        quote = QLabel('“Intelligence\nin service of\na meaningful life.”')
+        quote.setObjectName("quote")
+        quote.setAlignment(Qt.AlignmentFlag.AlignRight)
+        right_layout.addWidget(quote)
+        right_layout.addStretch(1)
+        hero.addWidget(right, 0, 2)
+        hero.setColumnStretch(0, 2)
+        hero.setColumnStretch(1, 8)
+        hero.setColumnStretch(2, 2)
+        layout.addLayout(hero, 1)
+
+        self.state = QLabel("PERSONAL AI")
+        self.state.setObjectName("heroTitle")
         self.state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.state)
 
-        self.state_hint = QLabel("I am here.")
-        self.state_hint.setObjectName("heroHint")
+        self.state_hint = QLabel("Ready")
+        self.state_hint.setObjectName("heroState")
         self.state_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.state_hint)
 
+        waveform = QLabel("·  ▁▂▃▅▇▅▃▂▁  ·  ▁▃▆█▆▃▁  ·")
+        waveform.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        waveform.setStyleSheet("color:#67b7ff;font-size:15px;letter-spacing:2px;")
+        layout.addWidget(waveform)
+
         self.chat = QTextBrowser()
         self.chat.setObjectName("homeConversation")
-        self.chat.setMaximumHeight(116)
+        self.chat.setMaximumHeight(104)
         self.chat.setVisible(False)
         layout.addWidget(self.chat)
 
+        composer_wrap = QHBoxLayout()
+        composer_wrap.addStretch(2)
         composer = QFrame()
         composer.setObjectName("composer")
-        composer_row = QHBoxLayout(composer)
-        composer_row.setContentsMargins(8, 3, 8, 3)
-        composer_row.setSpacing(4)
-
-        self.mic_btn = QPushButton("●")
-        self.mic_btn.setObjectName("mic")
-        self.mic_btn.setAccessibleName("Start voice")
-        self.mic_btn.clicked.connect(self.toggle_voice)
-        composer_row.addWidget(self.mic_btn)
-
+        composer.setMinimumWidth(620)
+        composer.setMaximumWidth(900)
+        row = QHBoxLayout(composer)
+        row.setContentsMargins(16, 6, 8, 6)
+        row.setSpacing(6)
+        wave_icon = QLabel("≋")
+        wave_icon.setStyleSheet("color:#6ebdff;font-size:23px;padding:0 8px")
+        row.addWidget(wave_icon)
         self.input = QLineEdit()
+        self.input.setPlaceholderText("Ask Personal AI anything...")
         self.input.setAccessibleName("Ask Personal AI")
-        self.input.setPlaceholderText("Speak or type…")
         self.input.returnPressed.connect(lambda: self.submit(self.input))
-        composer_row.addWidget(self.input, 1)
+        row.addWidget(self.input, 1)
+        self.mic_btn = QPushButton("◉")
+        self.mic_btn.setObjectName("mic")
+        self.mic_btn.setCheckable(True)
+        self.mic_btn.setAccessibleName("Pause continuous voice")
+        self.mic_btn.clicked.connect(self.toggle_voice)
+        row.addWidget(self.mic_btn)
+        composer_wrap.addWidget(composer, 6)
+        composer_wrap.addStretch(2)
+        layout.addLayout(composer_wrap)
 
-        send_btn = QPushButton("↑")
-        send_btn.setObjectName("send")
-        send_btn.setAccessibleName("Send")
-        send_btn.clicked.connect(lambda _checked=False: self.submit(self.input))
-        composer_row.addWidget(send_btn)
-        layout.addWidget(composer)
+        helper = QLabel("Speak naturally   •   Type a message   •   Or give a command")
+        helper.setObjectName("muted")
+        helper.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(helper)
+        layout.addSpacing(8)
 
-        indicators = QHBoxLayout()
-        indicators.addStretch(1)
+        features = QHBoxLayout()
+        features.setSpacing(10)
+        feature_specs = (
+            ("◉", "Memory", "Your history. Your context.\nAlways with you.", "Memory"),
+            ("⌁", "Activities", "What Personal AI is doing\nfor you right now.", "Activities"),
+            ("▣", "Devices", "Your connected world.\nIn sync.", "World"),
+            ("▱", "Knowledge", "Information when you need it.\nFrom anywhere.", "Knowledge"),
+        )
+        for icon, title, text, target in feature_specs:
+            features.addWidget(self._feature(icon, title, text, target), 1)
+        layout.addLayout(features)
 
-        self.memory_indicator = QPushButton("")
-        self.memory_indicator.setObjectName("indicator")
-        self.memory_indicator.clicked.connect(lambda _checked=False: self._show_page("Memory"))
-        indicators.addWidget(self.memory_indicator)
-
-        self.context_indicator = QPushButton("")
-        self.context_indicator.setObjectName("indicator")
-        self.context_indicator.clicked.connect(lambda _checked=False: self._show_page("Conversation"))
-        indicators.addWidget(self.context_indicator)
-
-        self.activity_indicator = QPushButton("")
-        self.activity_indicator.setObjectName("indicator")
-        self.activity_indicator.clicked.connect(lambda _checked=False: self._show_page("Activities"))
-        indicators.addWidget(self.activity_indicator)
-
-        indicators.addStretch(1)
-        layout.addLayout(indicators)
-
-        self._refresh_home_indicators()
+        footer = QHBoxLayout()
+        self.clock_label = QLabel("")
+        self.clock_label.setObjectName("muted")
+        footer.addWidget(self.clock_label)
+        footer.addStretch(1)
+        motto = QLabel("T H I N K   ·   P L A N   ·   C R E A T E   ·   T O G E T H E R")
+        motto.setStyleSheet("color:#48566c;font-size:9px;letter-spacing:2px")
+        footer.addWidget(motto)
+        footer.addStretch(1)
+        self.system_status = QLabel("All systems operational  ●")
+        self.system_status.setStyleSheet("color:#8290a5;font-size:11px")
+        footer.addWidget(self.system_status)
+        layout.addLayout(footer)
         return page
+
+    def _feature(self, icon, title, text, target):
+        frame = QFrame()
+        frame.setObjectName("feature")
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(14, 10, 14, 10)
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size:25px;color:#71bdff")
+        row.addWidget(icon_label)
+        copy = QVBoxLayout()
+        name = QPushButton(title)
+        name.setStyleSheet("text-align:left;color:#edf4ff;font-size:14px;padding:0;border:0;")
+        name.clicked.connect(lambda _checked=False: self._show_page(target))
+        detail = QLabel(text)
+        detail.setObjectName("muted")
+        detail.setStyleSheet("font-size:10px")
+        copy.addWidget(name)
+        copy.addWidget(detail)
+        row.addLayout(copy, 1)
+        arrow = QPushButton("›")
+        arrow.setObjectName("iconButton")
+        arrow.clicked.connect(lambda _checked=False: self._show_page(target))
+        row.addWidget(arrow)
+        return frame
+
+    def _label(self, text, object_name):
+        label = QLabel(text)
+        label.setObjectName(object_name)
+        return label
 
     def _conversation_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 18, 12, 12)
-
         title = QLabel("Conversation")
-        title.setStyleSheet("font-size:28px;font-weight:650")
+        title.setStyleSheet("font-size:30px;font-weight:600")
         layout.addWidget(title)
-
-        subtitle = QLabel(
-            "The expanded thread. Home remains the primary environment; this view is for history, sources and detailed work."
-        )
-        subtitle.setObjectName("muted")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
-
         self.conversation_chat = QTextBrowser()
         layout.addWidget(self.conversation_chat, 1)
-
         composer = QFrame()
         composer.setObjectName("composer")
         row = QHBoxLayout(composer)
-        row.setContentsMargins(8, 3, 8, 3)
-
-        self.conversation_mic_btn = QPushButton("●")
+        self.conversation_input = QLineEdit()
+        self.conversation_input.setPlaceholderText("Continue the conversation...")
+        self.conversation_input.returnPressed.connect(lambda: self.submit(self.conversation_input))
+        row.addWidget(self.conversation_input, 1)
+        self.conversation_mic_btn = QPushButton("◉")
         self.conversation_mic_btn.setObjectName("mic")
+        self.conversation_mic_btn.setCheckable(True)
         self.conversation_mic_btn.clicked.connect(self.toggle_voice)
         row.addWidget(self.conversation_mic_btn)
-
-        self.conversation_input = QLineEdit()
-        self.conversation_input.setPlaceholderText("Continue the conversation…")
-        self.conversation_input.returnPressed.connect(
-            lambda: self.submit(self.conversation_input)
-        )
-        row.addWidget(self.conversation_input, 1)
-
-        send_btn = QPushButton("↑")
-        send_btn.setObjectName("send")
-        send_btn.clicked.connect(lambda _checked=False: self.submit(self.conversation_input))
-        row.addWidget(send_btn)
         layout.addWidget(composer)
         return page
 
     def _card(self, title, value, detail=""):
         frame = QFrame()
         frame.setObjectName("card")
-        layout = QVBoxLayout(frame)
+        box = QVBoxLayout(frame)
         label = QLabel(title)
         label.setObjectName("muted")
         value_label = QLabel(str(value))
         value_label.setStyleSheet("font-size:25px;font-weight:650")
-        layout.addWidget(label)
-        layout.addWidget(value_label)
+        box.addWidget(label)
+        box.addWidget(value_label)
         if detail:
-            detail_label = QLabel(detail)
-            detail_label.setObjectName("muted")
-            detail_label.setWordWrap(True)
-            layout.addWidget(detail_label)
+            d = QLabel(detail)
+            d.setObjectName("muted")
+            d.setWordWrap(True)
+            box.addWidget(d)
         return frame
 
     def _memory_content(self, layout):
         graph = self._graph()
         grid = QGridLayout()
-        grid.addWidget(
-            self._card("Memory", len(graph.get("nodes", [])), "Second Brain objects"),
-            0,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Relationships",
-                len(graph.get("edges", [])),
-                "Graph connections between memories",
-            ),
-            0,
-            1,
-        )
+        grid.addWidget(self._card("Memory", len(graph.get("nodes", [])), "Second Brain objects"), 0, 0)
+        grid.addWidget(self._card("Relationships", len(graph.get("edges", [])), "Graph connections"), 0, 1)
         layout.addLayout(grid)
-
         button = QPushButton("Open Memory — Ambient / Graph / Tree / Detail")
-        button.setObjectName("navAction")
         button.clicked.connect(self.open_memory)
         layout.addWidget(button)
 
     def _knowledge_content(self, layout):
-        graph = self._graph()
         integrations = self.runtime.get("integrations")
         linked = integrations.list() if integrations and hasattr(integrations, "list") else []
-        grid = QGridLayout()
-        grid.addWidget(
-            self._card(
-                "Connected sources",
-                len(linked),
-                "External knowledge sources available to Personal AI",
-            ),
-            0,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Memory links",
-                len(graph.get("edges", [])),
-                "Knowledge stays distinct from personal memory",
-            ),
-            0,
-            1,
-        )
-        layout.addLayout(grid)
+        layout.addWidget(self._card("Connected sources", len(linked), "External knowledge sources"))
 
     def _activities_content(self, layout):
         automations = self.runtime.get("automations")
         rows = automations.list() if automations and hasattr(automations, "list") else []
-        running = sum(1 for item in rows if item.get("enabled"))
-        handled = sum(1 for item in rows if item.get("last_run_at"))
         grid = QGridLayout()
-        grid.addWidget(self._card("Running", running, "Active automated work"), 0, 0)
-        grid.addWidget(self._card("Completed", handled, "Work handled for you"), 0, 1)
+        grid.addWidget(self._card("Running", sum(1 for x in rows if x.get("enabled")), "Active automated work"), 0, 0)
+        grid.addWidget(self._card("Completed", sum(1 for x in rows if x.get("last_run_at")), "Work handled for you"), 0, 1)
+        layout.addLayout(grid)
+
+    def _world_content(self, layout):
+        grid = QGridLayout()
+        grid.addWidget(self._card("Devices", self._device_count(), "Trusted connected devices"), 0, 0)
+        integrations = self.runtime.get("integrations")
+        linked = integrations.list() if integrations and hasattr(integrations, "list") else []
+        grid.addWidget(self._card("Connected apps", len(linked), "Permission-scoped services"), 0, 1)
         layout.addLayout(grid)
 
     def _dashboard_content(self, layout):
-        graph = self._graph()
-        telemetry = self.runtime.get("telemetry")
-        snapshot = telemetry.snapshot() if telemetry else {"metrics": {}, "counters": {}}
         grid = QGridLayout()
-        grid.addWidget(
-            self._card("Second Brain", len(graph.get("nodes", [])), "memory nodes"),
-            0,
-            0,
-        )
-        grid.addWidget(
-            self._card("Devices", self._device_count(), "registered identities"),
-            0,
-            1,
-        )
-        grid.addWidget(
-            self._card(
-                "Voice",
-                "Ready" if self.runtime.get("voice") else "Unavailable",
-                "Realtime + fallback runtime",
-            ),
-            1,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Security",
-                "Enforced",
-                "permissions · approvals · vault · audit · device trust",
-            ),
-            1,
-            1,
-        )
-        grid.addWidget(
-            self._card(
-                "Local telemetry",
-                len(snapshot.get("metrics", {})),
-                "timed operations; never uploaded",
-            ),
-            2,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Recovery",
-                "Ready" if self.runtime.get("backups") else "Unavailable",
-                "integrity-checked backup/restore",
-            ),
-            2,
-            1,
-        )
+        grid.addWidget(self._card("Second Brain", self._memory_count(), "memory nodes"), 0, 0)
+        grid.addWidget(self._card("Devices", self._device_count(), "registered identities"), 0, 1)
+        grid.addWidget(self._card("Voice", "Active" if self.voice_running else "Ready", "continuous voice runtime"), 1, 0)
+        grid.addWidget(self._card("Security", "Enforced", "permissions · approvals · audit"), 1, 1)
         layout.addLayout(grid)
-
         button = QPushButton("Open Detailed Control Dashboard")
-        button.setObjectName("navAction")
         button.clicked.connect(self.open_control)
         layout.addWidget(button)
 
     def _apps_tools_content(self, layout):
-        automations = self.runtime.get("automations")
-        auto_rows = automations.list() if automations and hasattr(automations, "list") else []
         integrations = self.runtime.get("integrations")
         linked = integrations.list() if integrations and hasattr(integrations, "list") else []
         plugins = self.runtime.get("plugins")
         plugin_rows = plugins.list() if plugins and hasattr(plugins, "list") else []
         grid = QGridLayout()
-        grid.addWidget(
-            self._card(
-                "Active automations",
-                sum(1 for item in auto_rows if item.get("enabled")),
-                "Scheduled and conditional work",
-            ),
-            0,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Linked integrations",
-                len(linked),
-                "Permission-scoped accounts and services",
-            ),
-            0,
-            1,
-        )
-        grid.addWidget(
-            self._card(
-                "Trusted devices",
-                self._device_count(),
-                "Desktop and companion-device control plane",
-            ),
-            1,
-            0,
-        )
-        grid.addWidget(
-            self._card(
-                "Extensions",
-                len(plugin_rows),
-                "Declarative manifests; no arbitrary Python execution",
-            ),
-            1,
-            1,
-        )
+        grid.addWidget(self._card("Connected apps", len(linked), "Accounts and services"), 0, 0)
+        grid.addWidget(self._card("Extensions", len(plugin_rows), "Declarative tool manifests"), 0, 1)
         layout.addLayout(grid)
 
     def _settings_content(self, layout):
-        text = QLabel(
-            "Personal AI · Identity · Voice · Appearance · Memory · Privacy · Permissions · Connected Apps · Notifications · Automation · Data · Security · Devices · Models · Advanced"
-        )
+        text = QLabel("Personal AI · Identity · Voice · Appearance · Memory · Privacy · Permissions · Connected Apps · Notifications · Automation · Data · Security · Devices · Models · Advanced")
         text.setObjectName("muted")
         text.setWordWrap(True)
         layout.addWidget(text)
-
         button = QPushButton("Open Settings")
-        button.setObjectName("navAction")
         button.clicked.connect(self.open_settings)
         layout.addWidget(button)
 
     def _subtitle(self, name):
         return {
             "Memory": "Your personal context, relationships and recall surfaces.",
-            "Knowledge": "Documents, research, files and connected information Personal AI can retrieve.",
+            "Knowledge": "Documents, research, files and connected information.",
             "Activities": "What Personal AI has done, is doing, or needs from you.",
-            "Dashboard": "Overview and system evidence without turning Home into a dashboard.",
-            "Apps & Tools": "Capabilities behind Personal AI for visibility, configuration and manual control.",
-            "Settings": "Control Personal AI, identity, privacy, permissions, devices and models.",
+            "World": "Your devices, apps and connected environment.",
+            "Dashboard": "System overview without cluttering Home.",
+            "Apps & Tools": "Capabilities behind Personal AI.",
+            "Settings": "Identity, privacy, permissions, voice, models and devices.",
         }[name]
 
     def _show_page(self, name, close_menu=True):
@@ -699,13 +590,12 @@ class MainWindow(QMainWindow):
             return
         self.current_page = name
         self.stack.setCurrentWidget(self.pages[name])
-        self.dashboard_btn.setChecked(name == "Dashboard")
+        for target, button in self.top_buttons.items():
+            button.setChecked(target == name)
         for target, button in self.menu_buttons.items():
             button.setChecked(target == name)
         if close_menu:
             self._close_main_menu()
-        if name == "Home":
-            self._refresh_home_indicators()
 
     def _graph(self):
         try:
@@ -724,19 +614,13 @@ class MainWindow(QMainWindow):
 
     def _device_count(self):
         registry = self.runtime.get("device_registry")
-        return len(registry.list()) if registry and hasattr(registry, "list") else 0
+        try:
+            return len(registry.list()) if registry and hasattr(registry, "list") else 0
+        except Exception:
+            return 0
 
     def _context_count(self):
-        count = self._device_count()
-        integrations = self.runtime.get("integrations")
-        if integrations and hasattr(integrations, "list"):
-            try:
-                count += len(integrations.list())
-            except Exception:
-                pass
-        if self.pending_text:
-            count += 1
-        return count
+        return self._device_count() + (1 if self.pending_text else 0)
 
     def _activity_count(self):
         automations = self.runtime.get("automations")
@@ -748,12 +632,12 @@ class MainWindow(QMainWindow):
             return 0
 
     def _refresh_home_indicators(self):
-        if hasattr(self, "memory_indicator"):
-            self.memory_indicator.setText(f"Memory · {self._memory_count():02d}")
-        if hasattr(self, "context_indicator"):
-            self.context_indicator.setText(f"Context · {self._context_count():02d}")
-        if hasattr(self, "activity_indicator"):
-            self.activity_indicator.setText(f"Activity · {self._activity_count():02d}")
+        pass
+
+    def _update_clock(self):
+        if hasattr(self, "clock_label"):
+            now = datetime.now()
+            self.clock_label.setText(now.strftime("%H:%M\n%a, %d %b %Y"))
 
     def open_memory(self):
         MemoryPanel(self.memory, self).exec()
@@ -766,9 +650,26 @@ class MainWindow(QMainWindow):
         if self.runtime:
             SettingsPanel(self.runtime, self).exec()
 
+    def _ensure_voice_active(self):
+        voice = self.runtime.get("voice")
+        if not voice or self.voice_running:
+            if not voice and hasattr(self, "system_status"):
+                self.system_status.setText("Voice unavailable  ●")
+            return
+        try:
+            voice.start()
+            self.voice_running = True
+            self._set_state("active")
+            self._update_voice_buttons()
+        except Exception as exc:
+            self.voice_running = False
+            if hasattr(self, "system_status"):
+                self.system_status.setText("Voice needs attention  ●")
+            self._append_chat("System", f"Voice could not start: {exc}")
+
     def _update_voice_buttons(self):
-        label = "■" if self.voice_running else "●"
-        accessible = "Stop voice" if self.voice_running else "Start voice"
+        label = "◉" if self.voice_running else "○"
+        accessible = "Pause continuous voice" if self.voice_running else "Start continuous voice"
         for attr in ("mic_btn", "conversation_mic_btn"):
             button = getattr(self, attr, None)
             if button:
@@ -780,31 +681,39 @@ class MainWindow(QMainWindow):
         voice = self.runtime.get("voice")
         if not voice:
             return
-        if self.voice_running:
-            voice.stop()
-            self.voice_running = False
-            self._set_state("idle")
-        else:
-            voice.start()
-            self.voice_running = True
-            self._set_state("active")
-        self._update_voice_buttons()
+        try:
+            if self.voice_running:
+                voice.stop()
+                self.voice_running = False
+                self._set_state("idle")
+            else:
+                voice.start()
+                self.voice_running = True
+                self._set_state("active")
+        finally:
+            self._update_voice_buttons()
 
     def _set_state(self, state):
         normalized = PulseWidget.normalize_state(state)
-        label, hint = self.STATE_COPY.get(normalized, self.STATE_COPY["idle"])
-        self.state.setText(label)
-        self.state_hint.setText(hint)
-        self.pulse.set_state(normalized)
-        if normalized == "approval":
-            self.needs_label.setText("Your approval is required")
-            self.needs_label.setVisible(True)
-        elif normalized != "error":
-            self.needs_label.setVisible(False)
-        self._refresh_home_indicators()
+        title, hint = self.STATE_COPY.get(normalized, self.STATE_COPY["idle"])
+        if hasattr(self, "state"):
+            self.state.setText(title)
+        if hasattr(self, "state_hint"):
+            self.state_hint.setText(hint)
+        if hasattr(self, "pulse"):
+            self.pulse.set_state(normalized)
+        if hasattr(self, "needs_label"):
+            if normalized == "approval":
+                self.needs_label.setText("Your approval is required")
+                self.needs_label.setVisible(True)
+            elif normalized != "error":
+                self.needs_label.setVisible(False)
 
     def on_state(self, event):
         self._set_state(event.get("state", "idle"))
+
+    def _on_voice_wake(self, event):
+        self._set_state("listening")
 
     def _on_voice_transcript(self, event):
         text = event.get("text", "")
@@ -817,18 +726,14 @@ class MainWindow(QMainWindow):
         if text:
             self._append_chat("AI", text)
             self._set_state("speaking")
-            QTimer.singleShot(1000, lambda: self._set_state("idle"))
+            QTimer.singleShot(950, lambda: self._set_state("active" if self.voice_running else "idle"))
 
     def _append_chat(self, who, text):
         if not text:
             return
         safe_who = html.escape(str(who))
         safe_text = html.escape(str(text)).replace("\n", "<br>")
-        block = (
-            f'<div style="margin:4px 0 8px 0;">'
-            f'<span style="color:#71838d;font-size:11px;">{safe_who}</span><br>'
-            f'<span style="color:#d8e2e6;">{safe_text}</span></div>'
-        )
+        block = f'<div style="margin:4px 0 8px 0;"><span style="color:#7189a7;font-size:11px;">{safe_who}</span><br><span style="color:#dce8f6;">{safe_text}</span></div>'
         if hasattr(self, "chat"):
             self.chat.append(block)
             self.chat.setVisible(True)
@@ -843,13 +748,8 @@ class MainWindow(QMainWindow):
         field.clear()
         self.pending_text = text
         self._append_chat("You", text)
-        self._set_state("listening")
-        QTimer.singleShot(
-            180,
-            lambda: self._set_state("thinking")
-            if self.worker and self.worker.isRunning()
-            else None,
-        )
+        self._set_state("understanding")
+        QTimer.singleShot(170, lambda: self._set_state("thinking") if self.worker and self.worker.isRunning() else None)
         self._run(lambda: self.executor.chat(text))
 
     def _run(self, fn):
@@ -862,7 +762,13 @@ class MainWindow(QMainWindow):
         self._append_chat("AI", text)
         self.pending_text = None
         self._set_state("speaking")
-        QTimer.singleShot(1100, lambda: self._set_state("idle"))
+        voice = self.runtime.get("voice")
+        if voice and hasattr(voice, "speak"):
+            try:
+                voice.speak(text)
+            except Exception:
+                pass
+        QTimer.singleShot(1100, lambda: self._set_state("active" if self.voice_running else "idle"))
 
     def error(self, exc):
         if isinstance(exc, ConfirmationRequired):
@@ -870,11 +776,7 @@ class MainWindow(QMainWindow):
             choice = QMessageBox.question(
                 self,
                 "Approve once",
-                (
-                    "Personal AI wants to run:\n\n"
-                    f"{exc.tool_name}\n{exc.description}\n{exc.parameters}\n\n"
-                    "This approval is one-use and bound to these exact parameters. Allow it?"
-                ),
+                f"Personal AI wants to run:\n\n{exc.tool_name}\n{exc.description}\n{exc.parameters}\n\nAllow this one action?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if choice == QMessageBox.StandardButton.Yes:
@@ -886,18 +788,13 @@ class MainWindow(QMainWindow):
             self.executor.reject(exc.approval_id)
             self._append_chat("AI", "Action cancelled.")
             self.pending_text = None
-            self._set_state("idle")
+            self._set_state("active" if self.voice_running else "idle")
             return
 
         self._append_chat("Error", str(exc))
         self.pending_text = None
-        self.needs_label.setText("Something interrupted the request")
-        self.needs_label.setVisible(True)
+        if hasattr(self, "needs_label"):
+            self.needs_label.setText("Something interrupted the request")
+            self.needs_label.setVisible(True)
         self._set_state("error")
-        QTimer.singleShot(
-            1800,
-            lambda: (
-                self.needs_label.setVisible(False),
-                self._set_state("idle"),
-            ),
-        )
+        QTimer.singleShot(1800, lambda: self._set_state("active" if self.voice_running else "idle"))

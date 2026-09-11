@@ -4,17 +4,16 @@ import math
 import random
 
 from PyQt6.QtCore import QPointF, QTimer, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QRadialGradient
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
 
 class PulseWidget(QWidget):
-    """Personal AI Home V1 living neural field.
+    """Cinematic, asymmetric living neural field for Personal AI Home.
 
-    The core is deliberately open, asymmetric and non-mechanical. It behaves
-    like a living constellation of memory/context paths instead of a ring,
-    orb, reactor or loading spinner. State motion expresses what the AI is
-    doing while preserving one continuous identity.
+    The visual is drawn entirely in code. It deliberately avoids a metallic
+    HUD/orb look: the identity is a fluid field of luminous neural filaments,
+    particles and state-dependent motion.
     """
 
     STATE_ALIASES = {
@@ -32,103 +31,56 @@ class PulseWidget(QWidget):
     }
     STATE_SPEEDS = {
         "idle": 0.012,
-        "active": 0.022,
-        "listening": 0.046,
-        "understanding": 0.038,
-        "thinking": 0.061,
-        "memory": 0.042,
-        "knowledge": 0.048,
-        "acting": 0.072,
+        "active": 0.020,
+        "listening": 0.045,
+        "understanding": 0.037,
+        "thinking": 0.060,
+        "memory": 0.040,
+        "knowledge": 0.047,
+        "acting": 0.070,
         "speaking": 0.052,
         "approval": 0.010,
         "error": 0.026,
         "background": 0.006,
     }
     STATE_ENERGY = {
-        "idle": 0.50,
-        "active": 0.62,
-        "listening": 0.82,
-        "understanding": 0.76,
+        "idle": 0.56,
+        "active": 0.70,
+        "listening": 0.94,
+        "understanding": 0.84,
         "thinking": 1.00,
-        "memory": 0.94,
+        "memory": 0.92,
         "knowledge": 0.88,
-        "acting": 0.94,
-        "speaking": 0.88,
-        "approval": 0.38,
-        "error": 0.54,
-        "background": 0.23,
+        "acting": 0.98,
+        "speaking": 0.94,
+        "approval": 0.44,
+        "error": 0.62,
+        "background": 0.26,
     }
-    STATE_AMPLITUDE = {
-        "idle": 0.014,
-        "active": 0.019,
-        "listening": 0.029,
-        "understanding": 0.024,
-        "thinking": 0.038,
-        "memory": 0.031,
-        "knowledge": 0.028,
-        "acting": 0.026,
-        "speaking": 0.032,
-        "approval": 0.011,
-        "error": 0.020,
-        "background": 0.007,
-    }
-
-    # Stable irregular neural constellation. The outer nodes are intentionally
-    # not connected as a perimeter so the silhouette never becomes an oval.
-    CORE_NODES = (
-        (-0.27, -0.10),
-        (-0.19, -0.27),
-        (-0.05, -0.19),
-        (0.12, -0.26),
-        (0.26, -0.14),
-        (0.19, -0.02),
-        (0.28, 0.14),
-        (0.09, 0.24),
-        (-0.07, 0.18),
-        (-0.24, 0.25),
-        (-0.21, 0.04),
-        (-0.08, -0.04),
-        (0.05, 0.03),
-        (0.15, 0.10),
-        (-0.02, 0.30),
-        (0.00, -0.32),
-        (-0.32, 0.10),
-        (0.30, -0.02),
-    )
-    CORE_EDGES = (
-        (0, 2), (0, 10),
-        (1, 2), (1, 11), (1, 15),
-        (2, 11), (2, 12), (2, 3),
-        (3, 12), (3, 4),
-        (4, 5), (4, 17),
-        (5, 12), (5, 13), (5, 17),
-        (6, 13), (6, 7),
-        (7, 13), (7, 8), (7, 14),
-        (8, 12), (8, 14), (8, 9),
-        (9, 10), (9, 14),
-        (10, 11), (10, 16),
-        (11, 12), (12, 13),
-    )
-    # Open filaments give the field a heartbeat-like flow without enclosing it.
-    FLOW_PATHS = (
-        ((-0.34, -0.06), (-0.22, -0.17), (-0.10, -0.14), (0.04, -0.04)),
-        ((-0.16, -0.34), (-0.07, -0.24), (0.08, -0.12), (0.22, -0.18)),
-        ((0.31, -0.19), (0.24, -0.08), (0.10, 0.03), (0.20, 0.19)),
-        ((0.25, 0.25), (0.12, 0.19), (-0.02, 0.08), (-0.18, 0.18)),
-        ((-0.30, 0.28), (-0.22, 0.16), (-0.08, 0.05), (0.05, 0.13)),
-    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.t = 0.0
         self.state = "idle"
         self.reduce_motion = False
-        self.memory_labels = ("Project", "Person", "Decision", "Conversation")
-        self.seed = [random.Random(101 + i).uniform(-1.0, 1.0) for i in range(48)]
+        self._rng = random.Random(240917)
+        self._stars = [
+            (self._rng.random(), self._rng.random(), self._rng.uniform(0.35, 1.0), self._rng.random() * math.tau)
+            for _ in range(170)
+        ]
+        self._filaments = []
+        for i in range(52):
+            side = -1 if i % 2 == 0 else 1
+            y = self._rng.uniform(-0.34, 0.34)
+            spread = self._rng.uniform(0.72, 1.25)
+            phase = self._rng.random() * math.tau
+            width = self._rng.uniform(0.55, 1.65)
+            self._filaments.append((side, y, spread, phase, width))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(16)
-        self.setAccessibleName("Personal AI living core")
+        self.setMinimumHeight(330)
+        self.setAccessibleName("Personal AI living neural field")
 
     @classmethod
     def normalize_state(cls, state: str) -> str:
@@ -139,266 +91,161 @@ class PulseWidget(QWidget):
         self.state = self.normalize_state(state)
         self.update()
 
-    def set_memory_labels(self, labels):
-        cleaned = [str(item).strip() for item in labels if str(item).strip()]
-        if cleaned:
-            self.memory_labels = tuple(cleaned[:4])
+    def set_memory_labels(self, _labels):
         self.update()
 
     def set_reduce_motion(self, value: bool):
         self.reduce_motion = bool(value)
-        self.timer.setInterval(120 if self.reduce_motion else 16)
-        self.update()
+        self.timer.setInterval(90 if self.reduce_motion else 16)
 
     def tick(self):
         speed = self.STATE_SPEEDS[self.state]
-        self.t += speed * (0.18 if self.reduce_motion else 1.0)
+        self.t += speed * (0.20 if self.reduce_motion else 1.0)
         self.update()
 
     def _palette(self):
         if self.state == "error":
-            return QColor(234, 158, 143), QColor(184, 102, 92)
+            return QColor(255, 118, 128), QColor(176, 74, 255), QColor(90, 154, 255)
         if self.state == "approval":
-            return QColor(214, 205, 166), QColor(154, 144, 104)
+            return QColor(242, 214, 148), QColor(157, 122, 255), QColor(78, 149, 255)
         if self.state == "memory":
-            return QColor(155, 220, 216), QColor(84, 154, 153)
+            return QColor(104, 240, 224), QColor(137, 113, 255), QColor(70, 169, 255)
         if self.state == "knowledge":
-            return QColor(171, 206, 233), QColor(95, 136, 171)
-        return QColor(164, 224, 236), QColor(83, 151, 169)
+            return QColor(137, 204, 255), QColor(126, 100, 255), QColor(64, 159, 255)
+        return QColor(226, 239, 255), QColor(136, 105, 255), QColor(61, 165, 255)
 
-    def _node_position(self, cx, cy, width, height, index, amplitude=None):
-        nx, ny = self.CORE_NODES[index]
-        amp = self.STATE_AMPLITUDE[self.state] if amplitude is None else amplitude
-        if self.reduce_motion:
-            amp *= 0.42
-        seed = self.seed[index]
-        phase = self.t * (0.62 + (index % 4) * 0.07) + seed * 2.4
-        breath = 1.0 + math.sin(self.t * 0.72 + index * 0.17) * amp * 0.34
-        dx = math.sin(phase) * width * amp * 0.070
-        dy = math.cos(phase * 0.83) * height * amp * 0.076
-        return QPointF(
-            cx + nx * width * 0.78 * breath + dx,
-            cy + ny * height * 0.88 * breath + dy,
-        )
-
-    def _curve_between(self, a, b, index, bend_scale=1.0):
-        mx = (a.x() + b.x()) * 0.5
-        my = (a.y() + b.y()) * 0.5
-        vx = b.x() - a.x()
-        vy = b.y() - a.y()
-        length = max(1.0, math.hypot(vx, vy))
-        direction = -1.0 if index % 2 else 1.0
-        bend = (8.0 + (index % 5) * 3.0) * direction * bend_scale
-        control = QPointF(mx - vy / length * bend, my + vx / length * bend)
-        path = QPainterPath(a)
-        path.quadTo(control, b)
-        return path
-
-    def _draw_flow_paths(self, painter, cx, cy, width, height, primary):
-        energy = self.STATE_ENERGY[self.state]
-        amp = self.STATE_AMPLITUDE[self.state] * (0.42 if self.reduce_motion else 1.0)
-        for index, template in enumerate(self.FLOW_PATHS):
-            phase = self.t * (0.34 + index * 0.025) + self.seed[24 + index]
-            points = []
-            for point_index, (nx, ny) in enumerate(template):
-                wave_x = math.sin(phase + point_index * 1.2) * width * amp * 0.085
-                wave_y = math.cos(phase * 0.9 + point_index) * height * amp * 0.095
-                points.append(
-                    QPointF(
-                        cx + nx * width * 0.78 + wave_x,
-                        cy + ny * height * 0.88 + wave_y,
-                    )
-                )
-            path = QPainterPath(points[0])
-            path.cubicTo(points[1], points[2], points[3])
-            alpha = int((82 - index * 5) * energy)
-            pen = QPen(QColor(primary.red(), primary.green(), primary.blue(), max(16, alpha)))
-            pen.setWidthF(1.12 if index in (1, 3) else 0.88)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-
-    def _draw_lattice(self, painter, cx, cy, width, height, primary):
-        energy = self.STATE_ENERGY[self.state]
-        points = [self._node_position(cx, cy, width, height, i) for i in range(len(self.CORE_NODES))]
-        self._draw_flow_paths(painter, cx, cy, width, height, primary)
-
-        active_phase = int(self.t * 1.45) % 4
-        for edge_index, (source, target) in enumerate(self.CORE_EDGES):
-            alpha = int((88 + (edge_index % 4) * 15) * energy)
-            width_boost = 0.0
-            if self.state in ("thinking", "understanding") and edge_index % 4 == active_phase:
-                alpha += 58
-                width_boost = 0.38
-            pen = QPen(
-                QColor(
-                    primary.red(),
-                    primary.green(),
-                    primary.blue(),
-                    min(188, max(16, alpha)),
-                )
-            )
-            pen.setWidthF(0.72 + (edge_index % 3) * 0.12 + width_boost)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(self._curve_between(points[source], points[target], edge_index))
-
-        count = 11 if self.state == "background" else len(points)
-        for index, point in enumerate(points[:count]):
-            alpha = int((104 + (index % 4) * 18) * energy)
-            radius = 1.45 + (index % 3) * 0.36
-            if self.state == "thinking" and index % 4 == active_phase:
-                alpha = min(220, alpha + 72)
-                radius += 1.25
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 24))
-                painter.drawEllipse(point, radius + 6.0, radius + 6.0)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), max(18, alpha)))
-            painter.drawEllipse(point, radius, radius)
-
-    def _draw_listening(self, painter, cx, cy, width, height, primary):
-        if self.state != "listening":
-            return
-        targets = (0, 4, 6, 9)
-        origins = ((-0.36, -0.20), (0.36, -0.22), (0.37, 0.20), (-0.36, 0.22))
-        for i, (target_index, (ox, oy)) in enumerate(zip(targets, origins)):
-            target = self._node_position(cx, cy, width, height, target_index)
-            origin = QPointF(cx + ox * width, cy + oy * height)
-            progress = (self.t * 0.30 + i * 0.19) % 1.0
-            # Intake strokes contract toward the lattice. They remain short and
-            # curved instead of becoming screen-spanning technical spokes.
-            sx = origin.x() + (target.x() - origin.x()) * progress * 0.35
-            sy = origin.y() + (target.y() - origin.y()) * progress * 0.35
-            start = QPointF(sx, sy)
-            path = self._curve_between(start, target, i + 40, bend_scale=1.75)
-            alpha = int(122 * (1.0 - progress * 0.34))
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), alpha), 1.05))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 86))
-            painter.drawEllipse(start, 1.8, 1.8)
-
-    def _draw_thinking(self, painter, cx, cy, width, height, primary):
-        if self.state not in ("understanding", "thinking"):
-            return
-        signal_count = 9 if self.state == "thinking" else 5
-        for i in range(signal_count):
-            edge_index = (i * 3 + int(self.t * 2.0)) % len(self.CORE_EDGES)
-            source_index, target_index = self.CORE_EDGES[edge_index]
-            a = self._node_position(cx, cy, width, height, source_index)
-            b = self._node_position(cx, cy, width, height, target_index)
-            q = (self.t * 0.23 + i * 0.115) % 1.0
-            x = a.x() + (b.x() - a.x()) * q
-            y = a.y() + (b.y() - a.y()) * q
-            point = QPointF(x, y)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 34))
-            painter.drawEllipse(point, 6.0, 6.0)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 176))
-            painter.drawEllipse(point, 2.35, 2.35)
-
-    def _draw_memory(self, painter, cx, cy, width, height, primary):
-        if self.state != "memory":
-            return
-        source_nodes = (1, 4, 6, 9)
-        anchors = ((-0.30, -0.25), (0.32, -0.20), (0.31, 0.25), (-0.31, 0.24))
-        font = QFont()
-        font.setPointSizeF(8.2)
-        painter.setFont(font)
-        for index, (source_index, (ax, ay)) in enumerate(zip(source_nodes, anchors)):
-            source = self._node_position(cx, cy, width, height, source_index)
-            endpoint = QPointF(cx + ax * width, cy + ay * height)
-            path = self._curve_between(source, endpoint, index + 60, bend_scale=2.0)
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 118), 1.02))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 188))
-            painter.drawEllipse(endpoint, 2.7, 2.7)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 26))
-            painter.drawEllipse(endpoint, 7.0, 7.0)
-            label = self.memory_labels[index % len(self.memory_labels)]
-            painter.setPen(QColor(primary.red(), primary.green(), primary.blue(), 148))
-            tx = 10 if ax >= 0 else -70
-            painter.drawText(int(endpoint.x() + tx), int(endpoint.y() - 6), label)
-
-    def _draw_knowledge(self, painter, cx, cy, width, height, primary):
-        if self.state != "knowledge":
-            return
-        sources = ((-0.25, -0.34), (0.00, -0.39), (0.27, -0.32))
-        for i, (source_xy, target_index) in enumerate(zip(sources, (1, 15, 4))):
-            source = QPointF(cx + source_xy[0] * width, cy + source_xy[1] * height)
-            target = self._node_position(cx, cy, width, height, target_index)
-            path = self._curve_between(source, target, i + 70, bend_scale=1.8)
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 92), 0.95))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-
-    def _draw_action(self, painter, cx, cy, width, height, primary):
-        if self.state != "acting":
-            return
-        start = self._node_position(cx, cy, width, height, 17)
-        end = QPointF(start.x() + width * 0.105, start.y() - height * 0.035)
-        path = self._curve_between(start, end, 80, bend_scale=1.5)
-        painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 148), 1.20))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(path)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 190))
-        painter.drawEllipse(end, 3.0, 3.0)
-
-    def _draw_speaking(self, painter, cx, cy, width, height, primary):
-        if self.state != "speaking":
-            return
-        source_indices = (3, 4, 17, 6, 7)
-        angles = (-1.22, -0.68, -0.05, 0.58, 1.10)
-        for i, (source_index, angle) in enumerate(zip(source_indices, angles)):
-            source = self._node_position(cx, cy, width, height, source_index)
-            reach = width * (0.072 + 0.009 * math.sin(self.t * 2.3 + i))
-            end = QPointF(
-                source.x() + math.cos(angle) * reach,
-                source.y() + math.sin(angle) * height * 0.095,
-            )
-            path = self._curve_between(source, end, i + 90, bend_scale=1.35)
-            painter.setPen(QPen(QColor(primary.red(), primary.green(), primary.blue(), 92 + i * 9), 0.96))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(primary.red(), primary.green(), primary.blue(), 82))
-            painter.drawEllipse(end, 1.7, 1.7)
-
-    def paintEvent(self, _):
+    def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        width, height = self.width(), self.height()
-        cx, cy = width * 0.50, height * 0.50
-        primary, secondary = self._palette()
-        energy = self.STATE_ENERGY[self.state]
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        if w <= 2 or h <= 2:
+            return
 
-        glow = QRadialGradient(QPointF(cx, cy), min(width, height) * 0.45)
-        glow.setColorAt(
-            0,
-            QColor(primary.red(), primary.green(), primary.blue(), int(34 * energy)),
-        )
-        glow.setColorAt(
-            0.42,
-            QColor(secondary.red(), secondary.green(), secondary.blue(), int(16 * energy)),
-        )
-        glow.setColorAt(1, QColor(0, 0, 0, 0))
+        painter.fillRect(self.rect(), QColor(1, 4, 9))
+        self._draw_ambient(painter, w, h)
+        self._draw_stars(painter, w, h)
+        self._draw_neural_field(painter, w, h)
+        self._draw_core(painter, w, h)
+        self._draw_state_signal(painter, w, h)
+
+    def _draw_ambient(self, painter, w, h):
+        glow = QRadialGradient(QPointF(w * 0.52, h * 0.46), max(w, h) * 0.58)
+        glow.setColorAt(0.0, QColor(26, 63, 126, 58))
+        glow.setColorAt(0.32, QColor(35, 24, 91, 34))
+        glow.setColorAt(1.0, QColor(1, 3, 8, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(glow)
-        painter.drawEllipse(
-            QPointF(cx, cy),
-            min(width, height) * 0.43,
-            min(width, height) * 0.33,
-        )
+        painter.drawRect(self.rect())
 
-        self._draw_lattice(painter, cx, cy, width, height, primary)
-        self._draw_listening(painter, cx, cy, width, height, primary)
-        self._draw_thinking(painter, cx, cy, width, height, primary)
-        self._draw_memory(painter, cx, cy, width, height, primary)
-        self._draw_knowledge(painter, cx, cy, width, height, primary)
-        self._draw_action(painter, cx, cy, width, height, primary)
-        self._draw_speaking(painter, cx, cy, width, height, primary)
+    def _draw_stars(self, painter, w, h):
+        energy = self.STATE_ENERGY[self.state]
+        painter.setPen(Qt.PenStyle.NoPen)
+        for x, y, strength, phase in self._stars:
+            pulse = 0.52 + 0.48 * math.sin(self.t * 0.75 + phase)
+            alpha = int((16 + 82 * strength * pulse) * energy)
+            r = 0.55 + strength * 1.15
+            painter.setBrush(QColor(131, 192, 255, max(8, alpha)))
+            painter.drawEllipse(QPointF(x * w, y * h), r, r)
+
+    def _curve(self, p0, c1, c2, p3):
+        path = QPainterPath(p0)
+        path.cubicTo(c1, c2, p3)
+        return path
+
+    def _draw_neural_field(self, painter, w, h):
+        white, violet, blue = self._palette()
+        energy = self.STATE_ENERGY[self.state]
+        cx, cy = w * 0.52, h * 0.47
+        scale = min(w, h)
+
+        for i, (side, y0, spread, phase, width) in enumerate(self._filaments):
+            wobble = math.sin(self.t * (0.55 + (i % 7) * 0.035) + phase)
+            ywave = math.cos(self.t * 0.48 + phase * 1.3)
+            end_x = cx + side * w * (0.34 + 0.17 * spread)
+            end_y = cy + y0 * h + ywave * 13.0
+            start = QPointF(cx + math.sin(phase) * scale * 0.045, cy + math.cos(phase * 1.17) * scale * 0.050)
+            c1 = QPointF(cx + side * w * (0.08 + 0.035 * spread), cy + y0 * h * 0.35 + wobble * 30)
+            c2 = QPointF(cx + side * w * (0.23 + 0.07 * spread), cy + y0 * h * 0.82 - wobble * 38)
+            end = QPointF(end_x, end_y)
+            path = self._curve(start, c1, c2, end)
+
+            mix = i % 3
+            base = (blue, violet, white)[mix]
+            alpha = int((46 + (i % 6) * 9) * energy)
+            pen = QPen(QColor(base.red(), base.green(), base.blue(), min(190, alpha)))
+            pen.setWidthF(width)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+
+            if i % 4 == 0:
+                halo = QPen(QColor(base.red(), base.green(), base.blue(), int(18 * energy)))
+                halo.setWidthF(width + 5.5)
+                painter.setPen(halo)
+                painter.drawPath(path)
+
+            if i % 3 == 0:
+                q = (self.t * 0.11 + i * 0.071) % 1.0
+                point = path.pointAtPercent(q)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(205, 231, 255, int(170 * energy)))
+                painter.drawEllipse(point, 1.5 + energy, 1.5 + energy)
+
+        for i in range(20):
+            a = i / 19.0
+            x1 = cx - w * (0.26 - a * 0.18)
+            y1 = cy + math.sin(i * 1.43 + self.t * 0.7) * h * 0.19
+            x2 = cx + w * (0.25 - a * 0.16)
+            y2 = cy + math.cos(i * 1.17 + self.t * 0.6) * h * 0.17
+            path = QPainterPath(QPointF(x1, y1))
+            path.cubicTo(QPointF(cx - 40, y1), QPointF(cx + 40, y2), QPointF(x2, y2))
+            painter.setPen(QPen(QColor(125, 176, 255, int(22 + 32 * energy)), 0.65))
+            painter.drawPath(path)
+
+    def _draw_core(self, painter, w, h):
+        white, violet, blue = self._palette()
+        energy = self.STATE_ENERGY[self.state]
+        cx = w * 0.52 + math.sin(self.t * 0.37) * 8
+        cy = h * 0.47 + math.cos(self.t * 0.41) * 5
+        radius = min(w, h) * (0.12 + 0.008 * math.sin(self.t * 1.6))
+        gradient = QRadialGradient(QPointF(cx, cy), radius * 2.6)
+        gradient.setColorAt(0.0, QColor(white.red(), white.green(), white.blue(), int(105 * energy)))
+        gradient.setColorAt(0.18, QColor(blue.red(), blue.green(), blue.blue(), int(80 * energy)))
+        gradient.setColorAt(0.42, QColor(violet.red(), violet.green(), violet.blue(), int(42 * energy)))
+        gradient.setColorAt(1.0, QColor(4, 8, 18, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(QPointF(cx, cy), radius * 2.5, radius * 2.5)
+
+        for i in range(7):
+            angle = i * 0.92 + self.t * 0.32
+            ox = math.cos(angle) * radius * (0.28 + (i % 2) * 0.11)
+            oy = math.sin(angle * 1.21) * radius * (0.22 + (i % 3) * 0.07)
+            rr = radius * (0.20 + (i % 3) * 0.045)
+            c = (blue, violet, white)[i % 3]
+            painter.setBrush(QColor(c.red(), c.green(), c.blue(), int((34 + i * 7) * energy)))
+            painter.drawEllipse(QPointF(cx + ox, cy + oy), rr * 1.35, rr)
+
+    def _draw_state_signal(self, painter, w, h):
+        if self.state not in ("listening", "speaking", "thinking", "acting"):
+            return
+        energy = self.STATE_ENERGY[self.state]
+        y = h * 0.82
+        center = w * 0.52
+        span = min(w * 0.34, 430.0)
+        path = QPainterPath(QPointF(center - span / 2, y))
+        samples = 96
+        for i in range(1, samples + 1):
+            q = i / samples
+            x = center - span / 2 + q * span
+            envelope = math.sin(math.pi * q) ** 1.35
+            amp = (7 + 15 * energy) * envelope
+            yy = y + math.sin(q * 28 + self.t * 8.0) * amp * (0.55 + 0.45 * math.sin(q * 43 + self.t * 2.4))
+            path.lineTo(x, yy)
+        gradient = QLinearGradient(center - span / 2, y, center + span / 2, y)
+        gradient.setColorAt(0.0, QColor(57, 126, 255, 30))
+        gradient.setColorAt(0.5, QColor(194, 225, 255, 180))
+        gradient.setColorAt(1.0, QColor(126, 88, 255, 30))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(gradient, 1.2))
+        painter.drawPath(path)
