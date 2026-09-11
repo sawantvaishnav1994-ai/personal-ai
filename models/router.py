@@ -94,9 +94,12 @@ class ModelRouter:
 
     def _build_providers(self) -> dict[str, Provider]:
         explicit_local = bool(getattr(self.settings, 'local_ai_explicit', False))
-        cloud = bool(getattr(self.settings, 'cloud_runtime_enabled', False))
+        hosted = bool(
+            getattr(self.settings, 'cloud_runtime_enabled', False)
+            or getattr(self.settings, 'hosted_runtime', False)
+        )
         self_hosted_url = str(getattr(self.settings, 'self_hosted_ai_url', '') or '').rstrip('/')
-        if not self_hosted_url and (explicit_local or not cloud):
+        if not self_hosted_url and (explicit_local or not hosted):
             self_hosted_url = str(getattr(self.settings, 'local_ai_url', '') or '').rstrip('/')
         self_hosted_model = str(
             getattr(self.settings, 'self_hosted_ai_model', '')

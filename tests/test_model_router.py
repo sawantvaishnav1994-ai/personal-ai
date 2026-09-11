@@ -16,6 +16,7 @@ def settings(**overrides):
     values = {
         'ai_provider': 'local',
         'cloud_runtime_enabled': True,
+        'hosted_runtime': False,
         'local_ai_explicit': False,
         'local_ai_url': 'http://127.0.0.1:11434/v1',
         'local_ai_model': 'llama3.2',
@@ -57,6 +58,22 @@ def test_cloud_runtime_does_not_silently_call_loopback(monkeypatch):
     monkeypatch.setattr(requests, 'request', request)
     router = ModelRouter(settings())
     assert router.status()['state'] == 'not_configured'
+    with pytest.raises(ModelUnavailable):
+        router.chat('hello')
+    assert called is False
+
+
+def test_railway_runtime_does_not_treat_loopback_as_a_model(monkeypatch):
+    called = False
+
+    def request(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(requests, 'request', request)
+    router = ModelRouter(settings(cloud_runtime_enabled=False, hosted_runtime=True))
+    assert router.status()['state'] == 'not_configured'
+    assert router.status()['provider']['endpoint_host'] == ''
     with pytest.raises(ModelUnavailable):
         router.chat('hello')
     assert called is False

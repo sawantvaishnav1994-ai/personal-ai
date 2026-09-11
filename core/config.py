@@ -10,6 +10,7 @@ def env_bool(name:str,default:bool=False)->bool:
 class Settings:
     base_dir:Path=Path(__file__).resolve().parent.parent
     data_dir:Path=Path.home()/'.personal_ai'
+    hosted_runtime:bool=bool(os.getenv('RAILWAY_ENVIRONMENT_ID') or os.getenv('RAILWAY_PROJECT_ID'))
     ai_provider:str=os.getenv('AI_PROVIDER','local').lower().strip()
     local_ai_url:str=os.getenv('LOCAL_AI_URL','http://127.0.0.1:11434/v1').rstrip('/')
     local_ai_model:str=os.getenv('LOCAL_AI_MODEL','llama3.2')
