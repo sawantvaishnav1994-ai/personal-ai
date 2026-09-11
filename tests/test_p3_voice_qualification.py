@@ -69,3 +69,20 @@ def test_sessions_preserve_environment_metadata(tmp_path: Path):
     assert row['id'] == session_id
     assert row['environment']['os'] == 'Windows 11'
     assert row['environment']['noise'] == 'moderate'
+
+
+def test_active_session_survives_recorder_restart(tmp_path: Path):
+    path = tmp_path / 'qualification.sqlite3'
+    first = VoiceQualificationRecorder(path)
+    session_id = first.start_session(
+        evidence_class='real_device',
+        environment={'device_id': 'iphone-1', 'platform': 'ios-pwa'},
+    )
+
+    restarted = VoiceQualificationRecorder(path)
+    active = restarted.active_session()
+
+    assert active is not None
+    assert active['id'] == session_id
+    assert active['environment']['device_id'] == 'iphone-1'
+    assert restarted.stop_session()['session_id'] == session_id

@@ -198,9 +198,41 @@ def iphone_pwa_router(runtime, settings):
             'user_agent': request.headers.get('user-agent', ''),
             'transport': 'https-pwa',
         }
-        session_id = recorder.start_session(evidence_class='real_device', environment=environment, notes=body.notes)
+
+        def resume_active_session():
+            active = recorder.active_session()
+            if not active:
+                return None
+            if active.get('environment', {}).get('device_id') != device_id:
+                raise HTTPException(409, {
+                    'code': 'qualification_session_active',
+                    'message': 'Another trusted device already has an active qualification session',
+                })
+            emit('state', state='listening', device_id=device_id, source='iphone-pwa')
+            return {
+                'session_id': active['id'],
+                'evidence_class': active['evidence_class'],
+                'status': 'already_active',
+                'message': 'Existing session resumed',
+            }
+
+        resumed = resume_active_session()
+        if resumed:
+            return resumed
+        try:
+            session_id = recorder.start_session(evidence_class='real_device', environment=environment, notes=body.notes)
+        except RuntimeError as exc:
+            if str(exc) != 'voice qualification session already active':
+                raise
+            resumed = resume_active_session()
+            if resumed:
+                return resumed
+            raise HTTPException(409, {
+                'code': 'qualification_session_active',
+                'message': 'A qualification session is already active',
+            })
         emit('state', state='listening', device_id=device_id, source='iphone-pwa')
-        return {'session_id': session_id, 'evidence_class': 'real_device'}
+        return {'session_id': session_id, 'evidence_class': 'real_device', 'status': 'started'}
 
     @router.post('/api/qualification/stop')
     def qualification_stop(

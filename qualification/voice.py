@@ -87,7 +87,7 @@ class VoiceQualificationRecorder:
         normalized = str(evidence_class).strip().lower()
         if normalized not in self.EVIDENCE_CLASSES:
             raise ValueError('invalid evidence class')
-        if self.session_id:
+        if self.active_session():
             raise RuntimeError('voice qualification session already active')
         session_id = str(uuid.uuid4())
         with self._con() as con:
@@ -99,6 +99,25 @@ class VoiceQualificationRecorder:
         self._turn = None
         self._barge_started_at = None
         return session_id
+
+    def active_session(self):
+        """Return the active session metadata so trusted clients can reconnect safely."""
+        with self._con() as con:
+            if self.session_id:
+                row = con.execute(
+                    'SELECT * FROM voice_qualification_sessions WHERE id=? AND completed_at IS NULL',
+                    (self.session_id,),
+                ).fetchone()
+            else:
+                row = con.execute(
+                    'SELECT * FROM voice_qualification_sessions WHERE completed_at IS NULL ORDER BY started_at DESC LIMIT 1'
+                ).fetchone()
+        if not row:
+            return None
+        self.session_id = row['id']
+        item = dict(row)
+        item['environment'] = json.loads(item.pop('environment_json') or '{}')
+        return item
 
     def stop_session(self):
         if not self.session_id:

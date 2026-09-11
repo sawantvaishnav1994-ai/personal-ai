@@ -38,10 +38,22 @@ class Continuity:
 class Recorder:
     def __init__(self):
         self.started = False
+        self.environment = None
     def start_session(self, **kwargs):
+        if self.started:
+            raise RuntimeError('voice qualification session already active')
         self.started = True
         self.kwargs = kwargs
+        self.environment = kwargs.get('environment')
         return 'session-1'
+    def active_session(self):
+        if not self.started:
+            return None
+        return {
+            'id': 'session-1',
+            'evidence_class': 'real_device',
+            'environment': self.environment or {},
+        }
     def stop_session(self):
         if not self.started:
             raise RuntimeError('no active voice qualification session')
@@ -114,6 +126,23 @@ def test_second_stop_is_idempotent_and_user_safe(tmp_path):
         'ok': True,
         'status': 'already_stopped',
         'message': 'Session already stopped',
+    }
+
+
+def test_repeated_start_resumes_active_session_after_page_refresh(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    first = client.post('/iphone/api/qualification/start', json={'environment': {'noise': 'quiet'}})
+    assert first.status_code == 200
+    assert first.json()['status'] == 'started'
+
+    resumed = client.post('/iphone/api/qualification/start', json={'environment': {'noise': 'quiet'}})
+    assert resumed.status_code == 200
+    assert resumed.json() == {
+        'session_id': 'session-1',
+        'evidence_class': 'real_device',
+        'status': 'already_active',
+        'message': 'Existing session resumed',
     }
 
 
