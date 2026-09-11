@@ -38,6 +38,18 @@ class ModelRateLimited(ModelError):
     user_message = 'The AI model is temporarily busy. Please try again shortly.'
 
 
+class ModelCreditsExhausted(ModelError):
+    code = 'model_credits_exhausted'
+    status_code = 503
+    user_message = 'The AI provider has no remaining API credit. Add billing credits and try again.'
+
+
+class ModelSpendLimitReached(ModelError):
+    code = 'model_spend_limit_reached'
+    status_code = 503
+    user_message = 'The AI provider spending limit has been reached. Update the provider limit and try again.'
+
+
 class ModelTimeout(ModelError):
     code = 'model_timeout'
     status_code = 504
@@ -283,6 +295,15 @@ class ModelRouter:
         if response.status_code in {401, 403}:
             raise ModelAuthenticationError(provider=provider.id)
         if response.status_code == 429:
+            error_code = self._response_error_code(response)
+            if error_code == 'credit_balance_exhausted':
+                raise ModelCreditsExhausted(provider=provider.id)
+            if error_code in {
+                'organization_spend_limit_exceeded',
+                'project_spend_limit_exceeded',
+                'organization_usage_limit_exceeded',
+            }:
+                raise ModelSpendLimitReached(provider=provider.id)
             raise ModelRateLimited(provider=provider.id)
         if response.status_code in {408, 504}:
             raise ModelTimeout(provider=provider.id)
@@ -291,3 +312,14 @@ class ModelRouter:
         if response.status_code >= 400:
             raise ModelError(f'Provider returned HTTP {response.status_code}', provider=provider.id)
         return response
+
+    @staticmethod
+    def _response_error_code(response) -> str:
+        """Extract only a documented provider error code; never retain its message/body."""
+        try:
+            payload = response.json()
+        except (AttributeError, TypeError, ValueError):
+            return ''
+        error = payload.get('error') if isinstance(payload, dict) else None
+        code = error.get('code') if isinstance(error, dict) else None
+        return str(code or '').strip().lower()

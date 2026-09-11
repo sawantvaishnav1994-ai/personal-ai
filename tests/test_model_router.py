@@ -6,7 +6,9 @@ import requests
 from models.router import (
     InvalidModelResponse,
     ModelAuthenticationError,
+    ModelCreditsExhausted,
     ModelRouter,
+    ModelSpendLimitReached,
     ModelTimeout,
     ModelUnavailable,
 )
@@ -171,6 +173,30 @@ def test_authentication_and_invalid_payload_are_distinct(monkeypatch):
 
     monkeypatch.setattr(requests, 'request', lambda *args, **kwargs: Response(payload={'choices': []}))
     with pytest.raises(InvalidModelResponse):
+        router.chat('hello')
+
+
+@pytest.mark.parametrize(
+    ('provider_code', 'expected'),
+    [
+        ('credit_balance_exhausted', ModelCreditsExhausted),
+        ('project_spend_limit_exceeded', ModelSpendLimitReached),
+        ('organization_spend_limit_exceeded', ModelSpendLimitReached),
+        ('organization_usage_limit_exceeded', ModelSpendLimitReached),
+    ],
+)
+def test_billing_429_is_distinct_from_temporary_rate_limit(monkeypatch, provider_code, expected):
+    monkeypatch.setattr(
+        requests,
+        'request',
+        lambda *args, **kwargs: Response(
+            status_code=429,
+            payload={'error': {'code': provider_code, 'message': 'must never be retained'}},
+        ),
+    )
+    router = ModelRouter(settings(self_hosted_ai_url='https://gpu.example/v1'))
+
+    with pytest.raises(expected):
         router.chat('hello')
 
 
