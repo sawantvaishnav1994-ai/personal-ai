@@ -39,7 +39,7 @@ def build_runtime():
     preferences = Preferences(settings.data_dir / 'preferences.json')
     backups = BackupService(settings.data_dir)
     memory = MemoryStore(settings.data_dir / 'assistant.sqlite3')
-    models = ModelRouter(settings)
+    models = ModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     second_brain = SecondBrain(memory, models, vector)
 

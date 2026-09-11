@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from core.events import EventBus
 from server.iphone_pwa import iphone_pwa_router
+from models.router import ModelTimeout, ModelUnavailable
 
 
 class Registry:
@@ -42,6 +43,8 @@ class Recorder:
         self.kwargs = kwargs
         return 'session-1'
     def stop_session(self):
+        if not self.started:
+            raise RuntimeError('no active voice qualification session')
         self.started = False
         return {'turns': 1, 'barge_trials': 0, 'barge_success_rate': 0.0, 'passed': False}
     def sessions(self):
@@ -98,6 +101,63 @@ def test_p3_session_records_ios_pwa_environment_but_does_not_self_award(tmp_path
     stop = client.post('/iphone/api/qualification/stop', json={})
     assert stop.status_code == 200
     assert stop.json()['passed'] is False
+
+
+def test_second_stop_is_idempotent_and_user_safe(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    client.post('/iphone/api/qualification/start', json={'environment': {}})
+    assert client.post('/iphone/api/qualification/stop', json={}).status_code == 200
+    second = client.post('/iphone/api/qualification/stop', json={})
+    assert second.status_code == 200
+    assert second.json() == {
+        'ok': True,
+        'status': 'already_stopped',
+        'message': 'Session already stopped',
+    }
+
+
+def test_model_unavailable_is_a_safe_explicit_state(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class UnavailableExecutor:
+        def chat(self, *args, **kwargs):
+            raise ModelUnavailable('connection refused', provider='self_hosted')
+
+    runtime['executor'] = UnavailableExecutor()
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    response = client.post('/iphone/api/voice/turn', json={'transcript': 'hello'})
+    assert response.status_code == 503
+    assert response.json()['detail']['code'] == 'model_unavailable'
+    assert '127.0.0.1' not in response.text
+
+
+def test_model_timeout_is_not_reported_as_http_500(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class TimeoutExecutor:
+        def chat(self, *args, **kwargs):
+            raise ModelTimeout('timed out', provider='self_hosted')
+
+    runtime['executor'] = TimeoutExecutor()
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    response = client.post('/iphone/api/voice/turn', json={'transcript': 'hello'})
+    assert response.status_code == 504
+    assert response.json()['detail']['code'] == 'model_timeout'
 
 
 def test_plain_http_enrollment_fails_closed(tmp_path):

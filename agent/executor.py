@@ -6,6 +6,7 @@ import time
 import uuid
 
 from agent.planner import Planner
+from models.router import ModelError
 from security.approvals import ApprovalManager, parameter_hash
 
 
@@ -83,6 +84,9 @@ class AgentExecutor:
             plan = self.planner.plan(text, context=context)
             self._observe('agent.plan_ms', start)
         except ExecutionCancelled:
+            raise
+        except ModelError:
+            self._observe('agent.plan_ms', start)
             raise
         except Exception:
             self._observe('agent.plan_ms', start)

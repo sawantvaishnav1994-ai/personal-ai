@@ -9,6 +9,9 @@ from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from agent.executor import ExecutionCancelled
+from models.router import ModelError
+
 
 class OwnerEnrollBody(BaseModel):
     code: str
@@ -107,6 +110,7 @@ def iphone_pwa_router(runtime, settings):
             'device_id': device_id,
             'voice_qualification_available': recorder is not None,
             'continuity_available': continuity is not None,
+            'model': runtime['models'].status() if runtime.get('models') else {'state': 'unavailable'},
         }
 
     @router.post('/api/enroll')
@@ -152,6 +156,14 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.reply', text=reply, device_id=device_id, source='iphone-pwa')
             emit('state', state='speaking', device_id=device_id, source='iphone-pwa')
             return {'reply': reply, 'device_id': device_id}
+        except ExecutionCancelled:
+            emit('voice.turn.cancelled', device_id=device_id, source='iphone-pwa')
+            emit('state', state='listening', device_id=device_id, source='iphone-pwa')
+            raise HTTPException(409, 'turn_cancelled')
+        except ModelError as exc:
+            emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
+            emit('state', state='error', error=exc.code, device_id=device_id, source='iphone-pwa')
+            raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
         finally:
             state.finish(device_id, cancel_event)
 
@@ -198,7 +210,12 @@ def iphone_pwa_router(runtime, settings):
         auth_device(pa_device, pa_token)
         if recorder is None:
             raise HTTPException(503, 'Voice qualification recorder unavailable')
-        return recorder.stop_session()
+        try:
+            return recorder.stop_session()
+        except RuntimeError as exc:
+            if str(exc) != 'no active voice qualification session':
+                raise
+            return {'ok': True, 'status': 'already_stopped', 'message': 'Session already stopped'}
 
     @router.get('/api/qualification/sessions')
     def qualification_sessions(
