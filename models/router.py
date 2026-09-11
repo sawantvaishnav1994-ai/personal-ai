@@ -85,12 +85,24 @@ class ModelRouter:
         self.allow_external_sensitive = bool(getattr(settings, 'allow_external_for_sensitive', False))
         self.providers = self._build_providers()
         selected = str(getattr(settings, 'ai_provider', 'local') or 'local').strip().lower()
-        self.primary = 'self_hosted' if selected in {'local', 'self-hosted', 'self_hosted'} else selected
+        self.primary = self._safe_provider_id(selected)
         fallback = getattr(settings, 'model_fallback_providers', ()) or ()
         if isinstance(fallback, str):
             fallback = tuple(item.strip() for item in fallback.split(',') if item.strip())
-        self.fallbacks = tuple('self_hosted' if item in {'local', 'self-hosted'} else item for item in fallback)
+        self.fallbacks = tuple(
+            provider_id
+            for item in fallback
+            if (provider_id := self._safe_provider_id(str(item).strip().lower())) != 'invalid'
+        )
         self._last = {'state': 'not_checked', 'provider': self.primary, 'checked_at': None, 'error_code': None}
+
+    def _safe_provider_id(self, value: str) -> str:
+        """Normalize provider IDs without retaining arbitrary secret-like input."""
+        if value in {'local', 'self-hosted', 'self_hosted'}:
+            return 'self_hosted'
+        if value in self.providers:
+            return value
+        return 'invalid'
 
     def _build_providers(self) -> dict[str, Provider]:
         explicit_local = bool(getattr(self.settings, 'local_ai_explicit', False))

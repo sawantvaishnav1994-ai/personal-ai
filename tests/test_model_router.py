@@ -91,6 +91,18 @@ def test_public_status_does_not_expose_endpoint_credentials():
     assert 'api-secret' not in serialized
 
 
+def test_unknown_provider_value_is_never_exposed():
+    secret_like_value = 'sk-proj-do-not-expose-this-value'
+    router = ModelRouter(settings(ai_provider=secret_like_value))
+
+    status = router.status()
+    serialized = repr(status)
+
+    assert secret_like_value not in serialized
+    assert status['primary_provider'] == 'invalid'
+    assert status['state'] == 'not_configured'
+
+
 def test_self_hosted_openai_compatible_endpoint_is_used(monkeypatch):
     seen = {}
 
