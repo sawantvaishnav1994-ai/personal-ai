@@ -34,6 +34,9 @@ def settings(**overrides):
         'openai_api_key': '',
         'openai_base_url': 'https://api.openai.com/v1',
         'openai_model': 'cloud-model',
+        'gemini_api_key': '',
+        'gemini_base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
+        'gemini_model': 'gemini-3.5-flash-lite',
         'embedding_model': 'embed-model',
     }
     values.update(overrides)
@@ -117,6 +120,23 @@ def test_self_hosted_openai_compatible_endpoint_is_used(monkeypatch):
     assert router.chat('hello') == 'owner-controlled reply'
     assert seen['url'] == 'https://gpu.example/v1/chat/completions'
     assert 'Authorization' not in seen['headers']
+
+
+def test_gemini_openai_compatible_endpoint_is_used(monkeypatch):
+    seen = {}
+
+    def request(method, url, **kwargs):
+        seen.update(method=method, url=url, headers=kwargs['headers'], payload=kwargs['json'])
+        return Response(payload={'choices': [{'message': {'content': 'four'}}]})
+
+    monkeypatch.setattr(requests, 'request', request)
+    router = ModelRouter(settings(ai_provider='gemini', gemini_api_key='gemini-secret'))
+
+    assert router.chat('What is 2+2?') == 'four'
+    assert seen['url'] == 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+    assert seen['headers']['Authorization'] == 'Bearer gemini-secret'
+    assert seen['payload']['model'] == 'gemini-3.5-flash-lite'
+    assert 'gemini-secret' not in repr(router.status())
 
 
 def test_allowed_fallback_is_recorded(monkeypatch):

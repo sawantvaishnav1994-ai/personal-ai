@@ -147,6 +147,16 @@ class ModelRouter:
                 str(getattr(self.settings, 'openai_model', '') or ''),
                 False, ('chat', 'json', 'vision', 'embedding', 'audio'),
             ),
+            'gemini': Provider(
+                'gemini', str(getattr(
+                    self.settings,
+                    'gemini_base_url',
+                    'https://generativelanguage.googleapis.com/v1beta/openai',
+                )).rstrip('/'),
+                str(getattr(self.settings, 'gemini_api_key', '') or ''),
+                str(getattr(self.settings, 'gemini_model', '') or ''),
+                False, ('chat', 'json', 'vision'),
+            ),
         }
 
     def _candidates(self, capability: str, sensitivity: str) -> list[Provider]:
