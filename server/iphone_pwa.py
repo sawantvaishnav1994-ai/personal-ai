@@ -90,6 +90,16 @@ def iphone_pwa_router(runtime, settings):
     pending_approvals: dict[str, dict] = {}
     pending_approvals_lock = threading.RLock()
 
+    def device_cookie_kwargs():
+        cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
+        return dict(
+            httponly=True,
+            secure=True,
+            samesite='strict',
+            path='/iphone',
+            max_age=60 * 60 * 24 * cookie_days,
+        )
+
     def require_https(request: Request):
         forwarded = request.headers.get('x-forwarded-proto', '').split(',')[0].strip().lower()
         scheme = forwarded or request.url.scheme.lower()
@@ -156,10 +166,15 @@ def iphone_pwa_router(runtime, settings):
 
     @router.get('/api/status')
     def status(
+        response: Response,
         pa_device: str | None = Cookie(default=None),
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        # Successful use renews this browser's durable trust without changing
+        # its scoped credential or weakening revocation checks.
+        response.set_cookie('pa_device', device_id, **device_cookie_kwargs())
+        response.set_cookie('pa_token', pa_token, **device_cookie_kwargs())
         active_qualification = None
         if recorder is not None:
             active = recorder.active_session()
@@ -205,14 +220,7 @@ def iphone_pwa_router(runtime, settings):
         device, token = registry.enroll(body.name.strip() or 'Owner iPhone', 'ios-pwa')
         if continuity:
             continuity.resume(device['id'])
-        cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
-        cookie_kwargs = dict(
-            httponly=True,
-            secure=True,
-            samesite='strict',
-            path='/iphone',
-            max_age=60 * 60 * 24 * cookie_days,
-        )
+        cookie_kwargs = device_cookie_kwargs()
         response.set_cookie('pa_device', device['id'], **cookie_kwargs)
         response.set_cookie('pa_token', token, **cookie_kwargs)
         emit('iphone.enrolled', device_id=device['id'], platform='ios-pwa')

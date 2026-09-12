@@ -96,6 +96,20 @@ def test_owner_enrollment_requires_correct_code_and_sets_secure_cookies(tmp_path
     cookies = response.headers.get_list('set-cookie')
     assert any('pa_device=' in c and 'HttpOnly' in c and 'Secure' in c and 'SameSite=strict' in c for c in cookies)
     assert any('pa_token=' in c and 'HttpOnly' in c and 'Secure' in c and 'SameSite=strict' in c for c in cookies)
+    assert all('Max-Age=31536000' in c for c in cookies)
+
+
+def test_status_renews_existing_browser_trust_without_reenrollment(tmp_path):
+    client, runtime = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+
+    response = client.get('/iphone/api/status')
+
+    assert response.status_code == 200
+    cookies = response.headers.get_list('set-cookie')
+    assert len(cookies) == 2
+    assert all('Max-Age=31536000' in cookie for cookie in cookies)
+    assert len(runtime['device_registry'].tokens) == 1
 
 
 def test_voice_turn_uses_enrolled_device_and_existing_executor(tmp_path):
