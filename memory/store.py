@@ -63,19 +63,42 @@ class MemoryStore:
             for name, definition in additions.items():
                 if name not in columns:
                     con.execute(f'ALTER TABLE memories ADD COLUMN {name} {definition}')
+            message_columns = {row['name'] for row in con.execute('PRAGMA table_info(messages)')}
+            message_additions = {
+                'conversation_id': 'TEXT',
+                'device_id': 'TEXT',
+                'metadata_json': "TEXT NOT NULL DEFAULT '{}'",
+            }
+            for name, definition in message_additions.items():
+                if name not in message_columns:
+                    con.execute(f'ALTER TABLE messages ADD COLUMN {name} {definition}')
             con.execute('CREATE INDEX IF NOT EXISTS idx_memories_subject_type ON memories(type,subject)')
             con.execute('CREATE INDEX IF NOT EXISTS idx_memories_temporal ON memories(occurred_at,created_at)')
             con.execute('CREATE INDEX IF NOT EXISTS idx_memory_usage_memory ON memory_usage(memory_id,used_at)')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id,created_at)')
 
-    def add_message(self, role, content):
+    def add_message(self, role, content, *, conversation_id=None, device_id=None, metadata=None):
         message_id = str(uuid.uuid4())
         with self.lock, self.con() as con:
-            con.execute('INSERT INTO messages VALUES(?,?,?,?)', (message_id, role, content, now()))
+            con.execute(
+                '''INSERT INTO messages(id,role,content,created_at,conversation_id,device_id,metadata_json)
+                   VALUES(?,?,?,?,?,?,?)''',
+                (message_id, role, content, now(), conversation_id, device_id, json.dumps(metadata or {}, default=str)),
+            )
         return message_id
 
-    def recent_messages(self, limit=20):
+    def recent_messages(self, limit=20, *, conversation_id=None):
         with self.con() as con:
-            rows = con.execute('SELECT role,content FROM messages ORDER BY created_at DESC LIMIT ?', (limit,)).fetchall()
+            if conversation_id:
+                rows = con.execute(
+                    'SELECT role,content FROM messages WHERE conversation_id=? ORDER BY created_at DESC LIMIT ?',
+                    (conversation_id, limit),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    'SELECT role,content FROM messages ORDER BY created_at DESC LIMIT ?',
+                    (limit,),
+                ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     def remember(

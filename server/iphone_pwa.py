@@ -21,6 +21,7 @@ class OwnerEnrollBody(BaseModel):
 
 class VoiceTurnBody(BaseModel):
     transcript: str = Field(min_length=1, max_length=8000)
+    conversation_id: str | None = Field(default=None, max_length=80)
 
 
 class BargeBody(BaseModel):
@@ -39,6 +40,14 @@ class QualificationStartBody(BaseModel):
 
 class QualificationTakeoverBody(QualificationStartBody):
     confirm: Literal[True]
+
+
+class ConversationCreateBody(BaseModel):
+    title: str = Field(default='New conversation', max_length=120)
+
+
+class ConversationRenameBody(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class IphonePwaState:
@@ -98,6 +107,40 @@ def iphone_pwa_router(runtime, settings):
         if events:
             events.emit(name, **payload)
 
+    def resolve_conversation(device_id: str, conversation_id: str | None = None):
+        if continuity is None:
+            return None
+        if conversation_id:
+            thread = continuity.thread(conversation_id)
+            if not thread or thread.get('closed_at'):
+                raise HTTPException(404, 'Conversation not found')
+            continuity.set_active(device_id, thread['id'])
+            return thread
+        bundle = continuity.resume(device_id, event_limit=100)
+        return bundle.get('thread')
+
+    def append_conversation(thread, device_id: str, kind: str, text: str, **payload):
+        if not thread or continuity is None:
+            return
+        continuity.append(
+            thread['id'],
+            device_id=device_id,
+            kind=kind,
+            payload={'text': text, **payload},
+        )
+
+    def model_history(thread):
+        if not thread or continuity is None:
+            return None
+        roles = {'user_message': 'user', 'assistant_message': 'assistant'}
+        history = []
+        for event in continuity.events_for_thread(thread['id'], limit=1000):
+            role = roles.get(event.get('kind'))
+            text = str(event.get('payload', {}).get('text') or '').strip()
+            if role and text:
+                history.append({'role': role, 'content': text})
+        return history[-16:]
+
     @router.get('', response_class=HTMLResponse, include_in_schema=False)
     @router.get('/', response_class=HTMLResponse, include_in_schema=False)
     def iphone_home():
@@ -126,6 +169,12 @@ def iphone_pwa_router(runtime, settings):
                     'evidence_class': active['evidence_class'],
                     'started_at': active.get('started_at'),
                 }
+        conversation = None
+        conversations = []
+        if continuity is not None:
+            bundle = continuity.resume(device_id, event_limit=100)
+            conversation = bundle
+            conversations = continuity.list_threads(limit=50)
         memory_count = 0
         second_brain = runtime.get('second_brain')
         if second_brain is not None:
@@ -139,6 +188,8 @@ def iphone_pwa_router(runtime, settings):
             'voice_qualification_available': recorder is not None,
             'active_qualification': active_qualification,
             'continuity_available': continuity is not None,
+            'conversation': conversation,
+            'conversations': conversations,
             'memory_count': memory_count,
             'model': runtime['models'].status() if runtime.get('models') else {'state': 'unavailable'},
         }
@@ -154,7 +205,14 @@ def iphone_pwa_router(runtime, settings):
         device, token = registry.enroll(body.name.strip() or 'Owner iPhone', 'ios-pwa')
         if continuity:
             continuity.resume(device['id'])
-        cookie_kwargs = dict(httponly=True, secure=True, samesite='strict', path='/iphone', max_age=60 * 60 * 24 * 30)
+        cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
+        cookie_kwargs = dict(
+            httponly=True,
+            secure=True,
+            samesite='strict',
+            path='/iphone',
+            max_age=60 * 60 * 24 * cookie_days,
+        )
         response.set_cookie('pa_device', device['id'], **cookie_kwargs)
         response.set_cookie('pa_token', token, **cookie_kwargs)
         emit('iphone.enrolled', device_id=device['id'], platform='ios-pwa')
@@ -174,18 +232,37 @@ def iphone_pwa_router(runtime, settings):
     ):
         device_id = auth_device(pa_device, pa_token)
         transcript = body.transcript.strip()
+        conversation = resolve_conversation(device_id, body.conversation_id)
+        conversation_history = model_history(conversation)
+        append_conversation(conversation, device_id, 'user_message', transcript)
+        if conversation and conversation['title'] in {'New conversation', 'Current context', 'Primary Personal AI Context'}:
+            continuity.rename_thread(conversation['id'], transcript[:72])
+            conversation = continuity.thread(conversation['id'])
         cancel_event = state.begin_turn(device_id)
         emit('state', state='understanding', device_id=device_id, source='iphone-pwa')
         emit('voice.transcript', text=transcript, device_id=device_id, source='iphone-pwa')
         try:
-            reply = await asyncio.to_thread(executor.chat, transcript, cancel_event=cancel_event, device_id=device_id)
+            reply = await asyncio.to_thread(
+                executor.chat,
+                transcript,
+                cancel_event=cancel_event,
+                device_id=device_id,
+                conversation_id=conversation['id'] if conversation else None,
+                conversation_history=conversation_history,
+            )
             if cancel_event.is_set():
                 emit('voice.turn.cancelled', device_id=device_id, source='iphone-pwa')
                 emit('state', state='listening', device_id=device_id, source='iphone-pwa')
                 raise HTTPException(409, 'turn_cancelled')
             emit('voice.reply', text=reply, device_id=device_id, source='iphone-pwa')
+            append_conversation(conversation, device_id, 'assistant_message', reply)
             emit('state', state='speaking', device_id=device_id, source='iphone-pwa')
-            return {'reply': reply, 'device_id': device_id}
+            return {
+                'reply': reply,
+                'device_id': device_id,
+                'conversation_id': conversation['id'] if conversation else None,
+                'conversation_title': conversation['title'] if conversation else None,
+            }
         except ExecutionCancelled:
             emit('voice.turn.cancelled', device_id=device_id, source='iphone-pwa')
             emit('state', state='listening', device_id=device_id, source='iphone-pwa')
@@ -195,6 +272,7 @@ def iphone_pwa_router(runtime, settings):
                 pending_approvals[exc.approval_id] = {
                     'device_id': device_id,
                     'tool': exc.tool_name,
+                    'conversation_id': conversation['id'] if conversation else None,
                 }
             emit(
                 'state',
@@ -214,6 +292,7 @@ def iphone_pwa_router(runtime, settings):
                     'expires_at': exc.expires_at,
                 },
                 'device_id': device_id,
+                'conversation_id': conversation['id'] if conversation else None,
             })
         except ModelError as exc:
             emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
@@ -239,7 +318,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
-        claim_pending_approval(approval_id, device_id)
+        pending = claim_pending_approval(approval_id, device_id)
         emit('state', state='acting', device_id=device_id, source='iphone-pwa')
         try:
             reply = await asyncio.to_thread(executor.approve, approval_id)
@@ -260,6 +339,9 @@ def iphone_pwa_router(runtime, settings):
             with pending_approvals_lock:
                 pending_approvals.pop(approval_id, None)
         emit('voice.reply', text=reply, device_id=device_id, source='iphone-pwa')
+        conversation_id = pending.get('conversation_id')
+        if conversation_id and continuity is not None:
+            append_conversation(continuity.thread(conversation_id), device_id, 'assistant_message', reply)
         emit('state', state='speaking', device_id=device_id, source='iphone-pwa')
         return {'status': 'approved', 'reply': reply, 'device_id': device_id}
 
@@ -270,14 +352,87 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
-        claim_pending_approval(approval_id, device_id)
+        pending = claim_pending_approval(approval_id, device_id)
         try:
             reply = executor.reject(approval_id)
         finally:
             with pending_approvals_lock:
                 pending_approvals.pop(approval_id, None)
         emit('state', state='listening', device_id=device_id, source='iphone-pwa')
+        conversation_id = pending.get('conversation_id')
+        if conversation_id and continuity is not None:
+            continuity.append(
+                conversation_id,
+                device_id=device_id,
+                kind='approval_rejected',
+                payload={'text': reply, 'approval_id': approval_id},
+            )
         return {'status': 'rejected', 'reply': reply, 'device_id': device_id}
+
+    @router.get('/api/conversations')
+    def conversation_list(
+        q: str = '',
+        limit: int = 50,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        if continuity is None:
+            raise HTTPException(503, 'Conversation continuity is unavailable')
+        active = continuity.active_for_device(device_id)
+        return {
+            'active_conversation_id': active['id'] if active else None,
+            'conversations': continuity.list_threads(q, limit=max(1, min(limit, 100))),
+        }
+
+    @router.post('/api/conversations')
+    def conversation_create(
+        body: ConversationCreateBody,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        if continuity is None:
+            raise HTTPException(503, 'Conversation continuity is unavailable')
+        thread_id = continuity.create_thread(body.title.strip() or 'New conversation', device_id=device_id)
+        return {'conversation': continuity.thread(thread_id), 'events': []}
+
+    @router.get('/api/conversations/{conversation_id}')
+    def conversation_get(
+        conversation_id: str,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        thread = resolve_conversation(device_id, conversation_id)
+        return {
+            'conversation': thread,
+            'events': continuity.events_for_thread(thread['id'], limit=500),
+        }
+
+    @router.post('/api/conversations/{conversation_id}/activate')
+    def conversation_activate(
+        conversation_id: str,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        thread = resolve_conversation(device_id, conversation_id)
+        return {
+            'conversation': thread,
+            'events': continuity.events_for_thread(thread['id'], limit=500),
+        }
+
+    @router.patch('/api/conversations/{conversation_id}')
+    def conversation_rename(
+        conversation_id: str,
+        body: ConversationRenameBody,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        resolve_conversation(device_id, conversation_id)
+        return {'conversation': continuity.rename_thread(conversation_id, body.title)}
 
     @router.post('/api/voice/barge')
     def voice_barge(
@@ -363,9 +518,15 @@ def iphone_pwa_router(runtime, settings):
         pa_device: str | None = Cookie(default=None),
         pa_token: str | None = Cookie(default=None),
     ):
-        auth_device(pa_device, pa_token)
+        device_id = auth_device(pa_device, pa_token)
         if recorder is None:
             raise HTTPException(503, 'Voice qualification recorder unavailable')
+        active = recorder.active_session()
+        if active and active.get('environment', {}).get('device_id') != device_id:
+            raise HTTPException(409, {
+                'code': 'qualification_session_owned_by_other_device',
+                'message': 'This evidence session belongs to another trusted browser and was left running.',
+            })
         try:
             return recorder.stop_session()
         except RuntimeError as exc:

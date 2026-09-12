@@ -116,3 +116,20 @@ def test_owner_takeover_closes_stale_session_without_deleting_evidence(tmp_path:
         environment={'device_id': 'current-browser'},
     )
     assert replacement != stale_id
+
+
+def test_active_qualification_only_records_its_own_device_events(tmp_path: Path):
+    events = EventBus()
+    recorder = VoiceQualificationRecorder(tmp_path / 'qualification.sqlite3', events=events)
+    recorder.start_session(
+        evidence_class='real_device',
+        environment={'device_id': 'iphone-1', 'platform': 'ios-pwa'},
+    )
+
+    events.emit('voice.transcript', text='included', device_id='iphone-1')
+    events.emit('voice.reply', text='included reply', device_id='iphone-1')
+    events.emit('voice.transcript', text='excluded', device_id='iphone-2')
+    events.emit('voice.reply', text='excluded reply', device_id='iphone-2')
+    summary = recorder.stop_session()
+
+    assert summary['turns'] == 1

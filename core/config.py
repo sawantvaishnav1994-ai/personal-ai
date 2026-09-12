@@ -62,6 +62,7 @@ class Settings:
     cloud_allowed_origins:tuple[str,...]=tuple(x.strip().rstrip('/') for x in os.getenv('CLOUD_ALLOWED_ORIGINS','').split(',') if x.strip())
     iphone_owner_enrollment_code:str=os.getenv('PERSONAL_AI_IPHONE_ENROLLMENT_CODE','').strip()
     iphone_pwa_allow_insecure:bool=env_bool('PERSONAL_AI_IPHONE_ALLOW_INSECURE',False)
+    iphone_device_cookie_days:int=int(os.getenv('PERSONAL_AI_DEVICE_COOKIE_DAYS','365'))
     browser_headless:bool=env_bool('BROWSER_HEADLESS',False)
     vault_password:str=os.getenv('PERSONAL_AI_VAULT_PASSWORD','')
     google_client_id:str=os.getenv('GOOGLE_CLIENT_ID','')

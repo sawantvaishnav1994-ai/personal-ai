@@ -169,6 +169,13 @@ class VoiceQualificationRecorder:
     def _on_event(self, event: dict):
         if not self.session_id:
             return
+        active = self.active_session()
+        if not active:
+            return
+        expected_device = active.get('environment', {}).get('device_id')
+        event_device = event.get('device_id')
+        if expected_device and event_device and event_device != expected_device:
+            return
         name = str(event.get('event', ''))
         payload = {key: value for key, value in event.items() if key != 'event'}
         self._record(name, payload)

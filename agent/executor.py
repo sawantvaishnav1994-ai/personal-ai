@@ -47,7 +47,7 @@ class AgentExecutor:
         if cancel_event is not None and cancel_event.is_set():
             raise ExecutionCancelled('execution cancelled by the user')
 
-    def chat(self, text, *, confirmed_tools: set[str] | None = None, cancel_event=None, device_id: str | None = None):
+    def chat(self, text, *, confirmed_tools: set[str] | None = None, cancel_event=None, device_id: str | None = None, conversation_id: str | None = None, conversation_history: list[dict] | None = None):
         turn_start = time.perf_counter()
         try:
             return self._chat(
@@ -55,6 +55,8 @@ class AgentExecutor:
                 confirmed_tools=confirmed_tools,
                 cancel_event=cancel_event,
                 device_id=device_id,
+                conversation_id=conversation_id,
+                conversation_history=conversation_history,
             )
         except ExecutionCancelled:
             self.memory.audit('agent', 'cancelled', {'source': 'cooperative_cancel', 'device_id': device_id})
@@ -64,19 +66,27 @@ class AgentExecutor:
         finally:
             self._observe('agent.turn_ms', turn_start)
 
-    def _chat(self, text, *, confirmed_tools=None, cancel_event=None, device_id=None):
+    def _chat(self, text, *, confirmed_tools=None, cancel_event=None, device_id=None, conversation_id=None, conversation_history=None):
         if confirmed_tools:
             raise PermissionError('tool-name approvals are disabled; use the execution-scoped approval flow')
         self._check_cancel(cancel_event)
-        self.memory.add_message('user', text)
-        self.events.emit('conversation.user', text=text, device_id=device_id)
+        self.memory.add_message('user', text, conversation_id=conversation_id, device_id=device_id)
+        self.events.emit('conversation.user', text=text, device_id=device_id, conversation_id=conversation_id)
         if self.second_brain:
             self.events.emit('state', state='memory')
             memories = self.second_brain.context(text, 6)
         else:
             memories = []
         self._check_cancel(cancel_event)
-        history = self.memory.recent_messages(16)
+        if conversation_history is None:
+            history = self.memory.recent_messages(16, conversation_id=conversation_id)
+        else:
+            history = [
+                {'role': item['role'], 'content': item['content']}
+                for item in conversation_history[-15:]
+                if item.get('role') in {'user', 'assistant'} and item.get('content')
+            ]
+            history.append({'role': 'user', 'content': text})
         context = json.dumps(memories, default=str)[:8000] if memories else ''
         self.events.emit('state', state='thinking')
         start = time.perf_counter()
@@ -95,8 +105,8 @@ class AgentExecutor:
             answer = self.models.chat(text, history=history[:-1])
             self._observe('model.chat_ms', start)
             self._check_cancel(cancel_event)
-            self.memory.add_message('assistant', answer)
-            self.events.emit('conversation.assistant', text=answer, device_id=device_id)
+            self.memory.add_message('assistant', answer, conversation_id=conversation_id, device_id=device_id)
+            self.events.emit('conversation.assistant', text=answer, device_id=device_id, conversation_id=conversation_id)
             self.events.emit('state', state='speaking')
             return answer
         execution_id = str(uuid.uuid4())
@@ -109,9 +119,10 @@ class AgentExecutor:
             history,
             cancel_event=cancel_event,
             device_id=device_id,
+            conversation_id=conversation_id,
         )
 
-    def _continue(self, execution_id, text, plan, index, results, history, *, cancel_event=None, device_id=None):
+    def _continue(self, execution_id, text, plan, index, results, history, *, cancel_event=None, device_id=None, conversation_id=None):
         steps = plan.get('steps', [])
         while index < len(steps):
             self._check_cancel(cancel_event)
@@ -131,6 +142,7 @@ class AgentExecutor:
                         'history': history,
                         'cancel_event': cancel_event,
                         'device_id': device_id,
+                        'conversation_id': conversation_id,
                     }
                 audit = {
                     'approval_id': ticket.id,
@@ -159,6 +171,7 @@ class AgentExecutor:
             history,
             cancel_event=cancel_event,
             device_id=device_id,
+            conversation_id=conversation_id,
         )
 
     def _execute_step(self, execution_id, index, tool, params, results, *, cancel_event=None):
@@ -249,6 +262,7 @@ class AgentExecutor:
             paused['history'],
             cancel_event=cancel_event,
             device_id=paused.get('device_id'),
+            conversation_id=paused.get('conversation_id'),
         )
 
     def reject(self, approval_id: str):
@@ -278,7 +292,7 @@ class AgentExecutor:
         self.events.emit('state', state='idle')
         return 'Action cancelled.'
 
-    def _finalize(self, text, results, history, *, cancel_event=None, device_id=None):
+    def _finalize(self, text, results, history, *, cancel_event=None, device_id=None, conversation_id=None):
         self._check_cancel(cancel_event)
         start = time.perf_counter()
         if results:
@@ -290,8 +304,8 @@ class AgentExecutor:
             answer = self.models.chat(text, history=history[:-1])
         self._observe('model.chat_ms', start)
         self._check_cancel(cancel_event)
-        self.memory.add_message('assistant', answer)
-        self.events.emit('conversation.assistant', text=answer, device_id=device_id)
+        self.memory.add_message('assistant', answer, conversation_id=conversation_id, device_id=device_id)
+        self.events.emit('conversation.assistant', text=answer, device_id=device_id, conversation_id=conversation_id)
         if self.second_brain:
             for candidate in self.second_brain.extract_candidates(text, answer):
                 self.second_brain.remember(candidate)
