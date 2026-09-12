@@ -39,7 +39,7 @@ def build_runtime():
     preferences = Preferences(settings.data_dir / 'preferences.json')
     backups = BackupService(settings.data_dir)
     memory = MemoryStore(settings.data_dir / 'assistant.sqlite3')
-    models = ModelRouter(settings)
+    models = ModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     second_brain = SecondBrain(memory, models, vector)
 
@@ -171,8 +171,13 @@ def build_runtime():
     runtime['capability_scenarios'] = scenarios
     benchmark_tools.register(tools, benchmark, scenarios)
 
-    def append_continuity(kind, text, device_id=None):
+    def append_continuity(kind, text, device_id=None, conversation_id=None):
         if not text:
+            return
+        # Thread-aware surfaces persist directly so they can atomically pair the
+        # UI event with the selected conversation. Legacy/device commands still
+        # flow through this event bridge using the device's active thread.
+        if conversation_id:
             return
         source_device = str(device_id or 'desktop')
         try:
@@ -191,11 +196,21 @@ def build_runtime():
 
     events.subscribe(
         'conversation.user',
-        lambda event: append_continuity('user_message', event.get('text'), event.get('device_id')),
+        lambda event: append_continuity(
+            'user_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
+        ),
     )
     events.subscribe(
         'conversation.assistant',
-        lambda event: append_continuity('assistant_message', event.get('text'), event.get('device_id')),
+        lambda event: append_continuity(
+            'assistant_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
+        ),
     )
 
     events.subscribe(

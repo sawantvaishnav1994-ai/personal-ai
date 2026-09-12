@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from app.main import build_runtime
 from core.config import settings
 from server.api import create_app
+from server.iphone_pwa import iphone_pwa_router
 
 runtime=build_runtime()
 
@@ -26,4 +27,5 @@ app=create_app(
     automations=runtime['automations'],
     runtime=runtime,
 )
+app.include_router(iphone_pwa_router(runtime, settings))
 app.router.lifespan_context=lifespan
