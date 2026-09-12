@@ -91,3 +91,28 @@ def test_active_session_survives_recorder_restart(tmp_path: Path):
     assert active['id'] == session_id
     assert active['environment']['device_id'] == 'iphone-1'
     assert restarted.stop_session()['session_id'] == session_id
+
+
+def test_owner_takeover_closes_stale_session_without_deleting_evidence(tmp_path: Path):
+    path = tmp_path / 'qualification.sqlite3'
+    events = EventBus()
+    recorder = VoiceQualificationRecorder(path, events=events)
+    stale_id = recorder.start_session(
+        evidence_class='real_device',
+        environment={'device_id': 'old-browser'},
+    )
+    events.emit('voice.transcript', text='retained turn')
+
+    closed = recorder.close_active_sessions(reason='Owner-confirmed takeover test')
+
+    assert closed == [stale_id]
+    assert recorder.active_session() is None
+    assert recorder.summary(stale_id)['turns'] == 1
+    stale = next(item for item in recorder.sessions() if item['id'] == stale_id)
+    assert stale['completed_at'] is not None
+    assert 'Owner-confirmed takeover test' in stale['notes']
+    replacement = recorder.start_session(
+        evidence_class='real_device',
+        environment={'device_id': 'current-browser'},
+    )
+    assert replacement != stale_id

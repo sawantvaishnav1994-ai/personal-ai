@@ -60,6 +60,11 @@ class Recorder:
             raise RuntimeError('no active voice qualification session')
         self.started = False
         return {'turns': 1, 'barge_trials': 0, 'barge_success_rate': 0.0, 'passed': False}
+    def close_active_sessions(self, *, reason):
+        closed = ['session-1'] if self.started else []
+        self.started = False
+        self.closed_reason = reason
+        return closed
     def sessions(self):
         return [{'id': 'session-1'}]
 
@@ -201,6 +206,26 @@ def test_status_restores_the_active_session_for_hands_free_ui(tmp_path):
     assert status.json()['active_qualification']['session_id'] == 'session-1'
 
 
+def test_trusted_owner_can_explicitly_replace_other_device_stale_session(tmp_path):
+    client, runtime = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    recorder = runtime['voice_qualification']
+    recorder.started = True
+    recorder.environment = {'device_id': 'old-browser'}
+
+    blocked = client.post('/iphone/api/qualification/start', json={'environment': {}})
+    assert blocked.status_code == 409
+    takeover = client.post('/iphone/api/qualification/takeover', json={
+        'confirm': True,
+        'environment': {'noise': 'quiet'},
+    })
+
+    assert takeover.status_code == 200
+    assert takeover.json()['closed_session_ids'] == ['session-1']
+    assert recorder.environment['device_id'] == 'iphone-1'
+    assert 'Owner-confirmed takeover' in recorder.closed_reason
+
+
 def test_home_uses_one_touch_voice_instead_of_four_test_buttons(tmp_path):
     client, _ = make_client(tmp_path)
     page = client.get('/iphone/')
@@ -211,6 +236,7 @@ def test_home_uses_one_touch_voice_instead_of_four_test_buttons(tmp_path):
     assert '>Start Session<' not in page.text
     assert '>Start Listening<' not in page.text
     assert '>Interrupt<' not in page.text
+    assert 'Continue here' in page.text
 
 
 def test_client_tts_failure_is_recorded_as_voice_error(tmp_path):

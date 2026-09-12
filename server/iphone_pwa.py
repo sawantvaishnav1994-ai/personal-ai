@@ -37,6 +37,10 @@ class QualificationStartBody(BaseModel):
     notes: str = 'iPhone Safari physical voice qualification'
 
 
+class QualificationTakeoverBody(QualificationStartBody):
+    confirm: Literal[True]
+
+
 class IphonePwaState:
     def __init__(self):
         self._lock = threading.RLock()
@@ -368,6 +372,49 @@ def iphone_pwa_router(runtime, settings):
             if str(exc) != 'no active voice qualification session':
                 raise
             return {'ok': True, 'status': 'already_stopped', 'message': 'Session already stopped'}
+
+    @router.post('/api/qualification/takeover')
+    def qualification_takeover(
+        body: QualificationTakeoverBody,
+        request: Request,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        if recorder is None:
+            raise HTTPException(503, 'Voice qualification recorder unavailable')
+        close_sessions = getattr(recorder, 'close_active_sessions', None)
+        if not callable(close_sessions):
+            raise HTTPException(503, 'Qualification session recovery is unavailable')
+        closed_session_ids = close_sessions(
+            reason=f'Owner-confirmed takeover by trusted device {device_id}'
+        )
+        environment = {
+            **body.environment,
+            'device_id': device_id,
+            'platform': 'ios-pwa',
+            'user_agent': request.headers.get('user-agent', ''),
+            'transport': 'https-pwa',
+        }
+        session_id = recorder.start_session(
+            evidence_class='real_device',
+            environment=environment,
+            notes=body.notes,
+        )
+        emit(
+            'qualification.session_takeover',
+            device_id=device_id,
+            closed_session_ids=closed_session_ids,
+            session_id=session_id,
+            source='iphone-pwa',
+        )
+        emit('state', state='listening', device_id=device_id, source='iphone-pwa')
+        return {
+            'status': 'started',
+            'session_id': session_id,
+            'evidence_class': 'real_device',
+            'closed_session_ids': closed_session_ids,
+        }
 
     @router.get('/api/qualification/sessions')
     def qualification_sessions(

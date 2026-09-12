@@ -137,6 +137,25 @@ class VoiceQualificationRecorder:
         self._barge_started_at = None
         return self.summary(session_id)
 
+    def close_active_sessions(self, *, reason: str = 'Owner-confirmed trusted-device takeover'):
+        """Close every unfinished session without deleting its retained evidence."""
+        completed_at = now()
+        with self._con() as con:
+            rows = con.execute(
+                'SELECT id,notes FROM voice_qualification_sessions WHERE completed_at IS NULL ORDER BY started_at'
+            ).fetchall()
+            for row in rows:
+                existing = str(row['notes'] or '').strip()
+                note = f'{existing}\n{reason}'.strip()
+                con.execute(
+                    'UPDATE voice_qualification_sessions SET completed_at=?,notes=? WHERE id=?',
+                    (completed_at, note, row['id']),
+                )
+        self.session_id = None
+        self._turn = None
+        self._barge_started_at = None
+        return [row['id'] for row in rows]
+
     def _record(self, event: str, payload: dict):
         if not self.session_id:
             return
