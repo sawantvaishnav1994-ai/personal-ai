@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import threading
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
@@ -24,6 +25,11 @@ class VoiceTurnBody(BaseModel):
 
 class BargeBody(BaseModel):
     speaking: bool = True
+
+
+class VoiceClientEventBody(BaseModel):
+    event: Literal['tts_started', 'tts_completed', 'tts_error']
+    detail: str = Field(default='', max_length=160)
 
 
 class QualificationStartBody(BaseModel):
@@ -105,11 +111,29 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        active_qualification = None
+        if recorder is not None:
+            active = recorder.active_session()
+            if active and active.get('environment', {}).get('device_id') == device_id:
+                active_qualification = {
+                    'session_id': active['id'],
+                    'evidence_class': active['evidence_class'],
+                    'started_at': active.get('started_at'),
+                }
+        memory_count = 0
+        second_brain = runtime.get('second_brain')
+        if second_brain is not None:
+            try:
+                memory_count = len(second_brain.graph().get('nodes', []))
+            except Exception:
+                memory_count = 0
         return {
             'ok': True,
             'device_id': device_id,
             'voice_qualification_available': recorder is not None,
+            'active_qualification': active_qualification,
             'continuity_available': continuity is not None,
+            'memory_count': memory_count,
             'model': runtime['models'].status() if runtime.get('models') else {'state': 'unavailable'},
         }
 
@@ -180,6 +204,18 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.turn.cancelled', device_id=device_id, source='iphone-pwa')
             emit('state', state='listening', device_id=device_id, source='iphone-pwa')
         return {'ok': True, 'cancelled_server_turn': cancelled}
+
+    @router.post('/api/voice/client-event')
+    def voice_client_event(
+        body: VoiceClientEventBody,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        emit(f'voice.client.{body.event}', device_id=device_id, source='iphone-pwa', detail=body.detail)
+        if body.event == 'tts_error':
+            emit('voice.error', error='tts_error', detail=body.detail, device_id=device_id, source='iphone-pwa')
+        return {'ok': True}
 
     @router.post('/api/qualification/start')
     def qualification_start(

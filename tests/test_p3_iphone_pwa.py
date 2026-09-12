@@ -146,6 +146,46 @@ def test_repeated_start_resumes_active_session_after_page_refresh(tmp_path):
     }
 
 
+def test_status_restores_the_active_session_for_hands_free_ui(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    client.post('/iphone/api/qualification/start', json={'environment': {}})
+
+    status = client.get('/iphone/api/status')
+
+    assert status.status_code == 200
+    assert status.json()['active_qualification']['session_id'] == 'session-1'
+
+
+def test_home_uses_one_touch_voice_instead_of_four_test_buttons(tmp_path):
+    client, _ = make_client(tmp_path)
+    page = client.get('/iphone/')
+
+    assert page.status_code == 200
+    assert 'id="micButton"' in page.text
+    assert 'Tap once to talk continuously' in page.text
+    assert '>Start Session<' not in page.text
+    assert '>Start Listening<' not in page.text
+    assert '>Interrupt<' not in page.text
+
+
+def test_client_tts_failure_is_recorded_as_voice_error(tmp_path):
+    client, runtime = make_client(tmp_path)
+    errors = []
+    runtime['events'].subscribe('voice.error', errors.append)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    client.post('/iphone/api/qualification/start', json={'environment': {}})
+
+    response = client.post('/iphone/api/voice/client-event', json={
+        'event': 'tts_error',
+        'detail': 'start_timeout',
+    })
+
+    assert response.status_code == 200
+    assert errors[0]['error'] == 'tts_error'
+    assert errors[0]['detail'] == 'start_timeout'
+
+
 def test_model_unavailable_is_a_safe_explicit_state(tmp_path):
     client, runtime = make_client(tmp_path)
 

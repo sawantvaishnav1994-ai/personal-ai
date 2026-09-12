@@ -14,6 +14,8 @@ def test_simulated_voice_session_records_latency_and_barge(tmp_path: Path):
 
     events.emit('voice.transcript', text='hello')
     events.emit('voice.reply', text='hi')
+    events.emit('voice.client.tts_started')
+    events.emit('voice.client.tts_completed')
     events.emit('voice.barge_in')
     events.emit('voice.turn.cancelled')
     events.emit('state', state='listening')
@@ -26,6 +28,9 @@ def test_simulated_voice_session_records_latency_and_barge(tmp_path: Path):
     assert summary['barge_success_rate'] == 1.0
     assert summary['p95_transcript_to_reply_ms'] is not None
     assert summary['p95_barge_to_listening_ms'] is not None
+    assert summary['tts_started'] == 1
+    assert summary['tts_completed'] == 1
+    assert summary['tts_errors'] == 0
     assert summary['errors'] == 0
     assert summary['passed'] is True
 

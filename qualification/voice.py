@@ -26,6 +26,9 @@ class VoiceQualificationSummary:
     p95_transcript_to_reply_ms: float | None
     p50_barge_to_listening_ms: float | None
     p95_barge_to_listening_ms: float | None
+    tts_started: int
+    tts_completed: int
+    tts_errors: int
     errors: int
     passed: bool
     failed_gates: list[str]
@@ -50,7 +53,11 @@ class VoiceQualificationRecorder:
         self._barge_started_at = None
         self._init_db()
         if events:
-            for name in ('voice.transcript', 'voice.reply', 'voice.barge_in', 'voice.turn.cancelled', 'voice.error', 'state'):
+            for name in (
+                'voice.transcript', 'voice.reply', 'voice.barge_in', 'voice.turn.cancelled',
+                'voice.client.tts_started', 'voice.client.tts_completed', 'voice.client.tts_error',
+                'voice.error', 'state',
+            ):
                 events.subscribe(name, self._on_event)
 
     def _con(self):
@@ -199,6 +206,9 @@ class VoiceQualificationRecorder:
         barge_successes = sum(1 for event in events if event['event'] == 'qualification.barge_success')
         transcript_reply = [float(event['payload']['latency_ms']) for event in events if event['event'] == 'qualification.transcript_to_reply']
         barge_listening = [float(event['payload']['latency_ms']) for event in events if event['event'] == 'qualification.barge_to_listening']
+        tts_started = sum(1 for event in events if event['event'] == 'voice.client.tts_started')
+        tts_completed = sum(1 for event in events if event['event'] == 'voice.client.tts_completed')
+        tts_errors = sum(1 for event in events if event['event'] == 'voice.client.tts_error')
         errors = sum(1 for event in events if event['event'] == 'voice.error')
         success_rate = round(barge_successes / barge_trials, 4) if barge_trials else None
         p95_reply = self._percentile(transcript_reply, 0.95)
@@ -234,6 +244,9 @@ class VoiceQualificationRecorder:
             p95_transcript_to_reply_ms=p95_reply,
             p50_barge_to_listening_ms=self._percentile(barge_listening, 0.50),
             p95_barge_to_listening_ms=p95_barge,
+            tts_started=tts_started,
+            tts_completed=tts_completed,
+            tts_errors=tts_errors,
             errors=errors,
             passed=not failed,
             failed_gates=failed,
