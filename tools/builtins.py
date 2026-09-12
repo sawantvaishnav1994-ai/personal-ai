@@ -38,7 +38,10 @@ def register_builtin_tools(
     system.register(registry)
     memory_tools.register(registry, memory, second_brain=second_brain)
     documents.register(registry, settings)
-    screen.register(registry, settings.data_dir)
+    # A cloud container has no owner's physical display. Advertising screenshot
+    # there lets a planner select an impossible X11 tool and leaks raw failures.
+    if not bool(getattr(settings, 'hosted_runtime', False)):
+        screen.register(registry, settings.data_dir)
     reminders.register(registry, memory)
     browser.register(registry)
     advanced_control.register(registry, settings)

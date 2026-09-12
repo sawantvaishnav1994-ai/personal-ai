@@ -163,6 +163,52 @@ def test_voice_tool_request_returns_owner_approval_instead_of_http_500(tmp_path)
     assert approved.json()['reply'] == 'The approved search completed.'
 
 
+def test_unavailable_tool_returns_safe_error_instead_of_http_500(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class BrokenToolExecutor:
+        def chat(self, *args, **kwargs):
+            raise RuntimeError('Library libxcb.so not found at internal path')
+
+    runtime['executor'] = BrokenToolExecutor()
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+
+    response = client.post('/iphone/api/voice/turn', json={'transcript': 'look at the server screen'})
+
+    assert response.status_code == 502
+    assert response.json()['detail']['code'] == 'tool_error'
+    assert 'libxcb' not in response.text
+
+
+def test_cancelled_http_error_is_not_reclassified_as_tool_error(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class CancelledExecutor:
+        def chat(self, text, cancel_event=None, **kwargs):
+            cancel_event.set()
+            return 'stale reply'
+
+    runtime['executor'] = CancelledExecutor()
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    response = client.post('/iphone/api/voice/turn', json={'transcript': 'cancel'})
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'turn_cancelled'
+
+
 def test_p3_session_records_ios_pwa_environment_but_does_not_self_award(tmp_path):
     client, runtime = make_client(tmp_path)
     client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})

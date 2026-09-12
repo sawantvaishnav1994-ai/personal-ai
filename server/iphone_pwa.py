@@ -310,6 +310,15 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
             emit('state', state='error', error=exc.code, device_id=device_id, source='iphone-pwa')
             raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
+        except HTTPException:
+            raise
+        except Exception:
+            emit('voice.error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            emit('state', state='error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            raise HTTPException(502, {
+                'code': 'tool_error',
+                'message': 'That tool is unavailable on this Personal AI surface. No action was completed.',
+            })
         finally:
             state.finish(device_id, cancel_event)
 
