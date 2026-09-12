@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
 
@@ -284,6 +284,84 @@ class MemoryStore:
                 'nodes': [dict(row) for row in con.execute('SELECT * FROM memories').fetchall()],
                 'edges': [dict(row) for row in con.execute('SELECT * FROM relations').fetchall()],
             }
+
+    def tree(self):
+        """Return parent/child memory structure without changing graph semantics."""
+        nodes = self.graph()['nodes']
+        by_id = {row['id']: {**row, 'children': []} for row in nodes}
+        roots = []
+        for item in by_id.values():
+            parent = by_id.get(item.get('parent_id'))
+            if parent:
+                parent['children'].append(item)
+            else:
+                roots.append(item)
+        key = lambda item: (str(item.get('type') or ''), str(item.get('subject') or '').lower())
+        def sort_branch(branch):
+            branch.sort(key=key)
+            for child in branch:
+                sort_branch(child['children'])
+        sort_branch(roots)
+        return roots
+
+    def delete_memory(self, memory_id: str):
+        """Permanently remove one owner-selected memory and its dependent evidence."""
+        with self.lock, self.con() as con:
+            if not con.execute('SELECT 1 FROM memories WHERE id=?', (memory_id,)).fetchone():
+                return False
+            con.execute('DELETE FROM relations WHERE source_id=? OR target_id=?', (memory_id, memory_id))
+            con.execute('DELETE FROM memory_usage WHERE memory_id=?', (memory_id,))
+            con.execute('DELETE FROM memory_conflicts WHERE older_id=? OR newer_id=?', (memory_id, memory_id))
+            con.execute('UPDATE memories SET parent_id=NULL WHERE parent_id=?', (memory_id,))
+            con.execute('UPDATE memories SET superseded_by=NULL WHERE superseded_by=?', (memory_id,))
+            con.execute('DELETE FROM memories WHERE id=?', (memory_id,))
+        return True
+
+    def apply_retention(self, *, older_than_days: int, sensitivity: str | None = None, dry_run: bool = True):
+        days = max(1, min(int(older_than_days), 36500))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        clauses = ['COALESCE(occurred_at,created_at)<?']
+        params = [cutoff]
+        if sensitivity:
+            clauses.append('sensitivity=?')
+            params.append(str(sensitivity))
+        where = ' AND '.join(clauses)
+        with self.lock, self.con() as con:
+            ids = [row['id'] for row in con.execute(f'SELECT id FROM memories WHERE {where}', params)]
+        if not dry_run:
+            for memory_id in ids:
+                self.delete_memory(memory_id)
+        return {'dry_run': bool(dry_run), 'older_than_days': days, 'matched': len(ids), 'memory_ids': ids}
+
+    def export(self, *, include_sensitive: bool = True):
+        with self.con() as con:
+            clause = '' if include_sensitive else " WHERE sensitivity NOT IN ('sensitive','secret')"
+            memories = [dict(row) for row in con.execute(f'SELECT * FROM memories{clause} ORDER BY created_at')]
+            allowed = {row['id'] for row in memories}
+            relations = [
+                dict(row) for row in con.execute('SELECT * FROM relations ORDER BY created_at')
+                if row['source_id'] in allowed and row['target_id'] in allowed
+            ]
+        return {'version': 1, 'exported_at': now(), 'memories': memories, 'relations': relations}
+
+    def audit_entries(self, category: str | None = None, limit: int = 200):
+        with self.con() as con:
+            if category:
+                rows = con.execute(
+                    'SELECT * FROM audit WHERE category=? ORDER BY created_at DESC LIMIT ?',
+                    (category, max(1, min(int(limit), 1000))),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    'SELECT * FROM audit ORDER BY created_at DESC LIMIT ?',
+                    (max(1, min(int(limit), 1000)),),
+                ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item['payload'] = json.loads(item.pop('payload_json') or '{}')
+            output.append(item)
+        return output
 
     def audit(self, category, action, payload=None):
         audit_id = str(uuid.uuid4())

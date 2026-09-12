@@ -70,6 +70,8 @@ class Provider:
     model: str
     private: bool
     capabilities: tuple[str, ...]
+    cost_rank: int
+    latency_rank: int
 
     @property
     def configured(self) -> bool:
@@ -95,6 +97,7 @@ class ModelRouter:
         self.timeout = max(1.0, float(getattr(settings, 'model_request_timeout_seconds', 120)))
         self.health_timeout = max(0.5, float(getattr(settings, 'model_health_timeout_seconds', 5)))
         self.allow_external_sensitive = bool(getattr(settings, 'allow_external_for_sensitive', False))
+        self.local_first = bool(getattr(settings, 'model_local_first', True))
         self.providers = self._build_providers()
         selected = str(getattr(settings, 'ai_provider', 'local') or 'local').strip().lower()
         self.primary = self._safe_provider_id(selected)
@@ -107,6 +110,10 @@ class ModelRouter:
             if (provider_id := self._safe_provider_id(str(item).strip().lower())) != 'invalid'
         )
         self._last = {'state': 'not_checked', 'provider': self.primary, 'checked_at': None, 'error_code': None}
+        self._health = {
+            provider_id: {'state': 'not_checked', 'error_code': None, 'checked_at': None, 'latency_ms': None}
+            for provider_id in self.providers
+        }
 
     def _safe_provider_id(self, value: str) -> str:
         """Normalize provider IDs without retaining arbitrary secret-like input."""
@@ -133,19 +140,19 @@ class ModelRouter:
             'self_hosted': Provider(
                 'self_hosted', self_hosted_url,
                 str(getattr(self.settings, 'self_hosted_ai_api_key', '') or ''),
-                self_hosted_model, True, ('chat', 'json', 'vision', 'embedding', 'audio'),
+                self_hosted_model, True, ('chat', 'json', 'vision', 'embedding', 'audio'), 2, 2,
             ),
             'openrouter': Provider(
                 'openrouter', 'https://openrouter.ai/api/v1',
                 str(getattr(self.settings, 'openrouter_api_key', '') or ''),
                 str(getattr(self.settings, 'openrouter_model', '') or ''),
-                False, ('chat', 'json', 'vision'),
+                False, ('chat', 'json', 'vision'), 2, 3,
             ),
             'openai': Provider(
                 'openai', str(getattr(self.settings, 'openai_base_url', 'https://api.openai.com/v1')).rstrip('/'),
                 str(getattr(self.settings, 'openai_api_key', '') or ''),
                 str(getattr(self.settings, 'openai_model', '') or ''),
-                False, ('chat', 'json', 'vision', 'embedding', 'audio'),
+                False, ('chat', 'json', 'vision', 'embedding', 'audio'), 4, 2,
             ),
             'gemini': Provider(
                 'gemini', str(getattr(
@@ -155,13 +162,17 @@ class ModelRouter:
                 )).rstrip('/'),
                 str(getattr(self.settings, 'gemini_api_key', '') or ''),
                 str(getattr(self.settings, 'gemini_model', '') or ''),
-                False, ('chat', 'json', 'vision'),
+                False, ('chat', 'json', 'vision'), 1, 1,
             ),
         }
 
     def _candidates(self, capability: str, sensitivity: str) -> list[Provider]:
         candidates = []
-        for provider_id in (self.primary, *self.fallbacks):
+        provider_order = [self.primary, *self.fallbacks]
+        local = self.providers.get('self_hosted')
+        if self.local_first and local and local.configured:
+            provider_order.insert(0, 'self_hosted')
+        for provider_id in provider_order:
             provider = self.providers.get(provider_id)
             if not provider or provider in candidates or capability not in provider.capabilities:
                 continue
@@ -188,8 +199,11 @@ class ModelRouter:
                 last_error = ModelUnavailable('Provider is not configured', provider=provider.id)
                 continue
             try:
+                started = time.perf_counter()
                 result = call(provider)
+                latency_ms = round((time.perf_counter() - started) * 1000, 3)
                 self._last = {'state': 'available', 'provider': provider.id, 'checked_at': time.time(), 'error_code': None}
+                self._health[provider.id] = {'state': 'available', 'error_code': None, 'checked_at': time.time(), 'latency_ms': latency_ms}
                 self._record('model.selected', provider=provider.id, model=provider.model, capability=capability, fallback=index > 0)
                 if index:
                     self._record('model.fallback', provider=provider.id, model=provider.model, capability=capability)
@@ -197,6 +211,7 @@ class ModelRouter:
             except ModelError as exc:
                 last_error = exc
                 self._last = {'state': 'unavailable', 'provider': provider.id, 'checked_at': time.time(), 'error_code': exc.code}
+                self._health[provider.id] = {'state': 'unavailable', 'error_code': exc.code, 'checked_at': time.time(), 'latency_ms': None}
                 self._record('model.error', provider=provider.id, capability=capability, error_code=exc.code)
         raise last_error or ModelUnavailable(provider=self.primary)
 
@@ -204,8 +219,8 @@ class ModelRouter:
         messages = [{'role': 'system', 'content': system}, *(history or []), {'role': 'user', 'content': prompt}]
         return self._run('chat', lambda provider: self._chat_call(provider, messages, temperature), sensitivity=sensitivity)
 
-    def json(self, prompt: str, *, system: str = 'Return valid JSON only.') -> dict:
-        raw = self.chat(prompt, system=system, temperature=.1).strip()
+    def json(self, prompt: str, *, system: str = 'Return valid JSON only.', sensitivity: str = 'internal') -> dict:
+        raw = self.chat(prompt, system=system, temperature=.1, sensitivity=sensitivity).strip()
         if raw.startswith('```'):
             raw = raw.replace('```json', '').replace('```', '').strip()
         try:
@@ -264,17 +279,30 @@ class ModelRouter:
     def status(self, *, probe: bool = False) -> dict:
         provider = self.providers.get(self.primary)
         configured = bool(provider and provider.configured and (provider.private or provider.api_key))
-        result = {'state': 'configured' if configured else 'not_configured', 'primary_provider': self.primary, 'fallback_providers': list(self.fallbacks), 'provider': provider.public() if provider else None, 'last_check': dict(self._last)}
+        result = {
+            'state': 'configured' if configured else 'not_configured',
+            'primary_provider': self.primary,
+            'fallback_providers': list(self.fallbacks),
+            'local_first': self.local_first,
+            'provider': provider.public() if provider else None,
+            'providers': [
+                {**item.public(), 'health': dict(self._health[item.id])}
+                for item in self.providers.values()
+            ],
+            'last_check': dict(self._last),
+        }
         if not probe or not configured:
             return result
         try:
             self._request(provider, 'GET', '/models', timeout=self.health_timeout)
             result['state'] = 'available'
             self._last = {'state': 'available', 'provider': provider.id, 'checked_at': time.time(), 'error_code': None}
+            self._health[provider.id] = {'state': 'available', 'error_code': None, 'checked_at': time.time(), 'latency_ms': None}
         except ModelError as exc:
             result['state'] = 'unavailable'
             result['error_code'] = exc.code
             self._last = {'state': 'unavailable', 'provider': provider.id, 'checked_at': time.time(), 'error_code': exc.code}
+            self._health[provider.id] = {'state': 'unavailable', 'error_code': exc.code, 'checked_at': time.time(), 'latency_ms': None}
         result['last_check'] = dict(self._last)
         return result
 
