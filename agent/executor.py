@@ -26,12 +26,13 @@ class ExecutionCancelled(RuntimeError):
 
 
 class AgentExecutor:
-    def __init__(self, *, models, tools, memory, events, second_brain=None, approval_ttl_seconds: int = 300, telemetry=None):
+    def __init__(self, *, models, tools, memory, events, second_brain=None, knowledge=None, approval_ttl_seconds: int = 300, telemetry=None):
         self.models = models
         self.tools = tools
         self.memory = memory
         self.events = events
         self.second_brain = second_brain
+        self.knowledge = knowledge
         self.planner = Planner(models, tools)
         self.approvals = ApprovalManager(approval_ttl_seconds)
         self._paused = {}
@@ -77,6 +78,10 @@ class AgentExecutor:
             memories = self.second_brain.context(text, 6)
         else:
             memories = []
+        knowledge_results = []
+        if self.knowledge:
+            self.events.emit('state', state='knowledge')
+            knowledge_results = self.knowledge.search(text, 6)
         self._check_cancel(cancel_event)
         if conversation_history is None:
             history = self.memory.recent_messages(16, conversation_id=conversation_id)
@@ -87,11 +92,29 @@ class AgentExecutor:
                 if item.get('role') in {'user', 'assistant'} and item.get('content')
             ]
             history.append({'role': 'user', 'content': text})
-        context = json.dumps(memories, default=str)[:8000] if memories else ''
+        grounding = {
+            'memories': memories,
+            'knowledge': [
+                {
+                    'excerpt': item.get('excerpt'),
+                    'citation': item.get('citation'),
+                    'access_class': item.get('access_class'),
+                }
+                for item in knowledge_results
+            ],
+        }
+        context = json.dumps(grounding, default=str)[:14000] if memories or knowledge_results else ''
+        sensitivity = 'internal'
+        if any(str(item.get('sensitivity', '')).lower() == 'secret' for item in memories):
+            sensitivity = 'secret'
+        elif any(str(item.get('sensitivity', '')).lower() == 'sensitive' for item in memories) or any(
+            str(item.get('access_class', '')).lower() == 'private' for item in knowledge_results
+        ):
+            sensitivity = 'sensitive'
         self.events.emit('state', state='thinking')
         start = time.perf_counter()
         try:
-            plan = self.planner.plan(text, context=context)
+            plan = self.planner.plan(text, context=context, sensitivity=sensitivity)
             self._observe('agent.plan_ms', start)
         except ExecutionCancelled:
             raise
@@ -102,7 +125,12 @@ class AgentExecutor:
             self._observe('agent.plan_ms', start)
             self._check_cancel(cancel_event)
             start = time.perf_counter()
-            answer = self.models.chat(text, history=history[:-1])
+            answer = self.models.chat(
+                text,
+                history=history[:-1],
+                system=self._grounded_system(context),
+                sensitivity=sensitivity,
+            )
             self._observe('model.chat_ms', start)
             self._check_cancel(cancel_event)
             self.memory.add_message('assistant', answer, conversation_id=conversation_id, device_id=device_id)
@@ -120,9 +148,21 @@ class AgentExecutor:
             cancel_event=cancel_event,
             device_id=device_id,
             conversation_id=conversation_id,
+            grounding=context,
+            sensitivity=sensitivity,
         )
 
-    def _continue(self, execution_id, text, plan, index, results, history, *, cancel_event=None, device_id=None, conversation_id=None):
+    @staticmethod
+    def _grounded_system(context: str):
+        if not context:
+            return 'You are Personal AI. Be helpful and concise. Never claim to remember or know a source that was not provided.'
+        return (
+            'You are Personal AI. Use only relevant retrieved context below. Clearly distinguish personal memory from knowledge. '
+            'When using knowledge, cite its title/source/chunk from the citation object. Never invent a memory or citation.\n'
+            f'RETRIEVED CONTEXT:\n{context}'
+        )
+
+    def _continue(self, execution_id, text, plan, index, results, history, *, cancel_event=None, device_id=None, conversation_id=None, grounding='', sensitivity='internal'):
         steps = plan.get('steps', [])
         while index < len(steps):
             self._check_cancel(cancel_event)
@@ -143,6 +183,8 @@ class AgentExecutor:
                         'cancel_event': cancel_event,
                         'device_id': device_id,
                         'conversation_id': conversation_id,
+                        'grounding': grounding,
+                        'sensitivity': sensitivity,
                     }
                 audit = {
                     'approval_id': ticket.id,
@@ -172,10 +214,14 @@ class AgentExecutor:
             cancel_event=cancel_event,
             device_id=device_id,
             conversation_id=conversation_id,
+            grounding=grounding,
+            sensitivity=sensitivity,
         )
 
     def _execute_step(self, execution_id, index, tool, params, results, *, cancel_event=None):
         self._check_cancel(cancel_event)
+        if getattr(self.tools, 'emergency_stop', False):
+            raise PermissionError('owner emergency stop is active')
         self.events.emit('state', state='acting', tool=tool.name, execution_id=execution_id)
         start = time.perf_counter()
         try:
@@ -263,6 +309,8 @@ class AgentExecutor:
             cancel_event=cancel_event,
             device_id=paused.get('device_id'),
             conversation_id=paused.get('conversation_id'),
+            grounding=paused.get('grounding', ''),
+            sensitivity=paused.get('sensitivity', 'internal'),
         )
 
     def reject(self, approval_id: str):
@@ -292,16 +340,22 @@ class AgentExecutor:
         self.events.emit('state', state='idle')
         return 'Action cancelled.'
 
-    def _finalize(self, text, results, history, *, cancel_event=None, device_id=None, conversation_id=None):
+    def _finalize(self, text, results, history, *, cancel_event=None, device_id=None, conversation_id=None, grounding='', sensitivity='internal'):
         self._check_cancel(cancel_event)
         start = time.perf_counter()
         if results:
             answer = self.models.chat(
-                f"User request: {text}\nTool results: {json.dumps(results, default=str)[:12000]}\nSummarize what was completed and mention any limitations.",
-                system='You are a concise personal AI assistant.',
+                f"User request: {text}\nTool results: {json.dumps(results, default=str)[:12000]}\nRetrieved context: {grounding}\nSummarize what was completed and mention any limitations.",
+                system=self._grounded_system(grounding),
+                sensitivity=sensitivity,
             )
         else:
-            answer = self.models.chat(text, history=history[:-1])
+            answer = self.models.chat(
+                text,
+                history=history[:-1],
+                system=self._grounded_system(grounding),
+                sensitivity=sensitivity,
+            )
         self._observe('model.chat_ms', start)
         self._check_cancel(cancel_event)
         self.memory.add_message('assistant', answer, conversation_id=conversation_id, device_id=device_id)

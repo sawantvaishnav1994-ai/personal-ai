@@ -14,8 +14,10 @@ from core.telemetry import Telemetry
 from devices.continuity import ContinuityService
 from devices.gateway import DeviceGateway
 from devices.registry import DeviceRegistry
+from future_intelligence.program import FutureIntelligenceProgram
 from integrations.plugins import PluginManifestRegistry
 from integrations.runtime import build_integrations
+from knowledge.store import KnowledgeStore
 from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from memory.vector_store import VectorStore
@@ -42,6 +44,10 @@ def build_runtime():
     models = ModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     second_brain = SecondBrain(memory, models, vector)
+    knowledge = KnowledgeStore(
+        settings.data_dir / 'knowledge.sqlite3',
+        settings.data_dir / 'knowledge' / 'objects',
+    )
 
     device_registry = DeviceRegistry(settings.data_dir / 'devices.sqlite3')
     device_gateway = DeviceGateway(device_registry, events)
@@ -84,6 +90,7 @@ def build_runtime():
         memory=memory,
         events=events,
         second_brain=second_brain,
+        knowledge=knowledge,
         telemetry=telemetry,
     )
 
@@ -116,6 +123,7 @@ def build_runtime():
         events=events,
         proactive_engine=proactive,
         continuity_service=continuity,
+        integration_adapters=adapters,
     )
 
     voice = RealtimeVoiceSession(models, executor, events)
@@ -139,6 +147,7 @@ def build_runtime():
         'memory': memory,
         'models': models,
         'second_brain': second_brain,
+        'knowledge': knowledge,
         'vector_store': vector,
         'device_registry': device_registry,
         'device_gateway': device_gateway,
@@ -165,6 +174,17 @@ def build_runtime():
         'primary_continuity_thread_id': primary_thread_id,
     }
     p3_qualification.runtime = runtime
+
+    future = FutureIntelligenceProgram(settings.data_dir / 'future-intelligence', runtime=runtime)
+    runtime['future_intelligence'] = future
+    runtime['everyday_intelligence'] = future.everyday
+    runtime['life_graph'] = future.life_graph
+    runtime['personal_operations'] = future.operations
+    runtime['world_understanding'] = future.world
+    runtime['personal_ai_everywhere'] = future.everywhere
+    runtime['hybrid_intelligence'] = future.hybrid
+    runtime['advanced_autonomy'] = future.autonomy
+
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark

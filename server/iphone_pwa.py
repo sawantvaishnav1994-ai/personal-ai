@@ -111,6 +111,8 @@ def iphone_pwa_router(runtime, settings):
             raise HTTPException(401, 'iPhone session is not enrolled or has been revoked')
         if not registry.is_active(device_id):
             raise HTTPException(401, 'iPhone device is revoked')
+        if hasattr(registry, 'authorize') and not registry.authorize(device_id, 'ai:chat'):
+            raise HTTPException(403, 'This device is not permitted to use conversation or voice')
         return device_id
 
     def emit(name: str, **payload):
@@ -218,6 +220,8 @@ def iphone_pwa_router(runtime, settings):
         if not hmac.compare_digest(body.code.strip(), expected):
             raise HTTPException(401, 'Invalid owner enrollment code')
         device, token = registry.enroll(body.name.strip() or 'Owner iPhone', 'ios-pwa')
+        if hasattr(registry, 'set_permissions') and hasattr(registry, 'OWNER_SCOPES'):
+            registry.set_permissions(device['id'], registry.OWNER_SCOPES)
         if continuity:
             continuity.resume(device['id'])
         cookie_kwargs = device_cookie_kwargs()
@@ -306,6 +310,15 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
             emit('state', state='error', error=exc.code, device_id=device_id, source='iphone-pwa')
             raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
+        except HTTPException:
+            raise
+        except Exception:
+            emit('voice.error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            emit('state', state='error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            raise HTTPException(502, {
+                'code': 'tool_error',
+                'message': 'That tool is unavailable on this Personal AI surface. No action was completed.',
+            })
         finally:
             state.finish(device_id, cancel_event)
 
