@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from agent.executor import ExecutionCancelled
+from agent.executor import ConfirmationRequired, ExecutionCancelled
 from models.router import ModelError
 
 
@@ -74,6 +74,8 @@ def iphone_pwa_router(runtime, settings):
     events = runtime.get('events')
     continuity = runtime.get('continuity')
     recorder = runtime.get('voice_qualification')
+    pending_approvals: dict[str, dict] = {}
+    pending_approvals_lock = threading.RLock()
 
     def require_https(request: Request):
         forwarded = request.headers.get('x-forwarded-proto', '').split(',')[0].strip().lower()
@@ -184,12 +186,94 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.turn.cancelled', device_id=device_id, source='iphone-pwa')
             emit('state', state='listening', device_id=device_id, source='iphone-pwa')
             raise HTTPException(409, 'turn_cancelled')
+        except ConfirmationRequired as exc:
+            with pending_approvals_lock:
+                pending_approvals[exc.approval_id] = {
+                    'device_id': device_id,
+                    'tool': exc.tool_name,
+                }
+            emit(
+                'state',
+                state='approval',
+                approval_id=exc.approval_id,
+                tool=exc.tool_name,
+                device_id=device_id,
+                source='iphone-pwa',
+            )
+            return JSONResponse(status_code=202, content={
+                'status': 'approval_required',
+                'reply': f'This action needs your approval before I can use {exc.tool_name}.',
+                'approval': {
+                    'id': exc.approval_id,
+                    'tool': exc.tool_name,
+                    'description': exc.description or f'Use {exc.tool_name}',
+                    'expires_at': exc.expires_at,
+                },
+                'device_id': device_id,
+            })
         except ModelError as exc:
             emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
             emit('state', state='error', error=exc.code, device_id=device_id, source='iphone-pwa')
             raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
         finally:
             state.finish(device_id, cancel_event)
+
+    def claim_pending_approval(approval_id: str, device_id: str):
+        with pending_approvals_lock:
+            pending = pending_approvals.get(approval_id)
+        if not pending or pending['device_id'] != device_id:
+            raise HTTPException(404, {
+                'code': 'approval_not_found',
+                'message': 'This approval is missing, expired, or belongs to another device.',
+            })
+        return pending
+
+    @router.post('/api/approval/{approval_id}/approve')
+    async def approval_approve(
+        approval_id: str,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        claim_pending_approval(approval_id, device_id)
+        emit('state', state='acting', device_id=device_id, source='iphone-pwa')
+        try:
+            reply = await asyncio.to_thread(executor.approve, approval_id)
+        except PermissionError:
+            raise HTTPException(409, {
+                'code': 'approval_expired',
+                'message': 'This approval has expired or was already used.',
+            })
+        except ModelError as exc:
+            raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
+        except Exception:
+            emit('voice.error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            raise HTTPException(502, {
+                'code': 'tool_error',
+                'message': 'The approved action could not be completed safely.',
+            })
+        finally:
+            with pending_approvals_lock:
+                pending_approvals.pop(approval_id, None)
+        emit('voice.reply', text=reply, device_id=device_id, source='iphone-pwa')
+        emit('state', state='speaking', device_id=device_id, source='iphone-pwa')
+        return {'status': 'approved', 'reply': reply, 'device_id': device_id}
+
+    @router.post('/api/approval/{approval_id}/reject')
+    def approval_reject(
+        approval_id: str,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        claim_pending_approval(approval_id, device_id)
+        try:
+            reply = executor.reject(approval_id)
+        finally:
+            with pending_approvals_lock:
+                pending_approvals.pop(approval_id, None)
+        emit('state', state='listening', device_id=device_id, source='iphone-pwa')
+        return {'status': 'rejected', 'reply': reply, 'device_id': device_id}
 
     @router.post('/api/voice/barge')
     def voice_barge(

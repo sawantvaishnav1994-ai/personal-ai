@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.events import EventBus
+from agent.executor import ConfirmationRequired
 from server.iphone_pwa import iphone_pwa_router
 from models.router import ModelTimeout, ModelUnavailable
 
@@ -100,6 +101,49 @@ def test_voice_turn_uses_enrolled_device_and_existing_executor(tmp_path):
     response = client.post('/iphone/api/voice/turn', json={'transcript': 'hello'})
     assert response.status_code == 200
     assert response.json()['reply'] == 'reply:hello:iphone-1'
+
+
+def test_voice_tool_request_returns_owner_approval_instead_of_http_500(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class ApprovalExecutor:
+        def chat(self, text, cancel_event=None, device_id=None):
+            raise ConfirmationRequired(
+                'web_search_browser',
+                {'query': text},
+                'Search the web for the requested information',
+                approval_id='approval-1',
+                execution_id='execution-1',
+                expires_at=12345.0,
+            )
+
+        def approve(self, approval_id):
+            assert approval_id == 'approval-1'
+            return 'The approved search completed.'
+
+        def reject(self, approval_id):
+            assert approval_id == 'approval-1'
+            return 'Action cancelled.'
+
+    runtime['executor'] = ApprovalExecutor()
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+
+    response = client.post('/iphone/api/voice/turn', json={'transcript': 'search the web'})
+
+    assert response.status_code == 202
+    assert response.json()['status'] == 'approval_required'
+    assert response.json()['approval']['tool'] == 'web_search_browser'
+    assert 'query' not in response.json()['approval']
+    approved = client.post('/iphone/api/approval/approval-1/approve', json={})
+    assert approved.status_code == 200
+    assert approved.json()['reply'] == 'The approved search completed.'
 
 
 def test_p3_session_records_ios_pwa_environment_but_does_not_self_award(tmp_path):
