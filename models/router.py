@@ -284,6 +284,7 @@ class ModelRouter:
             'primary_provider': self.primary,
             'fallback_providers': list(self.fallbacks),
             'local_first': self.local_first,
+            'external_sensitive_allowed': self.allow_external_sensitive,
             'provider': provider.public() if provider else None,
             'providers': [
                 {**item.public(), 'health': dict(self._health[item.id])}

@@ -1,6 +1,14 @@
 # Personal AI iPhone PWA
 
-This PWA is a physical-iPhone qualification client for P3. It is not a replacement for the frozen desktop Home V1.
+This PWA is the responsive owner web/iPhone surface for the frozen Personal AI Home V1 and the physical-iPhone P3 qualification path.
+
+The normal product experience is conversation-first:
+
+- Home keeps the asymmetric living AI Core, persistent conversation, text input, document attachment and one-tap continuous voice.
+- Mobile navigation exposes Home, Memory, Knowledge, Activities and More.
+- The owner orb opens Settings, trusted devices and runtime/model status.
+- Workflows, Apps & Tools, Devices and Dashboard remain behind progressive disclosure.
+- P3 evidence controls live only in Settings > Advanced and never block normal conversation.
 
 Production requirements:
 

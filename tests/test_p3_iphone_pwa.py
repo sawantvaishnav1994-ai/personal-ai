@@ -452,6 +452,21 @@ def test_normal_chat_does_not_automatically_start_qualification(tmp_path):
     assert runtime['voice_qualification'].active_session() is None
 
 
+def test_pwa_home_is_conversation_first_and_qualification_lives_in_advanced(tmp_path):
+    client, _ = make_client(tmp_path)
+    page = client.get('/iphone/').text
+
+    assert 'id="messageStream"' in page
+    assert 'id="attachmentButton"' in page
+    assert 'data-module="more"' in page
+    assert 'data-owner-module="settings"' in page
+    assert 'Models &amp; Intelligence' in page
+    assert "renderSettings('advanced')" in page
+    assert '<details class="session-details">' not in page
+    assert 'id="startSession"' not in page
+    assert 'id="stopSession"' not in page
+
+
 def test_browser_cannot_stop_another_browsers_qualification_session(tmp_path):
     first, runtime = make_client(tmp_path)
     second = TestClient(first.app, base_url='https://testserver')
