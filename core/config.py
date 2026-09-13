@@ -9,7 +9,7 @@ def env_bool(name:str,default:bool=False)->bool:
 @dataclass(frozen=True)
 class Settings:
     base_dir:Path=Path(__file__).resolve().parent.parent
-    data_dir:Path=Path.home()/'.personal_ai'
+    data_dir:Path=Path(os.getenv('PERSONAL_AI_DATA_DIR',str(Path.home()/'.personal_ai'))).expanduser().resolve()
     hosted_runtime:bool=bool(os.getenv('RAILWAY_ENVIRONMENT_ID') or os.getenv('RAILWAY_PROJECT_ID'))
     ai_provider:str=os.getenv('AI_PROVIDER','local').lower().strip()
     local_ai_url:str=os.getenv('LOCAL_AI_URL','http://127.0.0.1:11434/v1').rstrip('/')
@@ -21,7 +21,9 @@ class Settings:
     model_fallback_providers:tuple[str,...]=tuple(x.strip().lower() for x in os.getenv('MODEL_FALLBACK_PROVIDERS','').split(',') if x.strip())
     model_request_timeout_seconds:float=float(os.getenv('MODEL_REQUEST_TIMEOUT_SECONDS','120'))
     model_health_timeout_seconds:float=float(os.getenv('MODEL_HEALTH_TIMEOUT_SECONDS','5'))
+    model_local_first:bool=env_bool('MODEL_LOCAL_FIRST',True)
     allow_external_for_sensitive:bool=env_bool('ALLOW_EXTERNAL_FOR_SENSITIVE',False)
+    model_evaluation_on_startup:bool=env_bool('MODEL_EVALUATION_ON_STARTUP',False)
     openrouter_api_key:str=os.getenv('OPENROUTER_API_KEY','')
     openrouter_model:str=os.getenv('OPENROUTER_MODEL','meta-llama/llama-3.3-70b-instruct')
     openai_api_key:str=os.getenv('OPENAI_API_KEY','')
@@ -63,7 +65,14 @@ class Settings:
     iphone_owner_enrollment_code:str=os.getenv('PERSONAL_AI_IPHONE_ENROLLMENT_CODE','').strip()
     iphone_pwa_allow_insecure:bool=env_bool('PERSONAL_AI_IPHONE_ALLOW_INSECURE',False)
     iphone_device_cookie_days:int=int(os.getenv('PERSONAL_AI_DEVICE_COOKIE_DAYS','365'))
+    google_signin_client_id:str=os.getenv('GOOGLE_SIGNIN_CLIENT_ID',os.getenv('GOOGLE_CLIENT_ID','')).strip()
+    owner_google_email:str=os.getenv('PERSONAL_AI_OWNER_GOOGLE_EMAIL','').strip().casefold()
     browser_headless:bool=env_bool('BROWSER_HEADLESS',False)
+    file_roots:tuple[Path,...]=tuple(
+        Path(item.strip()).expanduser().resolve()
+        for item in os.getenv('PERSONAL_AI_FILE_ROOTS',str(Path.home()/'.personal_ai'/'workspace')).split(os.pathsep)
+        if item.strip()
+    )
     vault_password:str=os.getenv('PERSONAL_AI_VAULT_PASSWORD','')
     google_client_id:str=os.getenv('GOOGLE_CLIENT_ID','')
     google_client_secret:str=os.getenv('GOOGLE_CLIENT_SECRET','')

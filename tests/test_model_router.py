@@ -96,6 +96,12 @@ def test_public_status_does_not_expose_endpoint_credentials():
     assert 'api-secret' not in serialized
 
 
+def test_public_status_exposes_privacy_policy_without_secrets():
+    router = ModelRouter(settings(allow_external_for_sensitive=False))
+
+    assert router.status()['external_sensitive_allowed'] is False
+
+
 def test_unknown_provider_value_is_never_exposed():
     secret_like_value = 'sk-proj-do-not-expose-this-value'
     router = ModelRouter(settings(ai_provider=secret_like_value))

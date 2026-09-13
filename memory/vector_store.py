@@ -18,3 +18,7 @@ class VectorStore:
             s=cosine(q,json.loads(r['vector_json']))
             if s>=min_score: out.append({'memory_id':r['memory_id'],'text':r['text'],'score':s})
         return sorted(out,key=lambda x:x['score'],reverse=True)[:limit]
+    def delete(self,memory_id:str):
+        with self._con() as c:
+            cur=c.execute('DELETE FROM vectors WHERE memory_id=?',(memory_id,))
+        return cur.rowcount==1

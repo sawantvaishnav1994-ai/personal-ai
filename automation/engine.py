@@ -50,6 +50,7 @@ class AutomationEngine:
         self._workflow_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='personal-ai-workflow')
         self._step_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='personal-ai-workflow-step')
         self._run_locks: dict[str, threading.Lock] = {}
+        self._run_cancel_events: dict[str, threading.Event] = {}
         self._init_db()
         self._recover_interrupted_runs()
         if self.events:
@@ -103,8 +104,8 @@ class AutomationEngine:
     def _recover_interrupted_runs(self):
         with self._con() as con:
             con.execute(
-                "UPDATE workflow_runs SET status='interrupted',error='runtime restarted during active workflow',updated_at=?,completed_at=? WHERE status IN ('running','rolling_back')",
-                (now(), now()),
+                "UPDATE workflow_runs SET status='recovery_required',error='runtime restarted; owner review required before resuming current checkpoint',updated_at=?,completed_at=NULL WHERE status IN ('running','rolling_back','queued')",
+                (now(),),
             )
 
     def _con(self):
@@ -269,7 +270,7 @@ class AutomationEngine:
             return
         try:
             run = self._run(run_id)
-            if run['status'] in {'completed', 'failed', 'cancelled', 'interrupted'}:
+            if run['status'] in {'completed', 'failed', 'cancelled', 'interrupted', 'recovery_required'}:
                 return
             workflow = self.workflow(run['workflow_id'])
             steps = workflow['steps']
@@ -282,9 +283,16 @@ class AutomationEngine:
             self._update_run(run_id, status='running', current_step=index, completed_steps_json=json.dumps(completed), pending_approval_id=None)
             self._emit('workflow.started', run_id=run_id, workflow_id=workflow['id'], title=workflow['title'])
             while index < len(steps):
+                if self._run(run_id)['status'] == 'cancelled':
+                    self._emit('workflow.cancelled', run_id=run_id, workflow_id=workflow['id'], reason='owner_cancelled')
+                    return
                 step = steps[index]
                 try:
                     result = self._execute_workflow_step(run_id, step, context)
+                except ExecutionCancelled:
+                    self._update_run(run_id, status='cancelled', error='cancelled by owner', completed_at=now())
+                    self._emit('workflow.cancelled', run_id=run_id, workflow_id=workflow['id'], reason='owner_cancelled')
+                    return
                 except ConfirmationRequired as approval:
                     self._update_run(run_id, status='waiting_approval', current_step=index, context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str), pending_approval_id=approval.approval_id)
                     self._emit('workflow.approval_required', run_id=run_id, workflow_id=workflow['id'], approval_id=approval.approval_id, tool=approval.tool_name)
@@ -294,12 +302,16 @@ class AutomationEngine:
                     self._update_run(run_id, status='failed', error=str(exc), context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str), result_json=json.dumps({'rollback': rollback}, default=str), completed_at=now())
                     self._emit('workflow.failed', run_id=run_id, workflow_id=workflow['id'], error=str(exc), rollback=rollback)
                     return
+                if self._run(run_id)['status'] == 'cancelled':
+                    return
                 completed.append({'step': index, 'kind': step['kind'], 'result': result})
                 context[f'step_{index + 1}'] = result
                 index += 1
                 self._update_run(run_id, current_step=index, context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str))
                 self._emit('workflow.step.completed', run_id=run_id, workflow_id=workflow['id'], step=index, kind=step['kind'])
             result = {'completed_steps': completed, 'context': context}
+            if self._run(run_id)['status'] == 'cancelled':
+                return
             self._update_run(run_id, status='completed', result_json=json.dumps(result, default=str), completed_at=now())
             with self._con() as con:
                 con.execute('UPDATE workflows SET last_run_at=?,updated_at=? WHERE id=?', (now(), now(), workflow['id']))
@@ -330,9 +342,11 @@ class AutomationEngine:
         last_error = None
         for attempt in range(retries + 1):
             cancel_event = threading.Event()
+            self._run_cancel_events[run_id] = cancel_event
             future = self._step_pool.submit(self.executor.chat, prompt, cancel_event=cancel_event)
             try:
                 reply = future.result(timeout=timeout)
+                self._run_cancel_events.pop(run_id, None)
                 return {'reply': reply, 'attempt': attempt + 1}
             except FutureTimeout:
                 cancel_event.set()
@@ -340,12 +354,16 @@ class AutomationEngine:
             except ConfirmationRequired:
                 raise
             except ExecutionCancelled as exc:
+                self._run_cancel_events.pop(run_id, None)
+                if cancel_event.is_set() or self._run(run_id)['status'] == 'cancelled':
+                    raise
                 last_error = exc
             except Exception as exc:
                 last_error = exc
             if attempt < retries:
                 self._emit('workflow.step.retry', run_id=run_id, attempt=attempt + 1, error=str(last_error))
                 time.sleep(min(2 ** attempt, 5))
+            self._run_cancel_events.pop(run_id, None)
         raise RuntimeError(str(last_error or 'workflow step failed'))
 
     @staticmethod
@@ -374,6 +392,50 @@ class AutomationEngine:
         self._update_run(run_id, status='cancelled', pending_approval_id=None, completed_at=now(), error='user rejected approval')
         self._emit('workflow.cancelled', run_id=run_id, workflow_id=run['workflow_id'], reason='approval_rejected')
         return {'run_id': run_id, 'cancelled': True}
+
+    def cancel_run(self, run_id: str):
+        run = self._run(run_id)
+        if run['status'] in {'completed', 'failed', 'cancelled'}:
+            return {'run_id': run_id, 'cancelled': run['status'] == 'cancelled', 'status': run['status']}
+        cancel_event = self._run_cancel_events.get(run_id)
+        # Persist the owner decision before signalling a worker so the worker
+        # cannot race ahead and overwrite cancellation with failure/completion.
+        self._update_run(
+            run_id,
+            status='cancelled',
+            pending_approval_id=None,
+            error='cancelled by owner',
+            completed_at=now(),
+        )
+        if cancel_event:
+            cancel_event.set()
+        if run['status'] == 'waiting_approval' and run.get('pending_approval_id') and self.executor:
+            try:
+                self.executor.reject(run['pending_approval_id'])
+            except Exception:
+                pass
+        self._emit('workflow.cancelled', run_id=run_id, workflow_id=run['workflow_id'], reason='owner_cancelled')
+        return {'run_id': run_id, 'cancelled': True, 'status': 'cancelled'}
+
+    def resume_run(self, run_id: str, *, background: bool = True):
+        run = self._run(run_id)
+        if run['status'] not in {'recovery_required', 'interrupted'}:
+            raise RuntimeError('workflow run is not waiting for recovery')
+        workflow = self.workflow(run['workflow_id'])
+        if not workflow['enabled'] or workflow['paused']:
+            raise RuntimeError('workflow must be enabled and unpaused before resuming')
+        self._update_run(run_id, status='queued', error=None, completed_at=None)
+        self._emit(
+            'workflow.resumed',
+            run_id=run_id,
+            workflow_id=run['workflow_id'],
+            checkpoint=int(run['current_step']),
+        )
+        if background:
+            self._workflow_pool.submit(self._continue_run, run_id)
+        else:
+            self._continue_run(run_id)
+        return {'run_id': run_id, 'resumed': True, 'checkpoint': int(run['current_step'])}
 
     def _rollback(self, workflow: dict, completed: list[dict], context: dict):
         results = []

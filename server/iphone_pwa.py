@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
+import time
 import threading
 from pathlib import Path
 from typing import Literal
@@ -9,14 +11,57 @@ from typing import Literal
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token as google_id_token
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers import base64url_to_bytes
+from webauthn.helpers.structs import (
+    AuthenticatorAttachment,
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
 from agent.executor import ConfirmationRequired, ExecutionCancelled
 from models.router import ModelError
+from security.owner_access import OwnerAccessStore
 
 
 class OwnerEnrollBody(BaseModel):
     code: str
     name: str = 'Owner iPhone'
+
+
+class OwnerPasswordBody(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    name: str = Field(default='Owner browser', max_length=120)
+
+
+class OwnerPasswordSetupBody(BaseModel):
+    password: str = Field(min_length=12, max_length=256)
+
+
+class OwnerRecoveryBody(BaseModel):
+    code: str = Field(min_length=8, max_length=64)
+    name: str = Field(default='Recovered owner browser', max_length=120)
+
+
+class GoogleLoginBody(BaseModel):
+    credential: str = Field(min_length=100, max_length=8192)
+    name: str = Field(default='Google owner browser', max_length=120)
+
+
+class PasskeyCompleteBody(BaseModel):
+    challenge_id: str = Field(min_length=10, max_length=80)
+    credential: dict
+    name: str = Field(default='Owner Face ID', max_length=120)
 
 
 class VoiceTurnBody(BaseModel):
@@ -87,8 +132,11 @@ def iphone_pwa_router(runtime, settings):
     events = runtime.get('events')
     continuity = runtime.get('continuity')
     recorder = runtime.get('voice_qualification')
+    owner_access: OwnerAccessStore = runtime['owner_access']
     pending_approvals: dict[str, dict] = {}
     pending_approvals_lock = threading.RLock()
+    failed_access_attempts: dict[str, list[float]] = {}
+    access_attempts_lock = threading.RLock()
 
     def device_cookie_kwargs():
         cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
@@ -106,11 +154,58 @@ def iphone_pwa_router(runtime, settings):
         if scheme != 'https' and not getattr(settings, 'iphone_pwa_allow_insecure', False):
             raise HTTPException(400, 'iPhone owner enrollment requires HTTPS')
 
+    def request_identity(request: Request):
+        forwarded_host = request.headers.get('x-forwarded-host', '').split(',')[0].strip()
+        host = forwarded_host or request.headers.get('host', '').strip()
+        forwarded_proto = request.headers.get('x-forwarded-proto', '').split(',')[0].strip().lower()
+        proto = forwarded_proto or request.url.scheme.lower()
+        if not host or proto != 'https':
+            raise HTTPException(400, 'Secure HTTPS origin required')
+        rp_id = host.rsplit(':', 1)[0] if host.count(':') == 1 else host.strip('[]')
+        return rp_id, f'{proto}://{host}'
+
+    def access_attempt_key(request: Request, method: str):
+        forwarded = request.headers.get('x-forwarded-for', '').split(',')[0].strip()
+        address = forwarded or (request.client.host if request.client else 'unknown')
+        return f'{method}:{address}'
+
+    def allow_access_attempt(request: Request, method: str):
+        key = access_attempt_key(request, method)
+        cutoff = time.monotonic() - 300
+        with access_attempts_lock:
+            attempts = [stamp for stamp in failed_access_attempts.get(key, []) if stamp >= cutoff]
+            failed_access_attempts[key] = attempts
+        if len(attempts) >= 5:
+            raise HTTPException(429, 'Too many unsuccessful attempts. Wait five minutes and try again.')
+        return key
+
+    def failed_access_attempt(key: str):
+        with access_attempts_lock:
+            failed_access_attempts.setdefault(key, []).append(time.monotonic())
+
+    def clear_access_attempts(key: str):
+        with access_attempts_lock:
+            failed_access_attempts.pop(key, None)
+
+    def trust_browser(response: Response, name: str, platform: str = 'web-pwa'):
+        device, token = registry.enroll(str(name or 'Owner browser').strip()[:120], platform)
+        if hasattr(registry, 'set_permissions') and hasattr(registry, 'OWNER_SCOPES'):
+            registry.set_permissions(device['id'], registry.OWNER_SCOPES)
+        if continuity:
+            continuity.resume(device['id'])
+        cookie_kwargs = device_cookie_kwargs()
+        response.set_cookie('pa_device', device['id'], **cookie_kwargs)
+        response.set_cookie('pa_token', token, **cookie_kwargs)
+        emit('owner.access.trusted', device_id=device['id'], platform=platform)
+        return device
+
     def auth_device(device_id: str | None, device_token: str | None):
         if not device_id or not device_token or not registry.authenticate(device_id, device_token):
             raise HTTPException(401, 'iPhone session is not enrolled or has been revoked')
         if not registry.is_active(device_id):
             raise HTTPException(401, 'iPhone device is revoked')
+        if hasattr(registry, 'authorize') and not registry.authorize(device_id, 'ai:chat'):
+            raise HTTPException(403, 'This device is not permitted to use conversation or voice')
         return device_id
 
     def emit(name: str, **payload):
@@ -209,20 +304,245 @@ def iphone_pwa_router(runtime, settings):
             'model': runtime['models'].status() if runtime.get('models') else {'state': 'unavailable'},
         }
 
+    @router.get('/api/access/options')
+    def access_options():
+        google_client_id = getattr(settings, 'google_signin_client_id', '').strip()
+        owner_google_email = getattr(settings, 'owner_google_email', '').strip().casefold()
+        return {
+            'passkey_available': bool(owner_access.passkeys()),
+            'password_available': owner_access.password_configured(),
+            'recovery_available': owner_access.recovery_codes_remaining() > 0,
+            'enrollment_available': len(getattr(settings, 'iphone_owner_enrollment_code', '').strip()) >= 12,
+            'google_available': bool(google_client_id and owner_google_email),
+            'google_client_id': google_client_id if google_client_id and owner_google_email else '',
+        }
+
+    @router.get('/api/access/security')
+    def access_security(
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        auth_device(pa_device, pa_token)
+        return {
+            'password_configured': owner_access.password_configured(),
+            'recovery_codes_remaining': owner_access.recovery_codes_remaining(),
+            'passkeys': owner_access.passkeys(),
+            'google_configured': bool(
+                getattr(settings, 'google_signin_client_id', '').strip()
+                and getattr(settings, 'owner_google_email', '').strip()
+            ),
+        }
+
+    @router.post('/api/access/google/login')
+    def google_login(body: GoogleLoginBody, request: Request, response: Response):
+        require_https(request)
+        key = allow_access_attempt(request, 'google')
+        client_id = getattr(settings, 'google_signin_client_id', '').strip()
+        owner_email = getattr(settings, 'owner_google_email', '').strip().casefold()
+        if not client_id or not owner_email:
+            raise HTTPException(503, 'Google owner sign-in is not configured')
+        try:
+            claims = google_id_token.verify_oauth2_token(
+                body.credential,
+                GoogleAuthRequest(),
+                client_id,
+            )
+            email = str(claims.get('email') or '').strip().casefold()
+            verified = claims.get('email_verified') is True or str(claims.get('email_verified')).lower() == 'true'
+            subject = str(claims.get('sub') or '').strip()
+            if not verified or not subject or not hmac.compare_digest(email, owner_email):
+                raise ValueError('Google account is not the configured owner')
+        except Exception:
+            failed_access_attempt(key)
+            raise HTTPException(401, 'This Google account is not authorized for Personal AI')
+        clear_access_attempts(key)
+        device = trust_browser(response, body.name, 'web-pwa-google')
+        emit('owner.google.login', device_id=device['id'], provider='google')
+        return {'ok': True, 'device_id': device['id']}
+
+    @router.post('/api/access/password/setup')
+    def password_setup(
+        body: OwnerPasswordSetupBody,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        try:
+            owner_access.set_password(body.password)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        emit('owner.password.updated', device_id=device_id)
+        return {'ok': True}
+
+    @router.post('/api/access/password/login')
+    def password_login(body: OwnerPasswordBody, request: Request, response: Response):
+        require_https(request)
+        key = allow_access_attempt(request, 'password')
+        if not owner_access.password_configured():
+            raise HTTPException(409, 'Owner password has not been set up yet')
+        if not owner_access.verify_password(body.password):
+            failed_access_attempt(key)
+            raise HTTPException(401, 'Incorrect owner password')
+        clear_access_attempts(key)
+        device = trust_browser(response, body.name, 'web-pwa-password')
+        emit('owner.password.login', device_id=device['id'])
+        return {'ok': True, 'device_id': device['id']}
+
+    @router.post('/api/access/recovery/regenerate')
+    def recovery_regenerate(
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        codes = owner_access.regenerate_recovery_codes()
+        emit('owner.recovery.regenerated', device_id=device_id, count=len(codes))
+        return {'codes': codes, 'message': 'Save these codes now. Each code works only once.'}
+
+    @router.post('/api/access/recovery/login')
+    def recovery_login(body: OwnerRecoveryBody, request: Request, response: Response):
+        require_https(request)
+        key = allow_access_attempt(request, 'recovery')
+        if not owner_access.consume_recovery_code(body.code):
+            failed_access_attempt(key)
+            raise HTTPException(401, 'Invalid or already used recovery code')
+        clear_access_attempts(key)
+        device = trust_browser(response, body.name, 'web-pwa-recovery')
+        emit('owner.recovery.used', device_id=device['id'])
+        return {'ok': True, 'device_id': device['id']}
+
+    @router.post('/api/access/passkey/register/options')
+    def passkey_register_options(
+        request: Request,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        require_https(request)
+        rp_id, origin = request_identity(request)
+        exclude = [
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(item['credential_id']))
+            for item in owner_access.passkeys()
+        ]
+        options = generate_registration_options(
+            rp_id=rp_id,
+            rp_name='Personal AI',
+            user_name='owner',
+            user_id=b'personal-ai-owner',
+            user_display_name='Personal AI Owner',
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+                resident_key=ResidentKeyRequirement.PREFERRED,
+                require_resident_key=False,
+                user_verification=UserVerificationRequirement.REQUIRED,
+            ),
+            exclude_credentials=exclude,
+        )
+        challenge_id = owner_access.create_challenge(
+            'registration', options.challenge, rp_id, origin, device_id=device_id,
+        )
+        return {'challenge_id': challenge_id, 'public_key': json.loads(options_to_json(options))}
+
+    @router.post('/api/access/passkey/register/complete')
+    def passkey_register_complete(
+        body: PasskeyCompleteBody,
+        request: Request,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = auth_device(pa_device, pa_token)
+        require_https(request)
+        challenge = owner_access.consume_challenge(body.challenge_id, 'registration', device_id=device_id)
+        if not challenge:
+            raise HTTPException(409, 'Face ID setup expired. Start again.')
+        rp_id, origin = request_identity(request)
+        if rp_id != challenge['rp_id'] or origin != challenge['origin']:
+            raise HTTPException(400, 'Passkey origin changed during setup')
+        try:
+            verified = verify_registration_response(
+                credential=body.credential,
+                expected_challenge=bytes(challenge['challenge']),
+                expected_rp_id=rp_id,
+                expected_origin=origin,
+                require_user_verification=True,
+            )
+        except Exception:
+            raise HTTPException(401, 'Face ID passkey could not be verified')
+        transports = body.credential.get('response', {}).get('transports', [])
+        owner_access.save_passkey(
+            verified.credential_id,
+            verified.credential_public_key,
+            verified.sign_count,
+            body.name,
+            json.dumps(transports),
+        )
+        emit('owner.passkey.registered', device_id=device_id)
+        return {'ok': True, 'name': body.name}
+
+    @router.post('/api/access/passkey/login/options')
+    def passkey_login_options(request: Request):
+        require_https(request)
+        rp_id, origin = request_identity(request)
+        passkeys = owner_access.passkeys()
+        if not passkeys:
+            raise HTTPException(409, 'Face ID has not been set up yet')
+        options = generate_authentication_options(
+            rp_id=rp_id,
+            allow_credentials=[
+                PublicKeyCredentialDescriptor(id=base64url_to_bytes(item['credential_id']))
+                for item in passkeys
+            ],
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        challenge_id = owner_access.create_challenge('authentication', options.challenge, rp_id, origin)
+        return {'challenge_id': challenge_id, 'public_key': json.loads(options_to_json(options))}
+
+    @router.post('/api/access/passkey/login/complete')
+    def passkey_login_complete(body: PasskeyCompleteBody, request: Request, response: Response):
+        require_https(request)
+        key = allow_access_attempt(request, 'passkey')
+        challenge = owner_access.consume_challenge(body.challenge_id, 'authentication')
+        if not challenge:
+            failed_access_attempt(key)
+            raise HTTPException(409, 'Face ID request expired. Try again.')
+        rp_id, origin = request_identity(request)
+        if rp_id != challenge['rp_id'] or origin != challenge['origin']:
+            failed_access_attempt(key)
+            raise HTTPException(400, 'Passkey origin changed during login')
+        try:
+            credential_id = base64url_to_bytes(str(body.credential.get('id') or ''))
+            stored = owner_access.passkey(credential_id)
+            if not stored:
+                raise ValueError('unknown credential')
+            verified = verify_authentication_response(
+                credential=body.credential,
+                expected_challenge=bytes(challenge['challenge']),
+                expected_rp_id=rp_id,
+                expected_origin=origin,
+                credential_public_key=bytes(stored['public_key']),
+                credential_current_sign_count=int(stored['sign_count']),
+                require_user_verification=True,
+            )
+        except Exception:
+            failed_access_attempt(key)
+            raise HTTPException(401, 'Face ID passkey could not be verified')
+        clear_access_attempts(key)
+        owner_access.use_passkey(credential_id, verified.new_sign_count)
+        device = trust_browser(response, body.name, 'web-pwa-passkey')
+        emit('owner.passkey.login', device_id=device['id'])
+        return {'ok': True, 'device_id': device['id']}
+
     @router.post('/api/enroll')
     def enroll(body: OwnerEnrollBody, request: Request, response: Response):
         require_https(request)
+        key = allow_access_attempt(request, 'enrollment')
         expected = getattr(settings, 'iphone_owner_enrollment_code', '').strip()
         if len(expected) < 12:
             raise HTTPException(503, 'iPhone owner enrollment is not configured')
         if not hmac.compare_digest(body.code.strip(), expected):
+            failed_access_attempt(key)
             raise HTTPException(401, 'Invalid owner enrollment code')
-        device, token = registry.enroll(body.name.strip() or 'Owner iPhone', 'ios-pwa')
-        if continuity:
-            continuity.resume(device['id'])
-        cookie_kwargs = device_cookie_kwargs()
-        response.set_cookie('pa_device', device['id'], **cookie_kwargs)
-        response.set_cookie('pa_token', token, **cookie_kwargs)
+        clear_access_attempts(key)
+        device = trust_browser(response, body.name, 'ios-pwa')
         emit('iphone.enrolled', device_id=device['id'], platform='ios-pwa')
         return {'ok': True, 'device_id': device['id']}
 
@@ -306,6 +626,15 @@ def iphone_pwa_router(runtime, settings):
             emit('voice.error', error=exc.code, device_id=device_id, source='iphone-pwa')
             emit('state', state='error', error=exc.code, device_id=device_id, source='iphone-pwa')
             raise HTTPException(exc.status_code, {'code': exc.code, 'message': exc.user_message})
+        except HTTPException:
+            raise
+        except Exception:
+            emit('voice.error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            emit('state', state='error', error='tool_error', device_id=device_id, source='iphone-pwa')
+            raise HTTPException(502, {
+                'code': 'tool_error',
+                'message': 'That tool is unavailable on this Personal AI surface. No action was completed.',
+            })
         finally:
             state.finish(device_id, cancel_event)
 
