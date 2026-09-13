@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -105,6 +106,12 @@ class EmergencyStopBody(BaseModel):
     enabled: bool
 
 
+class UiPreferencesBody(BaseModel):
+    continuous_voice: bool = True
+    voice_rate: float = Field(default=1.0, ge=0.75, le=1.35)
+    quiet_hours: bool = True
+
+
 def owner_product_router(runtime):
     router = APIRouter(prefix='/iphone/api', tags=['owner-product'])
     registry = runtime['device_registry']
@@ -127,6 +134,35 @@ def owner_product_router(runtime):
         if not hasattr(registry, 'authorize') or registry.authorize(device_id, 'knowledge:private'):
             classes.add('private')
         return classes
+
+    def ui_preferences(device_id: str):
+        defaults = UiPreferencesBody().model_dump()
+        try:
+            stored = json.loads(registry.metadata(device_id).get('ui.preferences', '{}'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            stored = {}
+        try:
+            return UiPreferencesBody(**{**defaults, **stored}).model_dump()
+        except (TypeError, ValueError):
+            return defaults
+
+    @router.get('/preferences')
+    def preferences_get(pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
+        device_id = authenticate(pa_device, pa_token, 'ai:chat')
+        return ui_preferences(device_id)
+
+    @router.put('/preferences')
+    def preferences_update(
+        body: UiPreferencesBody,
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = authenticate(pa_device, pa_token, 'ai:chat')
+        value = body.model_dump()
+        if not registry.set_metadata(device_id, 'ui.preferences', json.dumps(value, separators=(',', ':'))):
+            raise HTTPException(404, 'Active device not found')
+        audit('device.preferences.updated', device_id=device_id)
+        return value
 
     def can_read_sensitive_memory(device_id: str):
         return not hasattr(registry, 'authorize') or registry.authorize(device_id, 'memory:sensitive')

@@ -116,6 +116,43 @@ def test_owner_can_manage_other_device_and_revocation_is_immediate(tmp_path):
     assert runtime['device_registry'].authenticate(other['id'], other_token) is False
 
 
+def test_ui_preferences_are_scoped_to_the_trusted_device_and_persist(tmp_path):
+    client, runtime, owner = make_client(tmp_path)
+
+    defaults = client.get('/iphone/api/preferences')
+    assert defaults.json() == {
+        'continuous_voice': True,
+        'voice_rate': 1.0,
+        'quiet_hours': True,
+    }
+    updated = client.put('/iphone/api/preferences', json={
+        'continuous_voice': False,
+        'voice_rate': 1.15,
+        'quiet_hours': False,
+    })
+    assert updated.status_code == 200
+    assert client.get('/iphone/api/preferences').json() == updated.json()
+    assert 'ui.preferences' in runtime['device_registry'].metadata(owner['id'])
+
+    other, token = runtime['device_registry'].enroll('Other browser', 'web')
+    other_client = TestClient(client.app, base_url='https://testserver')
+    other_client.cookies.set('pa_device', other['id'])
+    other_client.cookies.set('pa_token', token)
+    assert other_client.get('/iphone/api/preferences').json()['continuous_voice'] is True
+
+
+def test_ui_preferences_reject_unsafe_voice_rate(tmp_path):
+    client, _, _ = make_client(tmp_path)
+
+    response = client.put('/iphone/api/preferences', json={
+        'continuous_voice': True,
+        'voice_rate': 4,
+        'quiet_hours': True,
+    })
+
+    assert response.status_code == 422
+
+
 def test_p3_stage_evidence_endpoint_records_but_does_not_self_award(tmp_path):
     client, _, _ = make_client(tmp_path)
     started = client.post('/iphone/api/qualification/stages', json={

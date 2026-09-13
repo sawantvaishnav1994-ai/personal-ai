@@ -465,6 +465,8 @@ def test_pwa_home_is_conversation_first_and_qualification_lives_in_advanced(tmp_
     assert '<details class="session-details">' not in page
     assert 'id="startSession"' not in page
     assert 'id="stopSession"' not in page
+    assert 'localStorage' not in page
+    assert 'sessionStorage' not in page
 
 
 def test_browser_cannot_stop_another_browsers_qualification_session(tmp_path):
