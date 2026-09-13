@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 
 
 def now():
@@ -19,6 +20,7 @@ class ContinuityService:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.events = events
         self.second_brain = second_brain
+        self.lock = RLock()
         with self._con() as con:
             con.executescript(
                 '''
@@ -58,7 +60,7 @@ class ContinuityService:
     def create_thread(self, title: str = 'Current context', *, device_id: str | None = None, context: dict | None = None):
         thread_id = str(uuid.uuid4())
         stamp = now()
-        with self._con() as con:
+        with self.lock, self._con() as con:
             con.execute(
                 'INSERT INTO continuity_threads VALUES(?,?,?,?,?,NULL)',
                 (thread_id, str(title), json.dumps(context or {}, default=str), stamp, stamp),
@@ -68,10 +70,56 @@ class ContinuityService:
         self._emit('continuity.thread.created', thread_id=thread_id, device_id=device_id, title=title)
         return thread_id
 
+    def list_threads(self, query: str = '', *, limit: int = 50, include_closed: bool = False):
+        clauses = []
+        params = []
+        if not include_closed:
+            clauses.append('t.closed_at IS NULL')
+        if query.strip():
+            term = f'%{query.strip()}%'
+            clauses.append('''(t.title LIKE ? OR EXISTS(
+                SELECT 1 FROM continuity_events e
+                WHERE e.thread_id=t.id AND e.payload_json LIKE ?
+            ))''')
+            params.extend([term, term])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        params.append(max(1, min(int(limit), 200)))
+        with self.lock, self._con() as con:
+            rows = con.execute(
+                f'''SELECT t.*,
+                    (SELECT COUNT(*) FROM continuity_events e WHERE e.thread_id=t.id) AS event_count,
+                    (SELECT payload_json FROM continuity_events e WHERE e.thread_id=t.id ORDER BY e.id DESC LIMIT 1) AS latest_payload_json
+                    FROM continuity_threads t {where}
+                    ORDER BY t.updated_at DESC LIMIT ?''',
+                params,
+            ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item['context'] = json.loads(item.pop('context_json') or '{}')
+            latest_payload = json.loads(item.pop('latest_payload_json') or '{}')
+            item['preview'] = str(latest_payload.get('text') or '')[:160]
+            output.append(item)
+        return output
+
+    def rename_thread(self, thread_id: str, title: str):
+        clean = ' '.join(str(title or '').split())[:120]
+        if not clean:
+            raise ValueError('conversation title is required')
+        with self.lock, self._con() as con:
+            cur = con.execute(
+                'UPDATE continuity_threads SET title=?,updated_at=? WHERE id=? AND closed_at IS NULL',
+                (clean, now(), thread_id),
+            )
+        if cur.rowcount != 1:
+            raise KeyError('active continuity thread not found')
+        self._emit('continuity.thread.renamed', thread_id=thread_id, title=clean)
+        return self.thread(thread_id)
+
     def set_active(self, device_id: str, thread_id: str):
         if not self.thread(thread_id):
             raise KeyError('continuity thread not found')
-        with self._con() as con:
+        with self.lock, self._con() as con:
             con.execute(
                 '''INSERT INTO continuity_device_state(device_id,active_thread_id,last_event_id,updated_at)
                    VALUES(?,?,0,?)
@@ -87,7 +135,7 @@ class ContinuityService:
             raise KeyError('active continuity thread not found')
         event_id = str(uuid.uuid4())
         stamp = now()
-        with self._con() as con:
+        with self.lock, self._con() as con:
             cur = con.execute(
                 'INSERT INTO continuity_events(event_id,thread_id,device_id,kind,payload_json,created_at) VALUES(?,?,?,?,?,?)',
                 (event_id, thread_id, device_id, str(kind), json.dumps(payload or {}, default=str), stamp),
@@ -105,7 +153,7 @@ class ContinuityService:
             raise KeyError('continuity thread not found')
         context = {} if replace else dict(thread['context'])
         context.update(dict(patch or {}))
-        with self._con() as con:
+        with self.lock, self._con() as con:
             con.execute(
                 'UPDATE continuity_threads SET context_json=?,updated_at=? WHERE id=?',
                 (json.dumps(context, default=str), now(), thread_id),
@@ -114,7 +162,7 @@ class ContinuityService:
         return context
 
     def thread(self, thread_id: str):
-        with self._con() as con:
+        with self.lock, self._con() as con:
             row = con.execute('SELECT * FROM continuity_threads WHERE id=?', (thread_id,)).fetchone()
         if not row:
             return None
@@ -123,14 +171,14 @@ class ContinuityService:
         return data
 
     def latest_thread(self):
-        with self._con() as con:
+        with self.lock, self._con() as con:
             row = con.execute(
                 'SELECT id FROM continuity_threads WHERE closed_at IS NULL ORDER BY updated_at DESC LIMIT 1'
             ).fetchone()
         return self.thread(row['id']) if row else None
 
     def active_for_device(self, device_id: str):
-        with self._con() as con:
+        with self.lock, self._con() as con:
             row = con.execute('SELECT active_thread_id FROM continuity_device_state WHERE device_id=?', (device_id,)).fetchone()
         if row and row['active_thread_id']:
             thread = self.thread(row['active_thread_id'])
@@ -159,7 +207,7 @@ class ContinuityService:
         return {'thread': thread, 'events': events, 'memory_context': memory_context}
 
     def events_for_thread(self, thread_id: str, *, after_sequence: int = 0, limit: int = 100):
-        with self._con() as con:
+        with self.lock, self._con() as con:
             rows = con.execute(
                 '''SELECT * FROM continuity_events WHERE thread_id=? AND id>? ORDER BY id ASC LIMIT ?''',
                 (thread_id, int(after_sequence), max(1, min(int(limit), 1000))),
@@ -176,13 +224,13 @@ class ContinuityService:
         thread = self.active_for_device(device_id)
         if not thread:
             return self.resume(device_id, event_limit=limit)
-        with self._con() as con:
+        with self.lock, self._con() as con:
             state = con.execute('SELECT last_event_id FROM continuity_device_state WHERE device_id=?', (device_id,)).fetchone()
         after = int(state['last_event_id']) if state else 0
         events = self.events_for_thread(thread['id'], after_sequence=after, limit=limit)
         if events:
             last = int(events[-1]['sequence'])
-            with self._con() as con:
+            with self.lock, self._con() as con:
                 con.execute(
                     'UPDATE continuity_device_state SET last_event_id=?,updated_at=? WHERE device_id=?',
                     (last, now(), device_id),
@@ -201,7 +249,7 @@ class ContinuityService:
         return bundle
 
     def close_thread(self, thread_id: str):
-        with self._con() as con:
+        with self.lock, self._con() as con:
             cur = con.execute('UPDATE continuity_threads SET closed_at=?,updated_at=? WHERE id=? AND closed_at IS NULL', (now(), now(), thread_id))
         return cur.rowcount == 1
 

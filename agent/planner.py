@@ -1,6 +1,6 @@
 class Planner:
     def __init__(self,models,tools): self.models=models; self.tools=tools
-    def plan(self,goal,context=""):
+    def plan(self,goal,context="",sensitivity="internal"):
         prompt=f"""
 Goal: {goal}
 
@@ -16,4 +16,8 @@ Return valid JSON only:
 Use minimum necessary steps. Do not invent tools.
 If no tool is required, return an empty steps list.
 """
-        return self.models.json(prompt,system="You are a conservative task planner. Return JSON only.")
+        return self.models.json(
+            prompt,
+            system="You are a conservative task planner. Return JSON only.",
+            sensitivity=sensitivity,
+        )

@@ -12,6 +12,7 @@ python-pptx>=1.0,<2
 openpyxl>=3.1,<4
 reportlab>=4.2,<5
 Pillow>=12.3,<13
+pypdf>=6.0,<7
 mss>=10,<11
 pyttsx3>=2.99,<3
 sounddevice>=0.5,<1

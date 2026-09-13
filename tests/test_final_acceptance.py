@@ -15,6 +15,7 @@ from tools.registry import ToolRegistry,Tool,Risk
 from tools import documents
 from updates.signed_updater import SignedUpdater
 from voice.wake_phrase import WakePhraseGate
+from models.router import ModelUnavailable
 
 class Models:
     def chat(self,*args,**kwargs):return 'completed'
@@ -66,3 +67,26 @@ def test_document_outputs_are_confined_to_workspace(tmp_path):
 def test_signed_updater_can_restore_previous_installation(tmp_path):
     private=Ed25519PrivateKey.generate();public=private.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw);import base64
     install=tmp_path/'install';install.mkdir();(install/'old.txt').write_text('old');stage=tmp_path/'stage';stage.mkdir();(stage/'new.txt').write_text('new');updater=SignedUpdater(base64.b64encode(public).decode(),install);backup=updater.install_staged(stage);assert (install/'new.txt').read_text()=='new';updater.rollback(backup);assert (install/'old.txt').read_text()=='old' and not (install/'new.txt').exists()
+
+
+def test_model_outage_is_not_retried_as_an_unplanned_chat(tmp_path):
+    class UnavailableModels:
+        def __init__(self): self.calls = 0
+        def json(self, *args, **kwargs):
+            self.calls += 1
+            raise ModelUnavailable('offline', provider='self_hosted')
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise AssertionError('must not retry the same outage as a second model call')
+
+    models = UnavailableModels()
+    settings = SimpleNamespace(autonomy_mode='ask')
+    executor = AgentExecutor(
+        models=models,
+        tools=ToolRegistry(settings),
+        memory=MemoryStore(tmp_path/'outage.sqlite3'),
+        events=EventBus(),
+    )
+    with pytest.raises(ModelUnavailable):
+        executor.chat('hello')
+    assert models.calls == 1
