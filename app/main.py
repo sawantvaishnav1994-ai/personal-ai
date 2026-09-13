@@ -28,6 +28,7 @@ from qualification.program import P3QualificationProgram
 from qualification.voice import VoiceQualificationRecorder
 from recovery.backup import BackupService
 from security.vault import SecretVault
+from security.owner_access import OwnerAccessStore
 from tools import benchmark as benchmark_tools
 from tools.builtins import register_builtin_tools
 from tools.registry import ToolRegistry
@@ -50,6 +51,7 @@ def build_runtime():
     )
 
     device_registry = DeviceRegistry(settings.data_dir / 'devices.sqlite3')
+    owner_access = OwnerAccessStore(settings.data_dir / 'owner-access.sqlite3')
     device_gateway = DeviceGateway(device_registry, events)
     continuity = ContinuityService(
         settings.data_dir / 'continuity.sqlite3',
@@ -150,6 +152,7 @@ def build_runtime():
         'knowledge': knowledge,
         'vector_store': vector,
         'device_registry': device_registry,
+        'owner_access': owner_access,
         'device_gateway': device_gateway,
         'continuity': continuity,
         'proactive': proactive,
