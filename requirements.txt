@@ -19,6 +19,7 @@ sounddevice>=0.5,<1
 soundfile>=0.13,<1
 cryptography>=50,<51
 webauthn>=2.8,<3
+google-auth>=2.40,<3
 playwright>=1.55,<2
 PyAutoGUI>=0.9.54,<1
 keyring>=25,<27

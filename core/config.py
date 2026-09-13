@@ -64,6 +64,8 @@ class Settings:
     iphone_owner_enrollment_code:str=os.getenv('PERSONAL_AI_IPHONE_ENROLLMENT_CODE','').strip()
     iphone_pwa_allow_insecure:bool=env_bool('PERSONAL_AI_IPHONE_ALLOW_INSECURE',False)
     iphone_device_cookie_days:int=int(os.getenv('PERSONAL_AI_DEVICE_COOKIE_DAYS','365'))
+    google_signin_client_id:str=os.getenv('GOOGLE_SIGNIN_CLIENT_ID',os.getenv('GOOGLE_CLIENT_ID','')).strip()
+    owner_google_email:str=os.getenv('PERSONAL_AI_OWNER_GOOGLE_EMAIL','').strip().casefold()
     browser_headless:bool=env_bool('BROWSER_HEADLESS',False)
     file_roots:tuple[Path,...]=tuple(
         Path(item.strip()).expanduser().resolve()

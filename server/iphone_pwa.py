@@ -11,6 +11,8 @@ from typing import Literal
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token as google_id_token
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -49,6 +51,11 @@ class OwnerPasswordSetupBody(BaseModel):
 class OwnerRecoveryBody(BaseModel):
     code: str = Field(min_length=8, max_length=64)
     name: str = Field(default='Recovered owner browser', max_length=120)
+
+
+class GoogleLoginBody(BaseModel):
+    credential: str = Field(min_length=100, max_length=8192)
+    name: str = Field(default='Google owner browser', max_length=120)
 
 
 class PasskeyCompleteBody(BaseModel):
@@ -299,11 +306,15 @@ def iphone_pwa_router(runtime, settings):
 
     @router.get('/api/access/options')
     def access_options():
+        google_client_id = getattr(settings, 'google_signin_client_id', '').strip()
+        owner_google_email = getattr(settings, 'owner_google_email', '').strip().casefold()
         return {
             'passkey_available': bool(owner_access.passkeys()),
             'password_available': owner_access.password_configured(),
             'recovery_available': owner_access.recovery_codes_remaining() > 0,
             'enrollment_available': len(getattr(settings, 'iphone_owner_enrollment_code', '').strip()) >= 12,
+            'google_available': bool(google_client_id and owner_google_email),
+            'google_client_id': google_client_id if google_client_id and owner_google_email else '',
         }
 
     @router.get('/api/access/security')
@@ -316,7 +327,38 @@ def iphone_pwa_router(runtime, settings):
             'password_configured': owner_access.password_configured(),
             'recovery_codes_remaining': owner_access.recovery_codes_remaining(),
             'passkeys': owner_access.passkeys(),
+            'google_configured': bool(
+                getattr(settings, 'google_signin_client_id', '').strip()
+                and getattr(settings, 'owner_google_email', '').strip()
+            ),
         }
+
+    @router.post('/api/access/google/login')
+    def google_login(body: GoogleLoginBody, request: Request, response: Response):
+        require_https(request)
+        key = allow_access_attempt(request, 'google')
+        client_id = getattr(settings, 'google_signin_client_id', '').strip()
+        owner_email = getattr(settings, 'owner_google_email', '').strip().casefold()
+        if not client_id or not owner_email:
+            raise HTTPException(503, 'Google owner sign-in is not configured')
+        try:
+            claims = google_id_token.verify_oauth2_token(
+                body.credential,
+                GoogleAuthRequest(),
+                client_id,
+            )
+            email = str(claims.get('email') or '').strip().casefold()
+            verified = claims.get('email_verified') is True or str(claims.get('email_verified')).lower() == 'true'
+            subject = str(claims.get('sub') or '').strip()
+            if not verified or not subject or not hmac.compare_digest(email, owner_email):
+                raise ValueError('Google account is not the configured owner')
+        except Exception:
+            failed_access_attempt(key)
+            raise HTTPException(401, 'This Google account is not authorized for Personal AI')
+        clear_access_attempts(key)
+        device = trust_browser(response, body.name, 'web-pwa-google')
+        emit('owner.google.login', device_id=device['id'], provider='google')
+        return {'ok': True, 'device_id': device['id']}
 
     @router.post('/api/access/password/setup')
     def password_setup(
