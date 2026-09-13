@@ -196,13 +196,21 @@ def create_app(
 
     @app.get('/health')
     def health():
+        models = runtime.get('models') if runtime else None
         return {
             'ok': True,
             'service': 'personal-ai',
             'version': 'p2',
             'cloud_runtime': cloud is not None,
             'capability_superiority': bool(runtime and runtime.get('benchmark')),
+            'model': models.status() if models else {'state': 'unavailable'},
         }
+
+    @app.get('/health/model')
+    def model_health():
+        models = require_runtime('models')
+        status = models.status(probe=True)
+        return JSONResponse(status_code=200 if status['state'] == 'available' else 503, content=status)
 
     @app.post('/pair/start')
     def pair_start(request: Request):

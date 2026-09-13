@@ -1,8 +1,8 @@
-# Personal AI — Clean-Room Rebuild
+# Personal AI
 
 Independent personal AI assistant codebase designed from scratch.
 
-## Included in this V2 baseline
+## Current integrated product
 
 - PyQt6 desktop shell
 - Living pulse AI visual states
@@ -27,6 +27,14 @@ Independent personal AI assistant codebase designed from scratch.
 - Tests
 - GitHub Actions CI file
 - Packaging entrypoints
+- iPhone/PWA persistent conversations and hands-free voice
+- Owner-facing Memory Graph, Tree, Detail and controls
+- Separate document Knowledge ingestion, search and citations
+- Durable governed workflows, recovery and emergency stop
+- Per-device scopes, device listing and revocation
+- Replaceable cloud/self-hosted model routing
+
+Operational details: [`docs/OWNER_PRODUCT_OPERATIONS.md`](docs/OWNER_PRODUCT_OPERATIONS.md).
 
 ## Run
 

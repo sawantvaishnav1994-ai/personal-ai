@@ -6,6 +6,7 @@ import threading
 from agent.executor import AgentExecutor
 from automation.engine import AutomationEngine
 from capabilities.benchmark import CapabilityBenchmark
+from capabilities.dialogue_evaluation import ModelDialogueEvaluation
 from capabilities.scenarios import CompetitiveScenarioSuite
 from core.config import settings
 from core.events import EventBus
@@ -14,8 +15,10 @@ from core.telemetry import Telemetry
 from devices.continuity import ContinuityService
 from devices.gateway import DeviceGateway
 from devices.registry import DeviceRegistry
+from future_intelligence.program import FutureIntelligenceProgram
 from integrations.plugins import PluginManifestRegistry
 from integrations.runtime import build_integrations
+from knowledge.store import KnowledgeStore
 from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from memory.vector_store import VectorStore
@@ -26,6 +29,7 @@ from qualification.program import P3QualificationProgram
 from qualification.voice import VoiceQualificationRecorder
 from recovery.backup import BackupService
 from security.vault import SecretVault
+from security.owner_access import OwnerAccessStore
 from tools import benchmark as benchmark_tools
 from tools.builtins import register_builtin_tools
 from tools.registry import ToolRegistry
@@ -39,11 +43,16 @@ def build_runtime():
     preferences = Preferences(settings.data_dir / 'preferences.json')
     backups = BackupService(settings.data_dir)
     memory = MemoryStore(settings.data_dir / 'assistant.sqlite3')
-    models = ModelRouter(settings)
+    models = ModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     second_brain = SecondBrain(memory, models, vector)
+    knowledge = KnowledgeStore(
+        settings.data_dir / 'knowledge.sqlite3',
+        settings.data_dir / 'knowledge' / 'objects',
+    )
 
     device_registry = DeviceRegistry(settings.data_dir / 'devices.sqlite3')
+    owner_access = OwnerAccessStore(settings.data_dir / 'owner-access.sqlite3')
     device_gateway = DeviceGateway(device_registry, events)
     continuity = ContinuityService(
         settings.data_dir / 'continuity.sqlite3',
@@ -84,6 +93,7 @@ def build_runtime():
         memory=memory,
         events=events,
         second_brain=second_brain,
+        knowledge=knowledge,
         telemetry=telemetry,
     )
 
@@ -116,6 +126,7 @@ def build_runtime():
         events=events,
         proactive_engine=proactive,
         continuity_service=continuity,
+        integration_adapters=adapters,
     )
 
     voice = RealtimeVoiceSession(models, executor, events)
@@ -139,8 +150,10 @@ def build_runtime():
         'memory': memory,
         'models': models,
         'second_brain': second_brain,
+        'knowledge': knowledge,
         'vector_store': vector,
         'device_registry': device_registry,
+        'owner_access': owner_access,
         'device_gateway': device_gateway,
         'continuity': continuity,
         'proactive': proactive,
@@ -165,14 +178,36 @@ def build_runtime():
         'primary_continuity_thread_id': primary_thread_id,
     }
     p3_qualification.runtime = runtime
+
+    future = FutureIntelligenceProgram(settings.data_dir / 'future-intelligence', runtime=runtime)
+    runtime['future_intelligence'] = future
+    runtime['everyday_intelligence'] = future.everyday
+    runtime['life_graph'] = future.life_graph
+    runtime['personal_operations'] = future.operations
+    runtime['world_understanding'] = future.world
+    runtime['personal_ai_everywhere'] = future.everywhere
+    runtime['hybrid_intelligence'] = future.hybrid
+    runtime['advanced_autonomy'] = future.autonomy
+
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
+    model_evaluation = ModelDialogueEvaluation(
+        settings.data_dir / 'model-dialogue-evaluation.sqlite3',
+        models,
+        audit=memory.audit,
+    )
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
+    runtime['model_evaluation'] = model_evaluation
     runtime['capability_scenarios'] = scenarios
     benchmark_tools.register(tools, benchmark, scenarios)
 
-    def append_continuity(kind, text, device_id=None):
+    def append_continuity(kind, text, device_id=None, conversation_id=None):
         if not text:
+            return
+        # Thread-aware surfaces persist directly so they can atomically pair the
+        # UI event with the selected conversation. Legacy/device commands still
+        # flow through this event bridge using the device's active thread.
+        if conversation_id:
             return
         source_device = str(device_id or 'desktop')
         try:
@@ -191,11 +226,21 @@ def build_runtime():
 
     events.subscribe(
         'conversation.user',
-        lambda event: append_continuity('user_message', event.get('text'), event.get('device_id')),
+        lambda event: append_continuity(
+            'user_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
+        ),
     )
     events.subscribe(
         'conversation.assistant',
-        lambda event: append_continuity('assistant_message', event.get('text'), event.get('device_id')),
+        lambda event: append_continuity(
+            'assistant_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
+        ),
     )
 
     events.subscribe(

@@ -6,6 +6,7 @@ from tools import (
     continuity,
     documents,
     files,
+    integrations,
     memory_tools,
     notifications,
     proactive,
@@ -29,13 +30,18 @@ def register_builtin_tools(
     events=None,
     proactive_engine=None,
     continuity_service=None,
+    integration_adapters=None,
 ):
-    files.register(registry)
+    files.register(registry, settings)
+    integrations.register(registry, integration_adapters)
     web.register(registry)
     system.register(registry)
     memory_tools.register(registry, memory, second_brain=second_brain)
     documents.register(registry, settings)
-    screen.register(registry, settings.data_dir)
+    # A cloud container has no owner's physical display. Advertising screenshot
+    # there lets a planner select an impossible X11 tool and leaks raw failures.
+    if not bool(getattr(settings, 'hosted_runtime', False)):
+        screen.register(registry, settings.data_dir)
     reminders.register(registry, memory)
     browser.register(registry)
     advanced_control.register(registry, settings)

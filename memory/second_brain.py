@@ -221,6 +221,27 @@ class SecondBrain:
             ],
         }
 
+    def delete(self, memory_id: str):
+        deleted = self.store.delete_memory(memory_id)
+        if deleted and self.vector_store:
+            try:
+                self.vector_store.delete(memory_id)
+            except Exception:
+                pass
+        return deleted
+
+    def apply_retention(self, *, older_than_days: int, sensitivity: str | None = None, dry_run: bool = True):
+        result = self.store.apply_retention(
+            older_than_days=older_than_days,
+            sensitivity=sensitivity,
+            dry_run=True,
+        )
+        if not dry_run:
+            for memory_id in result['memory_ids']:
+                self.delete(memory_id)
+            result['dry_run'] = False
+        return result
+
     def extract_candidates(self, user_text: str, assistant_text: str | None = None):
         if not self.models:
             return []
