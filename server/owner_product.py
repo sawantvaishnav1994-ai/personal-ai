@@ -615,6 +615,17 @@ def owner_product_router(runtime):
             'integrations': runtime['integrations'].list(),
             'future_intelligence': runtime['future_intelligence'].status(),
             'emergency_stop': bool(getattr(runtime['tools'], 'emergency_stop', False)),
+            'model_evaluation': runtime['model_evaluation'].latest(),
         }
+
+    @router.post('/system/model-evaluation')
+    def run_model_evaluation(
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = authenticate(pa_device, pa_token, 'qualification:record')
+        result = runtime['model_evaluation'].run()
+        audit('model.evaluation.requested', device_id=device_id, run_id=result['id'])
+        return result
 
     return router

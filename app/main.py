@@ -6,6 +6,7 @@ import threading
 from agent.executor import AgentExecutor
 from automation.engine import AutomationEngine
 from capabilities.benchmark import CapabilityBenchmark
+from capabilities.dialogue_evaluation import ModelDialogueEvaluation
 from capabilities.scenarios import CompetitiveScenarioSuite
 from core.config import settings
 from core.events import EventBus
@@ -189,8 +190,14 @@ def build_runtime():
     runtime['advanced_autonomy'] = future.autonomy
 
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
+    model_evaluation = ModelDialogueEvaluation(
+        settings.data_dir / 'model-dialogue-evaluation.sqlite3',
+        models,
+        audit=memory.audit,
+    )
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
+    runtime['model_evaluation'] = model_evaluation
     runtime['capability_scenarios'] = scenarios
     benchmark_tools.register(tools, benchmark, scenarios)
 

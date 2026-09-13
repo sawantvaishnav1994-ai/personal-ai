@@ -23,6 +23,7 @@ class Settings:
     model_health_timeout_seconds:float=float(os.getenv('MODEL_HEALTH_TIMEOUT_SECONDS','5'))
     model_local_first:bool=env_bool('MODEL_LOCAL_FIRST',True)
     allow_external_for_sensitive:bool=env_bool('ALLOW_EXTERNAL_FOR_SENSITIVE',False)
+    model_evaluation_on_startup:bool=env_bool('MODEL_EVALUATION_ON_STARTUP',False)
     openrouter_api_key:str=os.getenv('OPENROUTER_API_KEY','')
     openrouter_model:str=os.getenv('OPENROUTER_MODEL','meta-llama/llama-3.3-70b-instruct')
     openai_api_key:str=os.getenv('OPENAI_API_KEY','')
