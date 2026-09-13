@@ -68,11 +68,13 @@ class Recorder:
         return [{'id': 'session-1'}]
 
 
-def make_client(tmp_path: Path, allow_insecure=False):
+def make_client(tmp_path: Path, allow_insecure=False, google_signin=False):
     settings = SimpleNamespace(
         base_dir=Path(__file__).resolve().parent.parent,
         iphone_owner_enrollment_code='this-is-a-long-owner-code',
         iphone_pwa_allow_insecure=allow_insecure,
+        google_signin_client_id='google-client.apps.googleusercontent.com' if google_signin else '',
+        owner_google_email='owner@example.com' if google_signin else '',
     )
     events = EventBus()
     runtime = {
@@ -152,6 +154,8 @@ def test_access_options_and_passkey_registration_require_owner_trust(tmp_path):
         'password_available': False,
         'recovery_available': False,
         'enrollment_available': True,
+        'google_available': False,
+        'google_client_id': '',
     }
     assert client.post('/iphone/api/access/passkey/register/options', json={}).status_code == 401
     assert client.post('/iphone/api/access/passkey/login/options', json={}).status_code == 409
@@ -172,6 +176,58 @@ def test_password_failures_are_rate_limited(tmp_path):
     for _ in range(5):
         assert client.post('/iphone/api/access/password/login', json={'password': 'wrong'}).status_code == 401
     assert client.post('/iphone/api/access/password/login', json={'password': 'wrong'}).status_code == 429
+
+
+def test_verified_configured_google_owner_unlocks_new_browser(tmp_path, monkeypatch):
+    client, runtime = make_client(tmp_path, google_signin=True)
+    calls = []
+
+    def verify(token, request, audience):
+        calls.append((token, audience))
+        return {
+            'sub': 'google-owner-subject',
+            'email': 'OWNER@example.com',
+            'email_verified': True,
+        }
+
+    monkeypatch.setattr('server.iphone_pwa.google_id_token.verify_oauth2_token', verify)
+    options = client.get('/iphone/api/access/options').json()
+    assert options['google_available'] is True
+    assert options['google_client_id'] == 'google-client.apps.googleusercontent.com'
+
+    response = client.post('/iphone/api/access/google/login', json={
+        'credential': 'g' * 120,
+        'name': 'Owner Google Safari',
+    })
+
+    assert response.status_code == 200
+    assert calls == [('g' * 120, 'google-client.apps.googleusercontent.com')]
+    assert client.get('/iphone/api/status').status_code == 200
+    assert runtime['device_registry'].tokens['iphone-1'] == 'token-1'
+    cookies = response.headers.get_list('set-cookie')
+    assert all('HttpOnly' in cookie and 'Secure' in cookie and 'SameSite=strict' in cookie for cookie in cookies)
+
+
+def test_google_login_rejects_other_or_unverified_accounts(tmp_path, monkeypatch):
+    client, _ = make_client(tmp_path, google_signin=True)
+
+    monkeypatch.setattr(
+        'server.iphone_pwa.google_id_token.verify_oauth2_token',
+        lambda *_: {'sub': 'someone-else', 'email': 'other@example.com', 'email_verified': True},
+    )
+    assert client.post('/iphone/api/access/google/login', json={'credential': 'x' * 120}).status_code == 401
+
+    monkeypatch.setattr(
+        'server.iphone_pwa.google_id_token.verify_oauth2_token',
+        lambda *_: {'sub': 'owner', 'email': 'owner@example.com', 'email_verified': False},
+    )
+    assert client.post('/iphone/api/access/google/login', json={'credential': 'y' * 120}).status_code == 401
+
+
+def test_google_login_fails_closed_when_not_configured(tmp_path):
+    client, _ = make_client(tmp_path)
+    response = client.post('/iphone/api/access/google/login', json={'credential': 'x' * 120})
+    assert response.status_code == 503
 
 
 def test_voice_turn_uses_enrolled_device_and_existing_executor(tmp_path):
