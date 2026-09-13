@@ -9,6 +9,7 @@ from agent.executor import ConfirmationRequired
 from devices.continuity import ContinuityService
 from server.iphone_pwa import iphone_pwa_router
 from models.router import ModelTimeout, ModelUnavailable
+from security.owner_access import OwnerAccessStore
 
 
 class Registry:
@@ -80,6 +81,7 @@ def make_client(tmp_path: Path, allow_insecure=False):
         'events': events,
         'continuity': ContinuityService(tmp_path / 'continuity.sqlite3', events=events),
         'voice_qualification': Recorder(),
+        'owner_access': OwnerAccessStore(tmp_path / 'owner-access.sqlite3'),
     }
     app = FastAPI()
     app.include_router(iphone_pwa_router(runtime, settings))
@@ -110,6 +112,66 @@ def test_status_renews_existing_browser_trust_without_reenrollment(tmp_path):
     assert len(cookies) == 2
     assert all('Max-Age=31536000' in cookie for cookie in cookies)
     assert len(runtime['device_registry'].tokens) == 1
+
+
+def test_owner_password_unlocks_a_new_browser_after_trusted_setup(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    assert client.post('/iphone/api/access/password/setup', json={
+        'password': 'correct horse battery staple',
+    }).status_code == 200
+    client.post('/iphone/api/logout', json={})
+
+    assert client.post('/iphone/api/access/password/login', json={
+        'password': 'wrong password',
+    }).status_code == 401
+    login = client.post('/iphone/api/access/password/login', json={
+        'password': 'correct horse battery staple',
+        'name': 'Safari with password',
+    })
+    assert login.status_code == 200
+    assert client.get('/iphone/api/status').status_code == 200
+
+
+def test_recovery_code_unlocks_once_and_cannot_be_replayed(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    generated = client.post('/iphone/api/access/recovery/regenerate', json={}).json()['codes']
+    client.post('/iphone/api/logout', json={})
+
+    assert client.post('/iphone/api/access/recovery/login', json={'code': generated[0]}).status_code == 200
+    client.post('/iphone/api/logout', json={})
+    assert client.post('/iphone/api/access/recovery/login', json={'code': generated[0]}).status_code == 401
+
+
+def test_access_options_and_passkey_registration_require_owner_trust(tmp_path):
+    client, _ = make_client(tmp_path)
+    options = client.get('/iphone/api/access/options').json()
+    assert options == {
+        'passkey_available': False,
+        'password_available': False,
+        'recovery_available': False,
+        'enrollment_available': True,
+    }
+    assert client.post('/iphone/api/access/passkey/register/options', json={}).status_code == 401
+    assert client.post('/iphone/api/access/passkey/login/options', json={}).status_code == 409
+
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    registration = client.post('/iphone/api/access/passkey/register/options', json={})
+    assert registration.status_code == 200
+    public_key = registration.json()['public_key']
+    assert public_key['rp']['id'] == 'testserver'
+    assert public_key['authenticatorSelection']['userVerification'] == 'required'
+
+
+def test_password_failures_are_rate_limited(tmp_path):
+    client, _ = make_client(tmp_path)
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    client.post('/iphone/api/access/password/setup', json={'password': 'correct horse battery staple'})
+    client.post('/iphone/api/logout', json={})
+    for _ in range(5):
+        assert client.post('/iphone/api/access/password/login', json={'password': 'wrong'}).status_code == 401
+    assert client.post('/iphone/api/access/password/login', json={'password': 'wrong'}).status_code == 429
 
 
 def test_voice_turn_uses_enrolled_device_and_existing_executor(tmp_path):
@@ -370,6 +432,7 @@ def test_plain_http_enrollment_fails_closed(tmp_path):
         'events': events,
         'continuity': ContinuityService(tmp_path / 'continuity.sqlite3', events=events),
         'voice_qualification': Recorder(),
+        'owner_access': OwnerAccessStore(tmp_path / 'owner-access.sqlite3'),
     }
     app = FastAPI(); app.include_router(iphone_pwa_router(runtime, settings))
     client = TestClient(app, base_url='http://testserver')
@@ -465,6 +528,11 @@ def test_pwa_home_is_conversation_first_and_qualification_lives_in_advanced(tmp_
     assert '<details class="session-details">' not in page
     assert 'id="startSession"' not in page
     assert 'id="stopSession"' not in page
+    assert 'Continue with Face ID' in page
+    assert 'Use owner password' in page
+    assert 'Having trouble?' in page
+    assert 'Use enrollment code' in page
+    assert 'Trust this iPhone' not in page
     assert 'localStorage' not in page
     assert 'sessionStorage' not in page
 
