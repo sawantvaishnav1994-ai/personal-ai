@@ -2,101 +2,120 @@
 
 Date: 2026-09-14
 
-## W7.1 — frozen automated baseline
+## Frozen prior baselines
 
-Validated W7.1 documentation baseline: `526b249c54f5726421ecd8e2b6773916b5eed1a0`.
+W7.1 Durable Operator Transaction Core remains **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
 
-W7.1 Durable Operator Transaction Core remains **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**. Its Trusted Action Core, durable transaction authority, restart recovery, cancellation/deadline/Emergency Stop handling and approval binding are preserved; W7.2 extends rather than replaces them.
+W7.2 Observation Safety / Sensitive Evidence remains **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at final documentation head `2a05e1da4777cdb2393759bd650b264735b1ec97`.
 
-## W7.2 — Observation Safety and Sensitive Evidence Hardening
+## W7.3 — Allowlists and Data-Safety Policies
 
-Recovered W7.2 WIP: `f41aba85cf236800e1fc7ead0665448d9246e20d`.
+Baseline SHA: `2a05e1da4777cdb2393759bd650b264735b1ec97`.
 
-Superseded intermediate candidate: `5d100d16501d98f32856a16789198707e01e7ddd`; workflow `34867451105` is not final evidence.
+Validated implementation SHA: `893db9efd3a0c3838c31d13eda0f9b04f3710ee6`.
 
-Final W7.2 implementation SHA: `78ba7e7f9e1587fe5a68d3923f15d0425ef81715`.
+Exact implementation changed files:
+- `security/policy_gateway.py`
+- `security/policy_store.py`
+- `security/policy_targets.py`
+- `tests/test_w73_policy.py`
+- `tests/test_w73_binding_controls.py`
+- `tests/test_w73_adversarial_edges.py`
+- `tools/registry.py`
+- `ui/settings_panel.py`
 
-### Observation and plan binding
+### Policy model and authority
 
-W7.2 provides durable observation identity and expiry; owner/device/session/security-epoch/transaction binding; application/process/window identity; browser context/tab/origin/normalized URL/frame identity; sanitized DOM/accessibility/actionable-element digests; exact plan/observation digest binding through the existing Trusted Action Core; fresh observation immediately before dispatch; target removal/replacement/movement rejection; action-by-action observation renewal; before/after evidence; cancellation/Emergency Stop checks and recovery-review handling.
+W7.3 adds one authoritative default-deny policy gateway above the existing Trusted Action Core. It does not create a competing approval system. Consequential operations are evaluated against durable owner policy before execution, and approvals remain bound to the existing trusted-action authority.
 
-Consequential parameter changes change the prepared approval scope. Unknown or materially changed context fails closed before input dispatch.
+The gateway returns exactly: `allow`, `deny`, `approval_required`, `reauthentication_required`, or `recovery_review_required`, with stable owner-safe reason codes. Unknown applications, domains/origins, paths, destinations and operation classes fail closed.
 
-### Sensitive evidence guarantees
+Policies are durable and versioned with owner/device/session/security-epoch scope, target identity, allowed/denied operations, sensitivity restrictions, approval/reauthentication rules, validity, priority, version, actor and active/revoked state. Explicit deny takes precedence. Owner controls in Settings allow inspect/add/enable/disable/revoke/reset without redesigning Home V1 or the AI Core.
 
-Browser-supported observations use browser-native in-memory masking before screenshot bytes leave the browser capture boundary. Sensitive selectors cover password, hidden, OTP, payment, token/secret/pass/PIN/CVV/CVC fields and are evaluated across frames. Browser observation does not read cookies, local/session storage or authorization headers and stores bounded sanitized metadata/digests rather than unrestricted DOM values.
+Temporary/one-action permits are bound to current policy digest, owner, device, session, security epoch, exact operation/parameters, application/destination, data classification, observation identity/digest, expiry and maximum uses. Policy changes, security-epoch changes, Emergency Stop or binding mismatch invalidate authorization.
 
-Desktop capture is memory-first. No raw sensitive screenshot is written as an intermediate file. Redaction uses coordinate-space model version **2** with explicit typed spaces for:
+### SQLite migration
 
-- browser viewport;
-- browser document;
-- browser window;
-- physical monitor;
-- virtual desktop;
-- screenshot image.
+W7.3 policy schema version is **73**. The migration is additive and restart-safe from W7.2 schema 72. Fresh creation, 72→73 upgrade, repeated initialization, restart persistence and concurrent policy-update behavior are covered. Policy tables include durable policy state, temporary permits and redacted audit evidence.
 
-The transformation model explicitly accounts for available devicePixelRatio, page zoom, document scroll, viewport/window geometry, browser content/chrome offsets, monitor scale/origin, virtual-desktop origin, screenshot crop origin and screenshot dimensions. Rectangles from different spaces are never treated as interchangeable.
+### Application policy
 
-Missing, malformed, inconsistent or out-of-bounds mapping fails closed. The runtime either uses browser-native masking, valid typed transformation, or full-frame redaction/visual-evidence-unavailable. Full-frame-redacted evidence is never accepted as proof of target position or visual success.
+Application identity does not rely on process/display name alone. It uses canonical executable path plus executable SHA-256 and optional publisher/signature identity and version. Unknown/unverifiable executables are rejected; executable replacement, path mismatch and application-name spoofing are detected.
 
-`SanitizedEvidenceGuard` rejects unsanitized/full-redacted visual evidence, unknown coordinate provenance, expired evidence, owner/device/session mismatch, missing sanitized bytes and invalid checksums before model/vision consumption.
+### Domain/navigation policy
 
-Evidence uses unique IDs, exclusive writes, checksum verification, path confinement, symlink resistance and retention/deletion controls.
+Origins normalize scheme, IDNA hostname and port. HTTP and HTTPS are distinct. Exact-host and explicit-subdomain matching avoids suffix/wildcard confusion. Credential-bearing URLs are rejected. IP literals and localhost/private/link-local/reserved destinations require explicit owner policy. Redirects are checked against final origin; cross-origin or scheme-changing redirects require explicit final-origin permission.
 
-### Migration and restart safety
+### Filesystem and clipboard policy
 
-W7.2 keeps the additive restart-safe operator SQLite migration at schema version **72**. It creates the durable `operator_observations` journal and adds observation/target/plan bindings to operator actions while preserving W7.1 state. Fresh-database, W7.1-upgrade and repeated/restart migration regressions remain green.
+File paths use canonical/root-aware checks rather than string-prefix authorization. Coverage includes traversal, symlinks, Windows case behavior, UNC/network paths, junction/reparse indications, mounted-drive policy, NTFS alternate streams, reserved device names, MIME/extension/signature checks, size limits and temporary-root confinement. Destructive delete is separately reauthentication/approval gated.
 
-### Final tests
+Clipboard read/write are separate policy operations. Access is bounded and owner-visible. Secret/token/password/private-key patterns are classified; secret transfer is blocked; destination and content digest are bound so changed clipboard content invalidates authorization. Raw clipboard contents are excluded from normal policy audit and are not made durable Memory evidence by this layer.
 
-Focused W7.2 coverage: **85 PASS**.
+### Data/side-effect policy
 
-Full repository exact implementation-head CI: **557 passed, 8 warnings**.
+Classifications are normalized to public, personal, sensitive, secret and NEVER_STORE. NEVER_STORE cannot enter durable memory/evidence. Secret data cannot leave approved private boundaries. Sensitive external transfer requires explicit approval. High-risk actions require recent reauthentication. Purchase, financial transfer, public publishing, permission/security changes, legal acceptance and destructive delete require strong explicit approval. Prohibited operations remain blocked even if model-generated.
+
+### Recovery
+
+If a consequential outcome is unknown/uncertain, the gateway returns `recovery_review_required`; it does not authorize automatic blind retry. Redacted evidence is retained for owner review.
+
+### Validation
+
+Focused committed W7.3 tests: **45 PASS**.
+
+Supplementary adversarial scratch qualification: **81 PASS**. This is explicitly **non-release supplementary evidence only** and is not used as a substitute for committed tests or CI.
+
+Full repository exact implementation-head CI: **602 passed, 8 warnings**.
 
 `pip check`: PASS.
 
 `compileall`: PASS.
 
-Standalone JavaScript syntax gate: not applicable to this W7.2 delta; no standalone `.js` file changed. Embedded browser scripts are exercised through browser observation/masking tests.
-
-Coverage includes DPR 1/2/3, zoom, scrolling, browser chrome/content offsets, resized windows, positive/negative monitor origins, multi-monitor layouts, partially off-screen/cross-monitor clipping, malformed/out-of-bounds rectangles, iframe sensitive fields, missing/unsupported geometry, full-frame fail-safe redaction, browser-native masking, no raw screenshot persistence, no unredacted model/vision call, concurrent captures, retention/deletion and symlink/path confinement, plus all prior observation/approval/context/target/Emergency Stop/recovery tests.
+Standalone JavaScript syntax check: not applicable because the W7.3 implementation changed no standalone `.js` file.
 
 ### Security findings repaired
 
-1. Recovered WIP lacked complete fresh-dispatch binding and explicit plan/observation digest binding.
-2. Browser tab/window identity and normalized URL identity were insufficiently durable/safe.
-3. Browser viewport rectangles could not safely be reused as monitor screenshot rectangles.
-4. Coordinate provenance did not fully model DPR, zoom, scroll, browser-window/chrome offsets and multi-monitor origins.
-5. Screenshot consumers needed a single fail-closed sanitized-evidence boundary.
-6. Legacy test fixtures were updated to the live coordinate-space version without weakening production validation.
+1. Temporary-permit SQLite insert mismatch found by focused tests and repaired.
+2. Missing policy now explicitly means deny.
+3. Approval replay and policy-change reuse are invalidated by snapshot/digest and one-use binding.
+4. Application-name spoofing/executable replacement are rejected using canonical path/hash identity.
+5. Domain wildcard/suffix, IDN, credential URL, scheme, redirect and private-network confusion were hardened.
+6. Filesystem prefix confusion, traversal, symlink, junction/reparse, mounted path, UNC, ADS, reserved-name, MIME/signature and oversized-file cases were hardened.
+7. Clipboard secret detection and changed-after-approval races were hardened; audits redact sensitive content.
+8. Destructive delete and other consequential side effects now require appropriate reauthentication/approval.
 
 ### Exact implementation-head workflows
 
-All six required workflows passed on `78ba7e7f9e1587fe5a68d3923f15d0425ef81715`:
-
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #717 | `34873006958` | PASS |
-| Reliability and Security | #202 | `34873006929` | PASS |
-| P3 iPhone PWA | #170 | `34873006957` | PASS |
-| Android Instrumentation | #201 | `34873006928` | PASS |
-| Package Validation | #201 | `34873006956` | PASS |
-| iOS Companion | #183 | `34873007037` | PASS |
+| CI | #742 | `34879964954` | PASS |
+| Reliability and Security | #207 | `34879964723` | PASS |
+| P3 iPhone PWA | #175 | `34879964821` | PASS |
+| Android Instrumentation | #206 | `34879964875` | PASS |
+| Package Validation | #206 | `34879964783` | PASS |
+| iOS Companion | #188 | `34879964725` | PASS |
 
 Implementation gate: **6/6 PASS**.
 
-## Classification
+## Current classification before documentation-head validation
 
-W7.2 is **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at the implementation-head gate.
+W7.3 is:
+- **IMPLEMENTED**
+- **INTEGRATED**
+- **IMPLEMENTATION-HEAD AUTOMATED VALIDATED**
+- **DOCUMENTATION-HEAD VALIDATION PENDING**
 
-It remains **not PHYSICAL-DEVICE VERIFIED**, **not PRODUCTION VERIFIED**, and does **not** make W7 complete.
+Do not classify W7.3 yet as physical-device verified, production verified, live OAuth verified or complete W7.
 
-Production, Railway and the existing iPhone qualification service were not changed. W6 live OAuth remains blocked/deferred under the owner-approved paid-infrastructure decision.
+Production, Railway and the existing iPhone qualification service were not changed. W6 live Google OAuth remains blocked/deferred because the isolated paid qualification infrastructure is owner-deferred. No service purchase, production deployment or secret request is part of W7.3.
 
 ## Documentation-only gate
 
-This checkpoint/matrix update must itself pass the same six exact-head workflows before W7.3 begins. The resulting documentation SHA and workflow IDs are the final W7.2 evidence head.
+This checkpoint plus `CAPABILITY_MATRIX.md`, `TEST_MATRIX.md` and `MISSING_PARTIAL_STUB_MATRIX.md` form the documentation-only evidence commit. Its parent must be exactly `893db9efd3a0c3838c31d13eda0f9b04f3710ee6`, its diff must contain only those four documentation files, and the same six workflows must independently pass on the exact documentation SHA.
 
-## Exact continuation point after documentation 6/6
+Only after documentation-head **6/6 PASS** may W7.3 be frozen and classified **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
 
-W7.3 — **Allowlists and Data-Safety Policies**: approved applications/domains/paths/destinations, clipboard/secret handling, side-effect policy and bounded recovery rules. Do not begin W7.3 before the documentation-only W7.2 head is 6/6 green.
+## Exact W7.4 dependency
+
+W7.4 — Safe Browser Operator — may begin only from the final validated W7.3 documentation SHA. W7.4 must consume W7.1 transaction authority, W7.2 observation/evidence safety and the W7.3 policy gateway rather than duplicating them. Production/Railway remain out of scope.

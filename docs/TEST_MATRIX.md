@@ -2,106 +2,98 @@
 
 Baseline date: 2026-09-14
 
-Statuses distinguish automated software evidence from live-provider, physical-device and production evidence.
-
 ## W7 validated history
 
 | Batch | Exact implementation SHA | Focused/full evidence | Required workflows |
 | --- | --- | ---: | --- |
 | W7.1 Durable Operator Transaction Core | `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` | 471 full PASS | 6/6 PASS |
-| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f9e1587fe5a68d3923f15d0425ef81715` | **85 focused PASS; 557 full PASS, 8 warnings** | **6/6 PASS** |
+| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f9e1587fe5a68d3923f15d0425ef81715` | 85 focused PASS; 557 full PASS, 8 warnings | 6/6 PASS |
+| W7.3 Allowlists / Data-Safety Policies | `893db9efd3a0c3838c31d13eda0f9b04f3710ee6` | **45 committed focused PASS; 602 full PASS, 8 warnings** | **implementation 6/6 PASS; documentation pending** |
 
-## W7.2 implementation coverage
+## W7.3 implementation coverage
 
-Observation authority/freshness:
-- durable observation ID/digest and owner/device/session/security-epoch/transaction binding;
-- observation and plan expiry;
-- canonical plan digest tied to exact observation digest through existing Trusted Action approval scope;
-- immediate fresh observation before dispatch;
-- action-by-action observation renewal and bounded before/after evidence;
-- changed app/process/window/browser session/tab/origin/URL/frame rejection;
-- actionable-target removal/replacement/movement rejection;
-- new sensitive-region detection;
-- Emergency Stop/cancellation check immediately before input;
-- uncertain outcome -> recovery review.
+Policy authority:
+- one authoritative default-deny evaluation path;
+- durable versioned SQLite policy storage at schema **73**;
+- owner/device/session/security-epoch scope;
+- policy priority, explicit deny precedence, active/revoked state, expiry, temporary and one-action permissions;
+- policy snapshot/digest and Trusted Action binding;
+- stable results: allow, deny, approval_required, reauthentication_required, recovery_review_required;
+- owner-safe explanations and redacted decision audit;
+- Emergency Stop/security-epoch invalidation;
+- unknown consequential outcome -> recovery_review_required with no blind retry.
 
-Browser privacy/evidence:
-- bounded visible text, sanitized DOM and accessibility extraction;
-- stable browser-context/tab/action-target identities;
-- normalized URL strips user-info/query/fragment;
-- password/hidden/OTP/payment/token/secret/PIN/CVV/CVC detection;
-- browser-native in-memory masking across frames;
-- no cookie/local-storage/session-storage/authorization-header capture;
-- no unrestricted DOM persistence.
+Application/domain policy:
+- canonical executable path plus hash; optional publisher/version; executable replacement and name-spoof rejection;
+- scheme/hostname/port normalization and IDN/punycode handling;
+- exact hosts and explicit subdomains; no unsafe wildcard matching;
+- redirect final-origin checks; HTTP/HTTPS distinction; credential-bearing URL rejection;
+- IP-literal/private/localhost restrictions; origin/suffix confusion resistance;
+- cross-origin redirect requires explicit final-origin policy.
 
-Coordinate-space version 2:
-- browser viewport;
-- browser document;
-- browser window;
-- physical monitor;
-- virtual desktop;
-- screenshot image.
+Filesystem/clipboard policy:
+- canonical roots without string-prefix authorization;
+- traversal/symlink/UNC/case/reparse/junction/mounted-drive/NTFS ADS/reserved-name controls;
+- MIME/extension/signature and size checks; temporary-root confinement;
+- read/write/create/rename/move/delete/destructive-delete separable at policy operation level;
+- clipboard read/write separable; bounded access; secret detection; destination binding; clipboard-change race detection;
+- clipboard secret contents are not persisted in normal policy audit.
 
-Transformation and clipping regressions cover DPR 1/2/3, page zoom, document scrolling, browser chrome/content offset, resized browser windows, positive/negative monitor origins, multi-monitor layouts, partially off-screen and cross-monitor rectangles, malformed/out-of-bounds rectangles and missing/unsupported geometry.
-
-Evidence boundary:
-- desktop screenshot captured into memory;
-- sanitize before persistence;
-- incomplete/uncertain geometry -> full-frame fail-safe redaction / visual evidence unavailable;
-- full-redacted image cannot prove target position or visual success;
-- `SanitizedEvidenceGuard` rejects unsanitized/full-redacted, unknown-provenance, expired, binding-mismatched and checksum-invalid evidence;
-- no model/vision call for unavailable or unsanitized visual evidence;
-- unique concurrent evidence IDs;
-- retention/deletion;
-- path confinement and symlink resistance.
+Data/side-effect policy:
+- public/personal/sensitive/secret/NEVER_STORE classification normalization;
+- NEVER_STORE durable-write blocking;
+- secret external transfer blocked;
+- sensitive external transfer approval;
+- recent reauthentication for high-risk actions;
+- strong explicit approval for purchase, financial transfer, public publish, permission/security modification, legal acceptance and destructive delete;
+- approval binding includes owner/device/session/security epoch/application/destination/exact parameter digest/data class/policy digest/observation/expiry/max uses.
 
 Migration/restart:
-- fresh W7.2 database creation;
-- additive W7.1-style upgrade;
-- repeated/restart initialization;
-- `PRAGMA user_version = 72`;
-- durable `operator_observations` journal;
-- operator action observation/target/plan bindings.
+- fresh schema 73 database;
+- additive 72→73 upgrade;
+- repeated initialization and restart persistence;
+- concurrent policy update coverage.
 
-## Focused regression count
+## Counts and release evidence
 
-Final W7.2-focused coverage: **85 cases PASS**. This supersedes the earlier intermediate 33/33 prototype and the earlier 58-case implementation checkpoint.
+Focused committed W7.3 test count: **45 PASS**.
 
-## Full repository result
+Supplementary adversarial scratch qualification: **81 PASS**. This is explicitly **non-release supplementary evidence** and does not replace committed tests or exact-head CI.
 
-Exact implementation SHA `78ba7e7f9e1587fe5a68d3923f15d0425ef81715`:
-
+Exact implementation SHA `893db9efd3a0c3838c31d13eda0f9b04f3710ee6`:
 - `pip check`: PASS;
 - compileall: PASS;
-- `pytest -q`: **557 passed, 8 warnings**.
+- `pytest -q`: **602 passed, 8 warnings**;
+- standalone JavaScript syntax gate: N/A because no standalone `.js` file changed in W7.3.
 
-No standalone JavaScript file changed in the final W7.2 delta; embedded browser scripts are exercised by the browser observation/masking regressions.
-
-## Exact-head workflows — final W7.2 implementation
+## Exact-head workflows — W7.3 implementation
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #717 | `34873006958` | PASS |
-| Reliability and Security | #202 | `34873006929` | PASS |
-| P3 iPhone PWA | #170 | `34873006957` | PASS |
-| Android Instrumentation | #201 | `34873006928` | PASS |
-| Package Validation | #201 | `34873006956` | PASS |
-| iOS Companion | #183 | `34873007037` | PASS |
+| CI | #742 | `34879964954` | PASS |
+| Reliability and Security | #207 | `34879964723` | PASS |
+| P3 iPhone PWA | #175 | `34879964821` | PASS |
+| Android Instrumentation | #206 | `34879964875` | PASS |
+| Package Validation | #206 | `34879964783` | PASS |
+| iOS Companion | #188 | `34879964725` | PASS |
 
 Implementation gate: **6/6 PASS**.
 
-## Repair history
+## Security findings repaired
 
-1. Recovered WIP lacked complete immediate-dispatch binding and explicit plan/observation digest binding.
-2. Browser tab/window and normalized URL identity were hardened.
-3. Browser viewport sensitive rectangles were found unsafe to reuse as monitor coordinates.
-4. Browser-native masking and explicit typed geometry were added.
-5. Coordinate-space version 2 added all six requested coordinate systems and explicit DPR/zoom/scroll/window/chrome/monitor/crop inputs.
-6. Screenshot consumer guard added; full-redacted or invalid evidence cannot reach vision/model as proof.
-7. Legacy fixture compatibility was updated to the live provenance version without weakening production tests.
+1. A temporary-permit SQL insert mismatch was found during focused testing and repaired.
+2. Policy absence was made explicit default-deny rather than implicit permission.
+3. Approval replay/policy-change invalidation was bound to current snapshot/digest and one-use permits.
+4. Application display/process-name spoofing was rejected in favor of canonical executable identity and hash.
+5. Domain wildcard/suffix, IDN, redirect, embedded credential, private-network and scheme-confusion cases were hardened.
+6. Filesystem path-prefix confusion, traversal, symlink, reparse/junction, mounted path, UNC, ADS, reserved-name, MIME/signature and oversized-file cases were hardened.
+7. Clipboard secret/race handling and policy audit redaction were hardened.
+8. Destructive delete and other high-risk side effects were made reauthentication/approval gated.
 
-The superseded candidate `5d100d16501d98f32856a16789198707e01e7ddd` and workflow `34867451105` are not final evidence.
+## Evidence boundaries
 
-## Evidence outside automation
+W7.3 is **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
 
-W7.2 is not physical-device or production verified. Remaining future qualification includes physical Windows/browser operation, W7.3-W7.6, live Google OAuth/account qualification when infrastructure is approved, production durable storage, physical P3 and signed distribution.
+It is not physical-device verified, production verified, live OAuth verified, or complete W7. Production, Railway and the existing iPhone qualification service were unchanged. W6 live OAuth remains blocked/deferred pending future owner approval for isolated paid infrastructure.
+
+W7.4 Safe Browser Operator may begin only from the final validated W7.3 documentation SHA after the second 6/6 workflow gate.
