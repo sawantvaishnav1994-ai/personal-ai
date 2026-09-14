@@ -17,6 +17,24 @@ def register(reg):
     operator = SafeBrowserOperator(reg, PlaywrightBrowserAdapter(browser), download_root=data_dir / 'downloads')
     reg._safe_browser_operator = operator
 
+    # The one-use W7.3 permit is created after Trusted Action authorization but
+    # before the second fresh observation. It is consumed only if that fresh
+    # observation still matches the prepared browser/tab/origin/target binding.
+    original_fresh_target = operator._fresh_target
+    def permit_first_fresh_target(parameters):
+        if parameters.get('_issued_policy_permit'):
+            raise PermissionError('browser policy permit cannot be reused')
+        permit = reg.issue_tool_policy_permit(parameters)
+        parameters['_issued_policy_permit'] = permit
+        return original_fresh_target(parameters)
+    def consume_issued_permit(parameters):
+        permit = parameters.pop('_issued_policy_permit', None)
+        if not permit:
+            raise PermissionError('one-use browser policy permit is missing')
+        return reg.consume_tool_policy_permit(parameters, permit)
+    operator._fresh_target = permit_first_fresh_target
+    operator._consume_permit = consume_issued_permit
+
     def approved_roots(parameters, operation='read'):
         context = dict(parameters.get('_trusted_context') or {})
         owner = str(context.get('owner_id') or '')
