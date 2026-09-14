@@ -32,12 +32,48 @@ class SafeFileAdapter:
         return h.hexdigest()
 
     @staticmethod
-    def _safe(path: str, roots: list[str], *, must_exist=False) -> Path:
+    def _reject_link_components(raw_path: str) -> None:
+        raw=Path(str(raw_path)).expanduser()
+        if not raw.is_absolute(): raw=Path.cwd()/raw
+        parts=raw.parts
+        current=Path(parts[0]) if parts else raw
+        for part in parts[1:]:
+            current=current/part
+            try:
+                if current.exists() and current.is_symlink():
+                    raise TargetValidationError('path_changed','symlink traversal blocked')
+            except OSError as exc:
+                raise TargetValidationError('path_changed','path identity cannot be verified') from exc
+
+    @staticmethod
+    def _reject_reparse_or_mount(path: Path, roots: list[str]) -> None:
+        try:
+            st=path.lstat() if path.exists() else path.parent.lstat()
+            attrs=getattr(st,'st_file_attributes',0)
+            if attrs and attrs & 0x400:
+                raise TargetValidationError('path_changed','junction/reparse target blocked')
+            normalized_roots={str(Path(r).expanduser().resolve(strict=False)).casefold() for r in roots}
+            if path.exists() and os.path.ismount(path) and str(path.resolve(strict=False)).casefold() not in normalized_roots:
+                raise TargetValidationError('path_changed','mounted target requires explicit root policy')
+        except TargetValidationError: raise
+        except OSError as exc: raise TargetValidationError('path_changed','path identity cannot be verified') from exc
+
+    @staticmethod
+    def _reject_hardlink(path: Path) -> None:
+        if not path.exists() or not path.is_file(): return
+        try:
+            if path.stat().st_nlink>1: raise TargetValidationError('path_changed','hard-linked file requires owner review')
+        except TargetValidationError: raise
+        except OSError as exc: raise TargetValidationError('path_changed','file identity cannot be verified') from exc
+
+    @classmethod
+    def _safe(cls,path: str, roots: list[str], *, must_exist=False, mutation=False) -> Path:
+        cls._reject_link_components(path)
         canonical=canonical_path(path,roots)
         target=Path(canonical)
         if must_exist and not target.exists(): raise FileNotFoundError(canonical)
-        for parent in [target,*target.parents]:
-            if parent.exists() and parent.is_symlink(): raise TargetValidationError('path_changed','symlink traversal blocked')
+        cls._reject_reparse_or_mount(target,roots)
+        if mutation: cls._reject_hardlink(target)
         return target
 
     @staticmethod
@@ -47,7 +83,7 @@ class SafeFileAdapter:
 
     def metadata(self,path:str,roots:list[str])->dict[str,Any]:
         p=self._safe(path,roots,must_exist=True); st=p.stat()
-        return {'name':p.name,'size':st.st_size,'is_file':p.is_file(),'is_dir':p.is_dir(),'sha256':self.checksum(p) if p.is_file() else ''}
+        return {'exists':True,'name':p.name,'size':st.st_size,'is_file':p.is_file(),'is_dir':p.is_dir(),'sha256':self.checksum(p) if p.is_file() else '','link_count':st.st_nlink}
 
     def list_dir(self,path:str,roots:list[str],*,limit=500)->list[dict[str,Any]]:
         p=self._safe(path,roots,must_exist=True)
@@ -80,18 +116,21 @@ class SafeFileAdapter:
         if self._free_space(p)<len(data)+1024*1024: raise OSError('insufficient_disk_space')
         fd,tmp=tempfile.mkstemp(prefix='.pai-',dir=str(p.parent)); os.close(fd); tmp_path=Path(tmp)
         try:
-            tmp_path.write_bytes(data); os.replace(tmp_path,p)
+            tmp_path.write_bytes(data)
+            if p.exists(): raise FileExistsError('destination_exists')
+            os.replace(tmp_path,p)
             if claimed_mime: validate_file_metadata(str(p),claimed_mime=claimed_mime,max_bytes=self.max_bytes)
         except Exception:
             try: tmp_path.unlink(missing_ok=True)
             except Exception: pass
-            try: p.unlink(missing_ok=True)
+            try:
+                if p.exists() and p.stat().st_size==len(data): p.unlink(missing_ok=True)
             except Exception: pass
             raise
         return FileResult('completed',p.exists(),'reversible',{'destination':str(p),'sha256':self.checksum(p),'size':p.stat().st_size})
 
     def copy(self,source:str,destination:str,roots:list[str],*,claimed_mime='')->FileResult:
-        src=self._safe(source,roots,must_exist=True); dst=self._safe(destination,roots)
+        src=self._safe(source,roots,must_exist=True,mutation=True); dst=self._safe(destination,roots)
         if not src.is_file(): raise ValueError('source_not_regular_file')
         if dst.exists(): raise FileExistsError('destination_exists')
         validate_file_metadata(str(src),claimed_mime=claimed_mime,max_bytes=self.max_bytes)
@@ -102,17 +141,16 @@ class SafeFileAdapter:
             with src.open('rb') as r,tmp_path.open('wb') as w: shutil.copyfileobj(r,w,1024*1024)
             if self.checksum(src)!=source_hash: raise PermissionError('path_changed')
             if self.checksum(tmp_path)!=source_hash: raise IOError('checksum_mismatch')
+            if dst.exists(): raise FileExistsError('destination_exists')
             os.replace(tmp_path,dst)
         except Exception:
             try: tmp_path.unlink(missing_ok=True)
-            except Exception: pass
-            try: dst.unlink(missing_ok=True)
             except Exception: pass
             raise
         return FileResult('completed',dst.exists() and self.checksum(dst)==source_hash,'reversible',{'source_sha256':source_hash,'destination_sha256':self.checksum(dst),'destination':str(dst)})
 
     def move(self,source:str,destination:str,roots:list[str])->FileResult:
-        src=self._safe(source,roots,must_exist=True); dst=self._safe(destination,roots)
+        src=self._safe(source,roots,must_exist=True,mutation=True); dst=self._safe(destination,roots)
         if dst.exists(): raise FileExistsError('destination_exists')
         source_hash=self.checksum(src) if src.is_file() else ''
         os.replace(src,dst)
@@ -123,7 +161,7 @@ class SafeFileAdapter:
         return self.move(source,destination,roots)
 
     def trash(self,path:str,roots:list[str],trash_root:str)->FileResult:
-        src=self._safe(path,roots,must_exist=True); tr=self._safe(trash_root,roots,must_exist=True)
+        src=self._safe(path,roots,must_exist=True,mutation=True); tr=self._safe(trash_root,roots,must_exist=True)
         if not tr.is_dir(): raise NotADirectoryError(str(tr))
         candidate=tr/src.name; n=1
         while candidate.exists(): candidate=tr/f'{src.stem} ({n}){src.suffix}'; n+=1
@@ -132,7 +170,7 @@ class SafeFileAdapter:
         return FileResult('completed',candidate.exists() and not src.exists(),'compensating_action_available',{'trash_path':str(candidate),'source_sha256':source_hash})
 
     def permanent_delete(self,path:str,roots:list[str])->FileResult:
-        target=self._safe(path,roots,must_exist=True)
+        target=self._safe(path,roots,must_exist=True,mutation=True)
         if target.is_dir():
             if any(target.iterdir()): raise OSError('non_empty_directory_delete_blocked')
             target.rmdir()
