@@ -208,6 +208,20 @@ def test_policy_change_invalidates_expected_snapshot(env):
     assert p.evaluate(operation,expected_policy_digest=d.policy_digest).reason_code=='policy_changed'
 
 
+def test_restart_recovery_returns_safe_review_and_never_redispatches(tmp_path,monkeypatch):
+    browser=FakeBrowser(); policy=PolicyGateway(tmp_path/'policy.db'); db=tmp_path/'tx.db'; binding=OperatorBinding('owner','device','session',7)
+    policy.add_policy(owner_id='owner',target_type='domain',target_identity={'scheme':'https','host':'example.com','port':443},allowed_operations=['navigate'],security_epoch=7,reauthenticated=True)
+    monkeypatch.setattr(mod,'observe_page',lambda page: obs(page))
+    tx=OperatorTransactionStore(db); action=BrowserAction('open_url','tx-restart',url='https://example.com/x')
+    op=SafeBrowserOperator(browser,policy,tx,binding); op._ensure_tx(action); tx.transition('tx-restart','permitted'); tx.transition('tx-restart','executing')
+    recovered=OperatorTransactionStore(db)
+    assert recovered.transaction('tx-restart')['state']=='recovery_review_required'
+    before_dom=browser.page.dom
+    result=SafeBrowserOperator(browser,policy,recovered,binding).execute(action)
+    assert result.status=='recovery_review_required' and result.reason_code=='recovery_review_required'
+    assert browser.page.dom==before_dom and recovered.transaction('tx-restart')['state']=='recovery_review_required'
+
+
 def test_no_cookie_storage_or_background_monitoring_code():
     source=inspect.getsource(SafeBrowserOperator).lower()
     assert 'cookies(' not in source and 'local_storage' not in source and 'session_storage' not in source
