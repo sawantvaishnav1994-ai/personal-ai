@@ -42,12 +42,17 @@ class ComputerIntelligence:
     def _emit(self,name,**payload):
         if self.events:self.events.emit(name,**payload)
 
+    def _browser_native_evidence(self):
+        browser=self.browser_session
+        if browser is None or getattr(browser,'context',None) is None or getattr(browser,'page',None) is None:return None
+        try:return browser.capture_sanitized_screenshot()
+        except Exception as exc:return {'available':False,'reason':f'browser_native_capture_failed:{type(exc).__name__}','bytes':b''}
+
     def observe(self,question: str='Describe the visible screen and the actionable UI elements relevant to the user.',monitor:int=1):
-        self._emit('state',state='understanding'); redactions=[]
-        if self.browser_session is not None and getattr(self.browser_session,'context',None) is not None:
-            try:redactions=list((self.browser_session.observe() or {}).get('sensitive_regions') or [])
-            except Exception:redactions=[]
-        result=self.screen.analyze(question,monitor=monitor,redactions=redactions); self._emit('computer.observed',screenshot=result.get('screenshot_evidence_ref')); return result
+        self._emit('state',state='understanding')
+        browser_source=self._browser_native_evidence()
+        result=self.screen.analyze(question,monitor=monitor,redactions=None,sanitized_source=browser_source)
+        self._emit('computer.observed',screenshot=result.get('screenshot_evidence_ref')); return result
 
     def _memory_context(self,goal:str):
         if not self.second_brain:return []
@@ -95,8 +100,9 @@ class ComputerIntelligence:
         except Exception as exc:raise ObservationSafetyError('identity_unavailable',f'browser identity capture failed: {type(exc).__name__}') from exc
 
     def _capture_bound_observation(self,binding:OperatorBinding,txid:str,*,reason:str,question:str,monitor:int):
-        app=self.application_observer.capture(); browser_snapshot=self._browser_snapshot(); redactions=list((browser_snapshot or {}).get('sensitive_regions') or [])
-        result=self.screen.analyze(question,monitor=monitor,redactions=redactions)
+        app=self.application_observer.capture(); browser_snapshot=self._browser_snapshot(); browser_source=self._browser_native_evidence() if browser_snapshot is not None else None
+        evidence_binding={'owner_id':binding.owner_id,'device_id':binding.device_id,'session_id':binding.session_id}
+        result=self.screen.analyze(question,monitor=monitor,redactions=None,sanitized_source=browser_source,evidence_binding=evidence_binding,application_context=app)
         record=build_observation_record(binding=binding,transaction_id=txid,application=app,screen=result,browser=browser_snapshot,reason=reason,initiator='authenticated_transaction')
         self.operator_transactions.save_observation(record); return record,browser_snapshot,result
 
@@ -220,7 +226,7 @@ class ComputerIntelligence:
                     if cancel_event is not None and cancel_event.is_set():raise RuntimeError('computer execution cancelled by user')
                     self._validate_params(step.kind,step.params); result=self.transactions.execute(tx,step.kind,**step.params)
                     if not result.get('verified'):raise RuntimeError(f'computer action did not produce a verifiable change: step {index+1}')
-                    semantic_result=self.screen.analyze(f'Verify this UI postcondition: {step.verify}. Start the answer with VERIFIED or NOT_VERIFIED.',monitor=monitor); semantic=self._semantic_result(semantic_result,step.verify)
+                    semantic_result=self.observe(f'Verify this UI postcondition: {step.verify}. Start the answer with VERIFIED or NOT_VERIFIED.',monitor=monitor); semantic=self._semantic_result(semantic_result,step.verify)
                     if semantic['checked'] and not semantic['verified']:raise RuntimeError(f'computer postcondition failed at step {index+1}')
                     evidence.append({'step':index+1,'kind':step.kind,'action_verified':True,'semantic_verify':semantic})
                 final=self.observe(f'Describe the completed state for this goal: {goal}',monitor=monitor); committed=self.transactions.commit(tx); return {'ok':True,'verified':True,'goal':goal,'transaction_id':tx.id,'plan':plan,'evidence':evidence,'final':final,**committed}
