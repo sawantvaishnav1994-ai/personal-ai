@@ -91,6 +91,8 @@ class SafeBrowserOperator:
 
     def execute(self,a:BrowserAction,*,approved:bool=False,reauthenticated:bool=False)->BrowserResult:
         self._validate(a); tx=self._ensure_tx(a)
+        if tx.get('state')=='recovery_review_required':
+            return BrowserResult('recovery_review_required','recovery_review_required',a.transaction_id)
         if tx.get('cancel_requested'): return self._cancel(a,'cancelled')
         if self.emergency_stop(): return self._cancel(a,'emergency_stop_active')
         first=self._capture(a,'policy_evaluation'); op_class=self._classify(a,first['raw'])
