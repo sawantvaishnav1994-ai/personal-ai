@@ -2,208 +2,157 @@
 
 Date: 2026-09-14
 
-## W6.1 baseline
+## Validated history
 
-W6.1 established the shared governed Connector Contract Foundation.
+- W6.1 governed connector foundation: implementation `baaa7da38956e97231970c548626a71cde257176`, validated integration `152ef13217b652121917a890de14e20edb139473`, documentation head `a828cca77bbb910306641fabcc0f8211e3e65e19`.
+- W6.2 Drive/Sheets read-first: implementation `ecb5e2615d06816e869dd4adb398565bb5c524fa`, documentation head `6310709f65534dba79d89cccd8ea94c6a4c9d765`.
+- W6.3 controlled writes baseline: `6310709f65534dba79d89cccd8ea94c6a4c9d765`.
+- W6.3 implementation: `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254`.
+- W6.3 final implementation tree: `e879cee54f019ca2f98c8b90564fd2681bf5cab6`.
+- Commit: `W6.3: add verified Drive and Sheets write operations`.
+- Parent is exactly the validated W6.2 documentation head; branch advanced by normal non-force fast-forward.
 
-- Previous W5 documentation head: `83f2230d3d6a705807bf7161a1b00b2d9a65dc4b`
-- Direct W6.1 implementation SHA: `baaa7da38956e97231970c548626a71cde257176`
-- Validated W6.1 integration SHA: `152ef13217b652121917a890de14e20edb139473`
-- Validated W6.1 documentation head: `a828cca77bbb910306641fabcc0f8211e3e65e19`
+## W6.3 implementation scope
 
-W6.1 is IMPLEMENTED, INTEGRATED and AUTOMATED VALIDATED. It is not live-OAuth or production verified.
-
-## W6.2 exact implementation
-
-- Exact W6.2 baseline: `a828cca77bbb910306641fabcc0f8211e3e65e19`
-- Direct W6.2 implementation SHA: `ecb5e2615d06816e869dd4adb398565bb5c524fa`
-- Commit message: `W6.2 Drive and Sheets read connectors`
-- Parent: exactly `a828cca77bbb910306641fabcc0f8211e3e65e19`
-- Branch advanced by normal non-force fast-forward.
-
-The implementation diff contains exactly 16 files:
+The implementation diff contains exactly 18 files:
 
 1. `integrations/adapters.py`
 2. `integrations/contracts.py`
 3. `integrations/gateway.py`
 4. `integrations/google_read.py`
-5. `integrations/knowledge_bridge.py`
-6. `integrations/registry.py`
-7. `integrations/runtime.py`
-8. `server/connector_api.py`
-9. `server/connector_knowledge_api.py`
-10. `server/connector_ui.py`
-11. `tests/test_connector_knowledge_bridge.py`
-12. `tests/test_connector_registry_tools_api.py`
+5. `integrations/google_write.py`
+6. `integrations/oauth.py`
+7. `integrations/registry.py`
+8. `integrations/runtime.py`
+9. `integrations/state.py`
+10. `server/connector_api.py`
+11. `server/connector_ui.py`
+12. `tests/test_connector_state_oauth.py`
 13. `tests/test_drive_sheets_read.py`
 14. `tests/test_w62_registry_tools.py`
-15. `tools/builtins.py`
-16. `tools/google_read.py`
+15. `tests/test_w63_google_write.py`
+16. `tools/builtins.py`
+17. `tools/google_write.py`
+18. `tools/registry.py`
 
-No Railway, deployment, frozen Home V1, AI Core, or unrelated production configuration file is part of the W6.2 implementation diff.
+No Railway/deployment, frozen Home V1, AI Core, or unrelated production configuration file is in the W6.3 implementation diff.
 
-## Drive read-first connector
-
-W6.2 adds a first-class Google Drive manifest under the existing W6.1 contract using only:
-
-`https://www.googleapis.com/auth/drive.readonly`
-
-The manifest is explicitly read-only. It declares scope rationale, content limits, supported content types, retry/rate-limit/pagination behavior, health behavior and these operations:
-
-- `drive.files.list`
-- `drive.files.search`
-- `drive.files.metadata`
-- `drive.files.read`
-- `drive.files.download`
-- `drive.files.export`
-
-No create, upload, update, move, delete, share, or permission-changing Drive operation is declared in W6.2.
-
-Drive reads implement bounded pagination, query/search, metadata retrieval, safe download, Google Docs export, Sheets handoff, cancellation/deadline checks, MIME validation, result-size limits, malformed-response handling, and provenance including provider file ID, name, MIME type, source account/owners where supplied, created/modified time, size, checksum/version evidence when supplied, web/source reference and retrieval time.
-
-Raw binary Drive data is not exposed directly to the model-facing tool path. Binary content must pass through explicit Knowledge ingestion. Textual previews are bounded.
-
-## Sheets read-first connector
-
-W6.2 adds a first-class Google Sheets manifest using only:
-
-`https://www.googleapis.com/auth/spreadsheets.readonly`
-
-Read-first operations:
-
-- spreadsheet discovery through Drive
-- `sheets.spreadsheets.metadata`
-- `sheets.worksheets.list`
-- `sheets.values.read`
-- `sheets.values.batch_read`
-
-No cell write, append, clear, formatting, worksheet create/delete, spreadsheet create/delete, sharing, or permission-changing operation is implemented.
-
-Sheets reads require explicit spreadsheet/range identity and enforce bounded A1 validation, worksheet/range/row/column/cell/response-byte limits, cancellation/deadline checks, malformed/empty response handling and provider quota/rate-limit behavior. Formatted values, unformatted values and formulas remain distinct. Formulas are data only and are never executed. CSV/export rendering neutralizes formula-injection prefixes.
-
-Sheets provenance retains spreadsheet ID/title, worksheet ID/title when available, exact range and bounds, retrieval time, version/modified evidence when supplied, source connector/account and value-render mode.
-
-## Knowledge integration
-
-Drive files and Sheets ranges enter Knowledge only after explicit owner approval. There is no automatic bulk Drive ingestion path.
-
-Connector Knowledge provenance retains:
-
-- connector/provider
-- source account identity where available
-- Drive file ID or Sheets spreadsheet ID
-- source URL/reference
-- version/modified time
-- checksum where supplied
-- worksheet/range and row/column bounds for Sheets
-- ingestion/retrieval time
-- access classification
-- authorizing owner/device/session
-
-Knowledge remains separate from Memory. Existing Knowledge source/version semantics are reused so later source changes create lineage rather than silently overwriting historical content. Deleting a local Knowledge copy does not delete the provider source. `NEVER_STORE` rejects connector ingestion. Sensitive/private connector content is blocked from external model routing unless policy explicitly allows that route.
-
-## Provider-specific behavior
-
-The W6.1 gateway is extended for Drive/Sheets operational semantics while preserving existing Gmail/Calendar compatibility:
-
-- 401 -> authentication required
-- 403 -> insufficient scope or explicit permission failure
-- quota/rate-limit provider responses -> bounded retryable safe errors
-- 404 -> provider resource not found
-- 429 -> `Retry-After` respected within configured maximum
-- transient 5xx -> bounded retry
-- timeout/network failure -> safe connector error
-- malformed response -> safe invalid-response state
-- unsupported type/content too large/range too large -> bounded safe rejection
-- cancellation and deadlines remain authoritative
-
-Document/cell content, tokens, authorization codes and provider secret payloads are excluded from normal audit metadata.
-
-## Apps & Tools owner surface
-
-Apps & Tools now exposes Drive and Sheets under the existing connector-management surface, including safe health/status, connected state, granted/missing scopes, scope rationale, read-only state, capabilities, last health/error state, reconnect and revoke controls. The UI explicitly indicates that write/delete/share capabilities are not enabled. Frozen Home V1 and AI Core were not changed.
-
-## Focused validation
-
-Combined recovered W6.1 + W6.2 focused suite: **110 PASS**.
-
-Pre-branch checks:
-
-- Python compileall: PASS
-- Apps & Tools JavaScript `node --check`: PASS
-- changed-file secret-pattern scan: PASS
-- legacy Gmail/Calendar behavior regression coverage: PASS
-
-During development, two focused-test issues were caught before Git integration: generic W6.1 403 compatibility was preserved while Drive/Sheets permission/quota distinctions were added, and a Sheets test was corrected to use the keyword-only value-render mode. A later combined review caught a missing `hashlib` import after modularization; it was restored and the complete 110-test focused suite passed again before branch movement.
-
-## Exact-head automated evidence
-
-All six required workflows passed on exact W6.2 implementation SHA `ecb5e2615d06816e869dd4adb398565bb5c524fa`:
-
-| Workflow | Run number | Run ID | Conclusion |
-| --- | ---: | ---: | --- |
-| CI | #579 | `34836268100` | PASS |
-| Reliability and Security | #155 | `34836268108` | PASS |
-| P3 iPhone PWA | #123 | `34836268173` | PASS |
-| Android Instrumentation | #154 | `34836268200` | PASS |
-| Package Validation | #154 | `34836268171` | PASS |
-| iOS Companion | #136 | `34836268106` | PASS |
-
-CI passed dependency installation, `pip check`, repository `compileall` and full `pytest -q`. Reliability/Security passed dependency audit, full pytest, compileall, encrypted backup/restore qualification and the 45-second soak. Package Validation passed macOS, Ubuntu and Windows package jobs.
-
-## W6.3 read-only audit
-
-W6.3 should remain a separate controlled-write batch. Recommended operations are granular rather than one broad write capability:
+## Enabled write operations
 
 Drive:
 
-- create/upload
-- metadata update/rename
-- move
-- explicit sharing/permission change
-- delete/trash only as separate high-risk operations
+- `drive.files.create`
+- `drive.files.upload`
+- `drive.files.rename`
+- `drive.files.update_content`
 
 Sheets:
 
-- values update
-- append
-- clear
-- bounded batch update
-- worksheet create/rename/delete only as separate operations
+- `sheets.spreadsheets.create`
+- `sheets.values.update`
+- `sheets.values.append`
 
-Every write must declare exact OAuth scope, destination/data classification, risk, approval and re-auth requirement. Create/update operations need durable idempotency and provider-ID verification. Delete/share/permission operations should be high risk, require approval and recent re-auth, and must never be implicitly enabled by a generic connector-write permission. Unknown consequential outcomes must stop for recovery review rather than blind retry. Rollback must only be declared where provider state can actually be restored from safe retained prior state.
+W6.3 deliberately does not enable Drive permanent delete, trash, sharing, permission changes, ownership transfer, arbitrary move, or unrestricted bulk modification. It does not enable Sheets clear, worksheet/spreadsheet deletion, structural `batchUpdate`, sharing changes, or background/autonomous writes.
 
-## Live Google OAuth qualification audit
+## OAuth and scope behavior
 
-Software-side OAuth foundations are ready for a real-account qualification package, but no live credential evidence is claimed. The qualification gate must verify exact granted scopes, account identity, owner/device/session binding, refresh-token behavior, reconnect, provider revocation, local revoke, insufficient-scope negatives, real 401/403/429/quota behavior, read-only negative write tests, and audit redaction.
+- Drive reads retain `https://www.googleapis.com/auth/drive.readonly`.
+- Drive writes use `https://www.googleapis.com/auth/drive.file`.
+- Sheets reads retain `https://www.googleapis.com/auth/spreadsheets.readonly`.
+- Sheets writes use `https://www.googleapis.com/auth/spreadsheets`.
+- Google incremental authorization requests `include_granted_scopes=true`.
+- The durable provider token record preserves the cumulative confirmed granted-scope set while separately tracking the currently returned scope set.
+- Scope reduction is detected rather than silently replacing a larger previously confirmed set.
+- Every operation checks its required scope before provider dispatch and fails closed on insufficient scope.
+- OAuth completion refreshes already-live Google adapters with the returned token and current scope state.
 
-A provider-level Google token is currently shared across Google connectors. Real qualification must therefore explicitly verify multi-connector scope preservation/incremental consent before controlled writes are enabled. If the provider does not preserve previously granted connector scopes safely, token/account storage must be hardened before live multi-connector qualification is accepted.
+No live Google account/credential qualification is claimed by this checkpoint.
+
+## Trusted Action authority
+
+Every W6.3 write is independently declared and requires owner approval plus recent reauthentication. Existing Trusted Action authority remains authoritative for owner, trusted device, browser/cloud session, security epoch, exact operation, normalized parameters, destination/resource, data classification, ticket expiry and one-use replay prevention. Content is represented in write bindings by checksum rather than exposed in audit metadata. Emergency Stop remains authoritative and blocks writes.
+
+No generic `google.write`, `drive.write`, or `sheets.write` permission exists.
+
+## Durable idempotency and recovery
+
+The connector operation ledger is extended additively and restart-safely with provider-account, content-checksum and verification-evidence fields. Write records retain Personal AI operation identity, idempotency key, owner/device/session, connector/operation, destination, parameter hash, provider account, provider request/resource identifiers, dispatch time, state, verification state and rollback declaration.
+
+Confirmed duplicate submissions return durable existing state rather than dispatching again. Reusing an idempotency key for different normalized parameters/destination fails with an idempotency conflict. Consequential writes are not blindly retried after dispatch. An uncertain timeout transitions to `recovery_review_required` / outcome-unknown state and restart recovery resumes review/verification rather than redispatch.
+
+## Drive write safety and verification
+
+Create/upload require explicit validated filename and MIME type, bounded content size, optional explicit parent, provider account and durable request identity. Upload content is checksummed. Post-write verification reads metadata back and checks resource identity plus applicable name, MIME, explicit parent, size/checksum and version evidence.
+
+Rename requires explicit file ID, expected current name/version when supplied, validates the new name, uses provider version/ETag preconditions where available and verifies the resulting metadata. Content replacement requires explicit file ID, MIME/content checksum and expected provider version where available, and verifies the resulting provider metadata/checksum/size. Stale provider version or precondition conflict fails closed for owner review instead of overwriting newer external work.
+
+## Sheets write safety and verification
+
+Spreadsheet creation is bounded and verified by provider spreadsheet ID/title metadata. `sheets.values.update` requires explicit spreadsheet/range, validates the A1 bounds and dimensions/row/column/cell/request-byte limits, can require a hash of the previously observed values to reject concurrent/lost updates, uses `valueInputOption=RAW`, and verifies by RAW readback. `sheets.values.append` is bounded, uses RAW, retains the provider updated range and verifies that exact returned range by readback.
+
+Formula-looking strings beginning with `=`, `+`, `-`, or `@` remain literal RAW values. No spreadsheet formula is executed or interpreted as code by Personal AI.
+
+## Truthful rollback
+
+W6.3 does not enable hidden delete/clear operations to manufacture rollback. Create/upload and append have no automatic rollback. Rename/content/update and Sheets update may only be compensated through a separately authorized action when sufficient prior state exists. A compensating action must itself pass Trusted Action approval/reauthentication/audit; rollback is never implied merely because provider HTTP returned success.
+
+## Focused validation
+
+Combined recovered W6.1 + W6.2 + W6.3 focused suite: **131 PASS**.
+
+Pre-commit validation:
+
+- Python compileall: PASS
+- Apps & Tools JavaScript `node --check`: PASS
+- migration/repeated-startup coverage: PASS
+- concurrency/idempotency/uncertain-outcome coverage: PASS
+- changed-file secret-pattern scan: PASS
+- whitespace/syntax validation: PASS
+
+## Exact-head automated evidence
+
+All six required workflows passed on exact W6.3 implementation SHA `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254`:
+
+| Workflow | Run | Run ID | Conclusion |
+| --- | ---: | ---: | --- |
+| CI | #585 | `34843634899` | PASS |
+| Reliability and Security | #158 | `34843634900` | PASS |
+| P3 iPhone PWA | #126 | `34843634890` | PASS |
+| Android Instrumentation | #157 | `34843634957` | PASS |
+| Package Validation | #157 | `34843634972` | PASS |
+| iOS Companion | #139 | `34843634905` | PASS |
+
+CI passed dependency checks, repository compileall and full pytest. Reliability/Security passed dependency audit, compileall, full pytest, encrypted backup/restore qualification and soak. Package Validation passed macOS, Ubuntu and Windows jobs.
+
+## Real Google OAuth qualification package — prepared, not executed
+
+Use one harmless owner test account/resource set and retain only redacted evidence:
+
+1. Verify exact owner Google account identity and approved redirect URI.
+2. Connect Gmail/Calendar first and record granted scopes without tokens.
+3. Incrementally authorize Drive read then `drive.file`; prove prior Gmail/Calendar scopes remain in the confirmed union.
+4. Incrementally authorize Sheets read then Sheets write; prove the complete scope union remains preserved.
+5. Exercise token refresh, expiry, reconnect, local revoke, provider revoke, device/session revocation and reauthorization.
+6. Exercise live 401/403/429/quota handling and safe owner-facing diagnostics.
+7. Use one harmless Drive text file and one harmless spreadsheet/range to test read, create/upload, rename/content-update, spreadsheet creation, RAW bounded update and append.
+8. Repeat identical request IDs to prove no duplicate side effects.
+9. Force/observe an uncertain outcome where safely possible and verify recovery review rather than blind redispatch.
+10. Prove Drive delete/trash/share/permission/ownership/move and Sheets clear/delete/structural/sharing capabilities are absent/prohibited.
+11. Verify audit contains IDs/hashes/statuses but no token, auth code, PKCE verifier, file content or cell content.
+12. Retain timestamps, provider resource IDs, exact scopes, operation IDs, verification evidence and negative-test outcomes in a redacted evidence record.
 
 ## W7 read-only audit
 
-The repository already has an Observe -> Understand -> Act -> Verify desktop operator, a bounded action set, per-step visual verification, cancellation checks and a transaction manager that attempts rollback. Browser tools also provide navigation, text extraction and click-by-visible-text primitives.
+Existing foundations: Observe -> Understand -> Act -> Verify desktop operator, bounded action types, cooperative cancellation, visual/per-step verification, transaction rollback attempts, and browser navigation/text-extraction/visible-text click primitives.
 
-W7 still needs a unified operator contract that routes every consequential browser/desktop/file/application action through Trusted Action Core with explicit owner/device/session/security epoch, destination, data classification, approval/re-auth and Emergency Stop semantics. It also needs application/window identity, domain/app/path allowlists, accessibility/DOM-first behavior before coordinate control, clipboard/secret policy, file-operation sandboxing, before/after evidence, truthful rollback metadata, unknown-outcome recovery review, browser session persistence rules and platform-specific physical qualification.
+Required W7 hardening before qualification: route every consequential browser/desktop/file/app operation through Trusted Action Core; bind owner/device/session/security epoch/destination/data classification; detect and bind application/window identity; enforce domain/app/path allowlists; prefer accessibility/DOM semantics before coordinates; protect clipboard/secrets; sandbox file operations; retain before/after evidence; declare rollback truthfully; stop uncertain outcomes in recovery review; and perform platform-specific physical qualification.
 
-## Classification
+## Classification and production boundary
 
-W6.2 is:
+W6.3 is **IMPLEMENTED**, **INTEGRATED**, and **AUTOMATED VALIDATED** at software/CI level after the implementation exact-head gate. It remains **NOT LIVE OAUTH VERIFIED**, **NOT PRODUCTION VERIFIED**, and **NOT COMPLETE W6** until real Google-account operational evidence is completed.
 
-- **IMPLEMENTED**
-- **INTEGRATED**
-- **AUTOMATED VALIDATED**
-
-W6.2 is deliberately not:
-
-- **LIVE OAUTH VERIFIED**
-- **PRODUCTION VERIFIED**
-- **WRITE-CAPABLE DRIVE/SHEETS**
-- **COMPLETE W6**
-
-## Production boundary
-
-No production deployment, Railway variable, Railway storage, Railway service, source-branch, or persistent-volume change was performed for W6.2. Main production still requires the later approved `/data` durable-volume qualification gate.
+No production deployment, Railway variable/storage/service/source-branch/volume change was performed. PR #22 remains draft and unmerged; PR #18 and PR #21 remain separate.
 
 ## Exact next continuation point
 
-Freeze W6.2 unless a real regression is found. Next bounded engineering work is **W6.3 — controlled Drive and Sheets write operations with strict approval/reauth/idempotency/verification rules**. After W6.3 software validation, perform the real Google OAuth qualification gate. W7 Safe Computer Operator follows W6 completion.
+After this evidence-only documentation head itself passes all six workflows, freeze W6.3. The next phase is real Google OAuth and harmless-account operational qualification for Gmail, Calendar, Drive and Sheets. W7 Safe Computer Operator implementation begins only after that W6 operational qualification gate.

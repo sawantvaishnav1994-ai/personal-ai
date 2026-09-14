@@ -5,32 +5,31 @@ Baseline date: 2026-09-14
 | Priority | Workstream | Item | Current status | Why not complete | Next bounded action |
 | --- | --- | --- | --- | --- | --- |
 | P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | main runtime still lacks persistent `/data` | attach only at approved production gate; restart/redeploy/backup/restore proof |
-| P0 | W2 | Production durable approvals/actions | PARTIAL | software is durable but production filesystem is not | complete W1 production gate |
-| P0 | W3 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute exact P3 protocol on validated candidate |
+| P0 | W3/W12 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute exact physical protocol |
 | P1 | W4 | Real OCR/provider qualification | PARTIAL | bounded OCR contract exists; real provider/docs not qualified | qualify approved OCR path |
-| P1 | W5 | Workflow production durability | PARTIAL | W5 automated validated; Railway main volume absent | durable production operational proof |
-| P1 | W6.1 | Shared connector contract/OAuth lifecycle | RESOLVED FOR AUTOMATED SCOPE | implemented/integrated/automated validated | freeze unless regression |
-| P1 | W6.2 | Google Drive read-first | RESOLVED FOR AUTOMATED SCOPE | list/search/metadata/read/download/export + provenance exact-head validated | live Google account/provider qualification |
-| P1 | W6.2 | Google Sheets read-first | RESOLVED FOR AUTOMATED SCOPE | metadata/worksheet/range/batch reads + limits/provenance exact-head validated | live Google account/provider qualification |
-| P1 | W6 | Live Google OAuth | BLOCKED FOR LIVE EVIDENCE | real owner consent/account not yet connected by design | run exact read-only qualification package after software gate |
-| P1 | W6 | Google multi-connector scope preservation | QUALIFICATION | provider-level Google token is shared; incremental/multi-scope behavior must be proven live | verify granted-scope preservation before accepting live qualification |
-| P1 | W6.3 | Controlled Drive writes | PLANNED | intentionally excluded from W6.2 | granular create/upload/update/move/share/delete policies with approval/reauth/idempotency/verification |
-| P1 | W6.3 | Controlled Sheets writes | PLANNED | intentionally excluded from W6.2 | update/append/clear/batch/worksheet operations with bounded governance |
-| P1 | W6 | Provider-specific live quotas/revocation | PARTIAL | software contracts tested; real provider behavior not qualified | exercise real 401/403/429/quota/refresh/revoke behavior |
-| P1 | W7 | Safe Computer Operator | PARTIAL | bounded operator exists but policy surface is incomplete | Trusted Action binding, app/domain/path allowlists, accessibility-first control, clipboard/file safety, verification/recovery |
-| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | implement exact health/failover/correlation/cost telemetry |
+| P1 | W5 | Workflow production durability | PARTIAL | automated validated; Railway main volume absent | durable production operational proof |
+| P1 | W6.1 | Shared connector contract/OAuth lifecycle | RESOLVED FOR AUTOMATED SCOPE | exact-head automated validated | freeze unless regression |
+| P1 | W6.2 | Drive/Sheets read-first + Knowledge provenance | RESOLVED FOR AUTOMATED SCOPE | exact-head automated validated | real Google/source qualification |
+| P1 | W6.3 | Controlled Drive create/upload/rename/content update | RESOLVED FOR AUTOMATED SCOPE | 131 focused + exact-head six-workflow validation | harmless live Google qualification |
+| P1 | W6.3 | Controlled Sheets create/update/append | RESOLVED FOR AUTOMATED SCOPE | RAW/concurrency/verification/recovery exact-head validated | harmless live Google qualification |
+| P1 | W6 | Live Google OAuth/account qualification | BLOCKED FOR LIVE EVIDENCE | owner consent/account intentionally not connected during software work | run prepared real-account qualification package |
+| P1 | W6 | Multi-connector scope-union operational proof | QUALIFICATION | software preserves/detects scope sets; Google behavior must be proven live | incremental Gmail/Calendar/Drive/Sheets consent evidence |
+| P1 | W6 | Token refresh/revoke/quota operational proof | PARTIAL | software contracts tested only | exercise live refresh/expiry/401/403/429/reconnect/revoke |
+| P1 | W6 | Destructive/share/structural Google operations | PROHIBITED/NOT IMPLEMENTED | deliberately outside W6.3 | keep disabled; design separately only if later approved |
+| P1 | W7 | Safe Computer Operator | PARTIAL | bounded operator exists but unified safety surface incomplete | Trusted Action binding, app/window identity, allowlists, accessibility-first, clipboard/file safety, verification/recovery |
+| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | implement health/failover/correlation/cost telemetry |
 | P1 | W8 | Self-hosted private endpoint | BLOCKED | no GPU host | later owner infrastructure prerequisite |
-| P1 | W9 | Governed proactivity controls | PARTIAL | engine exists | quiet hours/frequency/why/suggestion-vs-action controls |
+| P1 | W9 | Governed proactivity | PARTIAL | engine exists | quiet hours/frequency/why/suggestion-vs-action controls |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | perform when signing prerequisites are available |
-| P1 | W11 | Complete observability taxonomy | PARTIAL | telemetry foundations exist | health endpoints, correlation, redaction, alert thresholds |
-| P0 | W12 | Release readiness | PARTIAL | automated W6.2 is green; production/physical/signing gates remain | do not merge/promote until P0 evidence is complete |
+| P1 | W11 | Complete observability taxonomy | PARTIAL | telemetry foundations exist | subsystem health/correlation/redaction/alerts |
+| P0 | W12 | Release readiness | PARTIAL | W6.3 software automated green; live Google/production/physical/signing gates remain | do not merge/promote until evidence-complete |
 
-## W6.2 evidence
+## W6.3 evidence
 
-Implementation SHA: `ecb5e2615d06816e869dd4adb398565bb5c524fa`
+- Baseline: `6310709f65534dba79d89cccd8ea94c6a4c9d765`
+- Implementation: `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254`
+- Final tree: `e879cee54f019ca2f98c8b90564fd2681bf5cab6`
+- Focused suite: **131 PASS**
+- Six exact-head workflows: CI #585, Reliability and Security #158, P3 iPhone PWA #126, Android Instrumentation #157, Package Validation #157, iOS Companion #139 — all PASS.
 
-Focused suite: **110 PASS**.
-
-Six exact-head workflows passed: CI #579, Reliability and Security #155, P3 iPhone PWA #123, Android Instrumentation #154, Package Validation #154 and iOS Companion #136.
-
-W6.2 resolves the software-side read-only Drive/Sheets items only. It does not resolve live OAuth, controlled writes, production persistence or real-provider operational qualification.
+W6.3 resolves only the software-side controlled-write batch. W6 remains operationally incomplete until real Google OAuth/account/provider evidence is recorded. Production persistence and physical qualification remain separate release gates.
