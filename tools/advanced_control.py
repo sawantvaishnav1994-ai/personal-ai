@@ -1,8 +1,12 @@
-from tools.registry import Tool,Risk
+from tools.registry import Tool, Risk
 from browser.session import PersistentBrowser
 from desktop.controller import DesktopController
-def register(reg,settings):
-    browser=PersistentBrowser(settings.data_dir/'browser-profile',headless=settings.browser_headless); desktop=DesktopController()
+
+
+def register(reg, settings):
+    browser = PersistentBrowser(settings.data_dir / 'browser-profile', headless=settings.browser_headless)
+    reg._persistent_browser = browser
+    desktop = DesktopController()
     reg.register(Tool('browser_goto','Persistent browser navigate; params:url',lambda p:browser.goto(p['url']),Risk.EXTERNAL_SIDE_EFFECT))
     reg.register(Tool('browser_snapshot','Read current browser DOM text',lambda p:browser.snapshot(),Risk.READ_ONLY))
     reg.register(Tool('browser_click','Click CSS selector; params:selector',lambda p:browser.click(p['selector']),Risk.EXTERNAL_SIDE_EFFECT))
