@@ -89,12 +89,25 @@ def domain_rule_matches(rule: dict, url: str) -> tuple[bool, NormalizedOrigin]:
         host_match = origin.host.endswith('.' + policy['host'])
     return bool(host_match and origin.scheme == policy['scheme'] and origin.port == policy['port']), origin
 
-def redirect_allowed(rule: dict, initial_url: str, final_url: str) -> tuple[bool, str]:
-    initial = normalize_origin(initial_url, allow_ip_literal=True, allow_private_network=True)
-    matched, final = domain_rule_matches(rule, final_url)
-    if not matched or initial.value != final.value:
+def redirect_allowed(rule: dict, initial_url: str, final_url: str, *, final_rule: dict | None = None) -> tuple[bool, str]:
+    initial_match, initial = domain_rule_matches(rule, initial_url)
+    if not initial_match:
         return False, 'redirect_not_allowed'
-    return True, 'allow'
+    try:
+        same_rule_match, final = domain_rule_matches(rule, final_url)
+    except TargetValidationError:
+        same_rule_match = False
+        final = None
+    if same_rule_match and final is not None and initial.value == final.value:
+        return True, 'allow'
+    if final_rule is not None:
+        try:
+            explicit_match, _ = domain_rule_matches(final_rule, final_url)
+        except TargetValidationError:
+            explicit_match = False
+        if explicit_match:
+            return True, 'allow_explicit_cross_origin'
+    return False, 'redirect_not_allowed'
 
 def file_sha256(path: str | os.PathLike) -> str:
     h = hashlib.sha256()
@@ -143,9 +156,10 @@ def _windows_path_checks(raw: str, *, allow_network: bool, path_is_reparse: bool
     if path_is_reparse: raise TargetValidationError('path_outside_allowed_root', 'Windows junction/reparse-point targets require explicit qualification.')
     return ntpath.normcase(ntpath.normpath(value))
 
-def canonical_path(path: str, roots: list[str] | tuple[str, ...], *, allow_network: bool = False, path_is_reparse: bool = False) -> str:
+def canonical_path(path: str, roots: list[str] | tuple[str, ...], *, allow_network: bool = False, path_is_reparse: bool = False, path_is_mounted: bool = False, allow_mounted: bool = False) -> str:
     raw = str(path or '').strip()
     if not raw: raise TargetValidationError('path_outside_allowed_root', 'File path is missing.')
+    if path_is_mounted and not allow_mounted: raise TargetValidationError('path_outside_allowed_root', 'Mounted/removable drive access requires an explicit owner policy.')
     if _looks_windows_path(raw) or any(_looks_windows_path(str(root)) for root in roots):
         candidate = _windows_path_checks(raw, allow_network=allow_network, path_is_reparse=path_is_reparse); allowed=[]
         for root in roots:
