@@ -22,7 +22,7 @@ class Tool:
 
 class ToolRegistry:
     def __init__(self,settings):
-        self.settings=settings;self.permissions=PermissionEngine(settings.autonomy_mode);self._tools={};self.emergency_stop=False;self._control_path=None
+        self.settings=settings;self.permissions=PermissionEngine(settings.autonomy_mode);self._tools={};self.emergency_stop=False;self._control_path=None;self._emergency_listeners=[]
         data_dir=getattr(settings,'data_dir',None)
         if data_dir is not None:
             self._control_path=Path(data_dir)/'runtime-controls.sqlite3';self._control_path.parent.mkdir(parents=True,exist_ok=True)
@@ -31,10 +31,14 @@ class ToolRegistry:
                 row=con.execute("SELECT value FROM runtime_controls WHERE key='emergency_stop'").fetchone()
                 self.emergency_stop=bool(row and row[0]=='1')
     def _control_con(self):return sqlite3.connect(self._control_path)
+    def add_emergency_listener(self,callback):
+        self._emergency_listeners.append(callback);return callback
     def set_emergency_stop(self,enabled:bool):
-        self.emergency_stop=bool(enabled)
+        previous=self.emergency_stop;self.emergency_stop=bool(enabled)
         if self._control_path is not None:
             with self._control_con() as con:con.execute("INSERT OR REPLACE INTO runtime_controls(key,value) VALUES('emergency_stop',?)",('1' if enabled else '0',))
+        if self.emergency_stop and not previous:
+            for callback in tuple(self._emergency_listeners):callback(True)
         return self.emergency_stop
     def register(self,t:Tool):
         if t.name in self._tools:raise ValueError(f'Duplicate tool {t.name}')
