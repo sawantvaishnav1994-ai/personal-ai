@@ -2,46 +2,59 @@
 
 Baseline date: 2026-09-14
 
-Statuses are limited to: COMPLETE, QUALIFICATION, PARTIAL, STUB, PLANNED, BLOCKED.
+Statuses are limited to: COMPLETE, QUALIFICATION, PARTIAL, STUB, PLANNED, BLOCKED. Automated validation is stated explicitly in evidence rather than used to imply live/production qualification.
 
 | Capability | Implementation location | Status | Automated/integration evidence | Deployment/physical evidence | Exact SHA | Known limitation / next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | Home / AI Core owner surface | `pwa/`, `server/iphone_pwa.py`, deployed UI branch | QUALIFICATION | UI/PWA workflows green | `/iphone/` returned 200 on latest Railway runtime; no full physical UX qualification recorded | `e63f02b...` deployed | preserve frozen visual architecture; complete physical voice/state validation |
-| Owner authentication bootstrap | `server/iphone_pwa.py`, `security/owner_access.py` | PARTIAL | P3/owner-access tests exist | live deployment includes owner auth variables | PR21 `a8a6d61...`; deployed branch differs | full recovery/re-auth/security-epoch design not yet complete |
-| Google owner sign-in | deployed UI branch + owner auth code | QUALIFICATION | exact-head UI CI green | deployment commit history records validated Google owner sign-in | `e63f02b...` | connected API redacts variable values; owner/device real-world tests still required |
-| Trusted-device registry | `devices/registry.py` | PARTIAL | device tests and P3 workflow green | qualification service deployed | `a8a6d61...` | no security epoch/session binding; lost-device/global session semantics require hardening |
-| Per-device scopes | `devices/registry.py`, `server/owner_product.py` | PARTIAL | owner product tests | not independently physical-qualified | `a8a6d61...` | scopes exist; complete session and critical-action binding |
-| Conversation message persistence | `memory/store.py`, `devices/continuity.py` | PARTIAL | grounded conversation/owner product tests | main runtime has no durable volume | `a8a6d61...` | code persists to SQLite but production data can be lost on redeploy |
-| Conversation reopen / continuation | `devices/continuity.py`, owner UI | PARTIAL | owner product and workflow tests | no physical refresh/browser-close/server-restart evidence | `a8a6d61...` | perform persistence/restart/cross-device qualification |
-| Memory store | `memory/store.py`, `memory/second_brain.py` | PARTIAL | memory/grounding tests present | no durable main-runtime volume | `a8a6d61...` | add NEVER_STORE/retention policy hardening and production persistence evidence |
-| Memory Graph | `memory/store.py`, `server/owner_product.py` | PARTIAL | API tests included in owner product suite | owner UI exists | `a8a6d61...` | production durability and physical UX verification pending |
-| Memory Tree | `memory/store.py`, `server/owner_product.py` | PARTIAL | API tests | owner UI exists | `a8a6d61...` | production durability pending |
-| Memory Detail/correction/deletion/export | `memory/store.py`, `memory/second_brain.py`, `server/owner_product.py` | PARTIAL | owner product/memory tests | no restart/redeploy evidence | `a8a6d61...` | verify deletion/export/retention on durable production storage |
-| Memory contradiction handling | `memory/store.py`, `memory/second_brain.py` | PARTIAL | conflict/supersede code exists | no operational qualification | `a8a6d61...` | strengthen provenance, verification and owner-correction flows |
-| Knowledge ingestion | `knowledge/store.py` | PARTIAL | `tests/test_knowledge.py` | no durable main-runtime volume | `a8a6d61...` | text extraction supports PDF/DOCX/XLSX etc.; OCR/image ingestion not implemented here |
-| Knowledge citations/provenance | `knowledge/store.py`, `agent/executor.py` | PARTIAL | grounded conversation tests | no production persistence evidence | `a8a6d61...` | verify citations end-to-end on durable deployment |
-| Knowledge access controls | `knowledge/store.py`, `server/owner_product.py` | PARTIAL | owner product tests | no security review evidence for every surface | `a8a6d61...` | complete policy integration and session binding |
-| Voice recognition/TTS | `voice/`, `server/iphone_pwa.py` | QUALIFICATION | P3 iPhone PWA workflow green | mandatory physical P3 evidence not complete | P3 `78c7e9d...` | do not claim natural/background full-duplex beyond platform limits |
-| Interruption / cancellation | `agent/executor.py`, voice runtime | QUALIFICATION | automated cancellation tests/workflow green | physical interruption/cancellation still mandatory | P3/PR21 | capture P3 physical evidence |
-| Activities/audit | `memory/store.py`, owner UI | PARTIAL | audit calls covered indirectly by tests | main runtime non-durable | `a8a6d61...` | add tamper evidence, stronger redaction, durable production proof |
-| Emergency stop | `tools/registry.py` | PARTIAL | reliability/security suite green | state persists only if data root persists | `a8a6d61...` | add broader workflow/session/freeze semantics and durable deployment evidence |
-| One-use tool approval | `security/approvals.py`, `agent/executor.py` | PARTIAL | current tests exercise approval flow | process-memory tickets/paused state | `a8a6d61...` | make approvals durable/atomic and bind owner/device/session/epoch/destination/classification |
-| Permission engine | `core/permissions.py`, `tools/registry.py` | PARTIAL | reliability/security tests | no full dynamic-risk production proof | `a8a6d61...` | add destination/data classification/rate/spend rules |
-| Workflows | `automation/engine.py` | PARTIAL | workflow recovery tests; CI green | DB is non-durable on main runtime | `a8a6d61...` | workflow approval resume depends on in-memory executor approval state; harden restart semantics |
-| Workflow restart recovery | `automation/engine.py` | PARTIAL | `_recover_interrupted_runs` + tests | no production restart persistence test | `a8a6d61...` | validate restart/redeploy with durable storage and approval waits |
-| Proactive intelligence | `proactive/`, runtime wiring | PARTIAL | existing tests/CI | no owner-controlled production qualification | `a8a6d61...` | verify quiet hours/frequency/why surfaced/notification destinations |
-| Tool registry | `tools/registry.py`, `tools/builtins.py` | PARTIAL | tool/integration tests | live connectors not generally authenticated | `a8a6d61...` | route every consequential tool through hardened Trusted Action Core |
-| File tools | `tools/files.py` | PARTIAL | file-scope tests | not production-qualified | `a8a6d61...` | verify sandbox/path scopes/rollback |
-| Gmail / Calendar connectors | `tools/integrations.py`, integration runtime | PARTIAL | mocks/integration tests | OAuth/owner consent not verified live | `a8a6d61...` | read-only first; owner OAuth is external blocker |
-| Google Drive / Sheets connectors | connector architecture present but current owner-product evidence incomplete | PARTIAL | connector/tool tests are not enough to claim live operations | no live OAuth evidence | `a8a6d61...` | implement/verify declared operations and scopes |
-| GitHub connector | integration/tool architecture | PARTIAL | code-level tests only | no live owner-product connector qualification recorded | `a8a6d61...` | implement read-first then controlled write with approval |
-| Computer operator | browser/computer modules + builtins | PARTIAL | tool tests | no full end-to-end safe desktop qualification | current branches | enforce API/DOM/accessibility preference, sandbox, verification/rollback |
-| Provider abstraction | `models/router.py` | PARTIAL | model-router and dialogue evaluation tests | Gemini deployment evidence exists | `a8a6d61...` / deployed `e63f02b...` | complete owner preference, health/failover and private endpoint qualification |
-| Sensitive-data routing | `models/router.py` | PARTIAL | router tests | no live private model | `a8a6d61...` | fail closed until self-hosted/approved private provider exists |
-| Self-hosted vLLM package | `deploy/self-hosted-model/` | QUALIFICATION | package files/verify script exist | no GPU host purchased/deployed | `a8a6d61...` | owner-only GPU purchase then live security/latency/concurrency tests |
-| Backup service | `recovery/backup.py` | PARTIAL | code exists | no isolated restore evidence recorded for current candidate | current branch | implement encrypted backup/checksum/restore qualification |
-| Production durable storage | `core/config.py`, `app/main.py`, Railway | BLOCKED | local SQLite stores exist | main Railway runtime has no volume | deployed `e63f02b...` | W1: add fail-closed validation, attach durable storage, restart/redeploy/backup/restore tests |
-| Windows package | packaging code/workflows | QUALIFICATION | package validation workflow green | signed installer/physical install not proven | PR21/UI heads | signing prerequisite + install/update/uninstall tests |
-| Android package | `android-companion/` | QUALIFICATION | Android Companion + Instrumentation workflows green | physical installation/reconnect not yet recorded | PR21/UI heads | signed APK/AAB and physical qualification |
-| Native iOS distribution | `ios-companion/` | BLOCKED | iOS workflow green | no Apple Developer/TestFlight signed distribution evidence | current branches | Apple Developer account/signing owner blocker |
-| Physical P3 qualification | `qualification/`, PR #18 | BLOCKED | automated P3 workflow green | mandatory real-device evidence incomplete | `78c7e9d...` | owner must perform/permit required physical tests; do not fabricate evidence |
+| Owner authentication bootstrap | `server/iphone_pwa.py`, `security/owner_access.py` | PARTIAL | owner-access/P3 tests | live deployment includes owner auth foundation | current branches | production/physical recovery and reauth qualification remains |
+| Trusted-device registry | `devices/registry.py` | PARTIAL | device tests plus W6 revocation/OAuth invalidation integration | qualification service deployed | W6 `152ef132...` | production durable trust/session qualification remains |
+| Per-device scopes | `devices/registry.py`, owner APIs | PARTIAL | owner product tests | not independently physical-qualified | current branch | physical multi-device qualification remains |
+| Conversation message persistence | `memory/store.py`, `devices/continuity.py` | PARTIAL | grounded conversation/owner product tests | main runtime has no durable volume | current branch | production data can be lost on redeploy until durable volume gate |
+| Conversation reopen / continuation | `devices/continuity.py`, owner UI | PARTIAL | owner product/workflow tests | no full physical restart evidence | current branch | perform persistence/restart/cross-device qualification |
+| Memory / Graph / Tree / Detail | `memory/`, `server/owner_product.py`, W4 inspection | PARTIAL | W4 exact-head automated validation | main runtime non-durable | W4/W5 heads | production durability and physical UX verification pending |
+| Knowledge ingestion/versioning/provenance | `knowledge/`, W4 APIs | PARTIAL | W4 exact-head automated validation | no production durable qualification | W4/W5 heads | real OCR/provider and durable production proof remain |
+| Voice recognition/TTS | `voice/`, `server/iphone_pwa.py` | QUALIFICATION | P3 workflow green | mandatory physical P3 evidence incomplete | current branch | physical P3.2–P3.8 required |
+| Activities / audit | memory audit + `security/action_audit.py` | PARTIAL | Trusted Action hash-chain and W6 lifecycle audit tests | production data root non-durable | W6 `152ef132...` | production persistence and broader operational qualification |
+| Emergency Stop | `tools/registry.py`, workflow integration | PARTIAL | security/workflow exact-head tests green | durable only where data root persists | W5/W6 | production persistence qualification |
+| Trusted Action one-use approval | `security/approvals.py`, `agent/executor.py` | PARTIAL | durable binding/replay tests + W5 exact-head CI | not production durable-qualified | W5 | live connector/session qualification |
+| Workflow budgets/concurrency/idempotency | `automation/budget.py`, `automation/engine.py` | PARTIAL | W5 implemented/integrated/automated validated | main runtime has no persistent volume | W5 `8d4e5ea...` | production restart/durable-volume qualification |
+| Connector manifest contract | `integrations/contracts.py`, `integrations/registry.py` | PARTIAL | **W6.1 implemented, integrated, automated validated**; manifest validation and stricter-policy tests | not live-provider verified | W6 implementation `baaa7da...`; validated head `152ef132...` | W6.2 + live provider qualification |
+| Durable OAuth transaction lifecycle | `integrations/oauth.py`, `integrations/state.py`, vault | PARTIAL | restart, replay, expiry, owner/device/session/security-epoch, concurrent callback, redirect and redaction tests pass | no real OAuth account connected in W6.1 | `152ef132...` | live OAuth qualification when owner credentials are required |
+| Connector health/error/retry/rate-limit/pagination | `integrations/gateway.py`, `integrations/state.py` | PARTIAL | 401/403/429/Retry-After/5xx/timeout/malformed response, bounded retry, deadline/cancel and cursor-cycle tests pass | no live provider quota/latency evidence | `152ef132...` | provider-specific operational qualification |
+| Connector durable idempotency/recovery | `integrations/state.py`, `integrations/gateway.py` | PARTIAL | duplicate dispatch prevention, durable operation ID and outcome-unknown recovery behavior automated-tested | no live external side-effect recovery exercise | `152ef132...` | qualify real provider uncertain-outcome cases |
+| Connector verification / rollback contract | connector manifests, gateway, tools | PARTIAL | W6 provider hooks and safe rollback-availability metadata tested | only implemented provider-specific subset | `152ef132...` | expand to Drive/Sheets/remaining providers; never claim rollback where impossible |
+| Connector lifecycle audit | `integrations/lifecycle.py`, `security/action_audit.py` | PARTIAL | redacted tamper-evident lifecycle audit tests | production durability pending | `152ef132...` | live connect/refresh/revoke audit qualification |
+| Gmail connector | `integrations/adapters.py`, `tools/integrations.py` | PARTIAL | existing reads preserved; read/search/draft/send/modify/delete-governance and verification hooks automated validated; legacy adapter compatibility repaired | **not live OAuth/provider verified** | W6 `152ef132...` | live Google account read-first qualification; delete remains prohibited by default |
+| Google Calendar connector | `integrations/adapters.py`, `tools/integrations.py` | PARTIAL | read/search/create/update/delete governance, provider-ID verification and rollback metadata automated validated | **not live OAuth/provider verified** | W6 `152ef132...` | live read-first then controlled write qualification |
+| Apps & Tools connector management | `server/connector_api.py`, `server/connector_ui.py` | PARTIAL | authenticated owner API, trust rejection, safe scopes/health/reconnect/revoke display tests pass; Home unchanged | no live OAuth management exercise | `152ef132...` | live connector owner UX qualification |
+| Slack connector | existing adapter + W6 manifest foundation | PARTIAL | common contract/runtime foundations present | not W6.1 live-qualified | `152ef132...` | migrate/qualify provider-specific verification/idempotency as needed |
+| Home Assistant connector | existing adapter + W6 manifest foundation | PARTIAL | common contract/runtime foundations present | not W6.1 live-qualified | `152ef132...` | provider-specific operational qualification |
+| Google Drive connector | W6 contract foundation only | PLANNED | no W6.1 Drive implementation claim | none | W6.1 | W6.2 read/search/download, then controlled writes |
+| Google Sheets connector | W6 contract foundation only | PLANNED | no W6.1 Sheets implementation claim | none | W6.1 | W6.2 read/search, then controlled writes |
+| GitHub connector | general integration/tool architecture | PARTIAL | code-level foundations only | no live owner-product qualification recorded | current branches | implement/qualify read-first then controlled write |
+| Microsoft 365 connector | connector contract can represent provider but adapter not implemented | PLANNED | manifest/runtime architecture supports future provider | none | W6.1 | future bounded connector batch |
+| Computer operator | browser/computer modules + builtins | PARTIAL | tool tests | no full end-to-end safe desktop qualification | current branches | W7 safety/verification/rollback hardening |
+| Provider abstraction | `models/router.py` | PARTIAL | model-router/dialogue tests | Gemini deployment evidence exists | current/deployed heads | W8 health/failover/observability hardening |
+| Sensitive-data routing | `models/router.py` | PARTIAL | router tests | no live private model | current branch | fail closed until approved private endpoint exists |
+| Self-hosted vLLM package | `deploy/self-hosted-model/` | QUALIFICATION | package/verify files exist | no GPU host deployed | current branch | later owner-only GPU prerequisite |
+| Backup service | `recovery/backup.py` | PARTIAL | Reliability/Security automated isolated backup/restore passes | no main production durable restore proof | W5/W6 workflows | production durable qualification |
+| Production durable storage | storage guard + Railway | BLOCKED | fail-closed/local code exists | main Railway runtime has no persistent volume | deployed `e63f02b...` | attach volume only at approved production gate, then restart/redeploy/backup/restore proof |
+| Windows package | packaging workflows | QUALIFICATION | Package Validation #149 green including Windows build | signed physical install not proven | `152ef132...` | signing prerequisite + physical install/update/uninstall |
+| Android package | Android companion/instrumentation | QUALIFICATION | Android Instrumentation #149 green | physical install/reconnect not recorded | `152ef132...` | signed release + physical qualification |
+| Native iOS distribution | `ios-companion/` | BLOCKED | iOS Companion #131 green | no Apple Developer/TestFlight signed evidence | `152ef132...` | Apple Developer/signing owner blocker |
+| Physical P3 qualification | `qualification/`, PR #18 | BLOCKED | P3 iPhone PWA #118 green | mandatory real-device evidence incomplete | `152ef132...` automated | owner must perform/permit physical tests; do not fabricate evidence |
+
+## W6.1 exact evidence
+
+- Direct baseline-parent implementation SHA: `baaa7da38956e97231970c548626a71cde257176`
+- Exact validated branch integration SHA: `152ef13217b652121917a890de14e20edb139473`
+- Focused W6 tests: **60 PASS**
+- CI #569 / `34831726193`: PASS
+- Reliability and Security #150 / `34831726152`: PASS
+- P3 iPhone PWA #118 / `34831726271`: PASS
+- Android Instrumentation #149 / `34831726189`: PASS
+- Package Validation #149 / `34831726154`: PASS
+- iOS Companion #131 / `34831726233`: PASS
+
+W6.1 is therefore **IMPLEMENTED**, **INTEGRATED**, and **AUTOMATED VALIDATED**. It is deliberately **not LIVE OAUTH VERIFIED**, **not PRODUCTION VERIFIED**, and **not complete W6**, because Drive/Sheets and real-provider qualification remain.
