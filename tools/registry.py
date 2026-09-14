@@ -22,23 +22,24 @@ class Tool:
 
 class ToolRegistry:
     def __init__(self,settings):
-        self.settings=settings;self.permissions=PermissionEngine(settings.autonomy_mode);self._tools={};self.emergency_stop=False;self._control_path=None;self._emergency_listeners=[]
+        self.settings=settings;self.permissions=PermissionEngine(settings.autonomy_mode);self._tools={};self.emergency_stop=False;self._control_path=None;self._approval_path=None
         data_dir=getattr(settings,'data_dir',None)
         if data_dir is not None:
-            self._control_path=Path(data_dir)/'runtime-controls.sqlite3';self._control_path.parent.mkdir(parents=True,exist_ok=True)
+            data_root=Path(data_dir);self._control_path=data_root/'runtime-controls.sqlite3';self._approval_path=data_root/'trusted-actions.sqlite3';self._control_path.parent.mkdir(parents=True,exist_ok=True)
             with self._control_con() as con:
                 con.execute('CREATE TABLE IF NOT EXISTS runtime_controls (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
                 row=con.execute("SELECT value FROM runtime_controls WHERE key='emergency_stop'").fetchone()
                 self.emergency_stop=bool(row and row[0]=='1')
     def _control_con(self):return sqlite3.connect(self._control_path)
-    def add_emergency_listener(self,callback):
-        self._emergency_listeners.append(callback);return callback
     def set_emergency_stop(self,enabled:bool):
         previous=self.emergency_stop;self.emergency_stop=bool(enabled)
         if self._control_path is not None:
             with self._control_con() as con:con.execute("INSERT OR REPLACE INTO runtime_controls(key,value) VALUES('emergency_stop',?)",('1' if enabled else '0',))
-        if self.emergency_stop and not previous:
-            for callback in tuple(self._emergency_listeners):callback(True)
+        if self.emergency_stop and not previous and self._approval_path is not None and self._approval_path.exists():
+            # Emergency stop is a trust-boundary event. Invalidate every pending
+            # approval/permit so clearing the stop cannot resurrect stale intent.
+            from security.approvals import ApprovalManager
+            ApprovalManager(path=self._approval_path).advance_security_epoch()
         return self.emergency_stop
     def register(self,t:Tool):
         if t.name in self._tools:raise ValueError(f'Duplicate tool {t.name}')
