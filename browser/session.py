@@ -72,22 +72,21 @@ class PersistentBrowser:
                 if count:
                     masks.append(locator)
             except Exception:
-                # If frame geometry cannot be inspected, fail closed at the caller.
                 return {'available': False, 'reason': 'unsupported_geometry', 'sensitive_count': sensitive_count, 'bytes': b''}
         try:
             geometry = self.page.evaluate('''() => ({
-                devicePixelRatio: window.devicePixelRatio || null,
-                pageZoom: (window.visualViewport && window.visualViewport.scale) || 1,
-                viewportWidth: window.innerWidth || null,
-                viewportHeight: window.innerHeight || null,
-                scrollX: window.scrollX || 0,
-                scrollY: window.scrollY || 0,
-                windowX: window.screenX,
-                windowY: window.screenY,
-                outerWidth: window.outerWidth || null,
-                outerHeight: window.outerHeight || null,
-                contentOffsetX: Math.max(0, ((window.outerWidth || window.innerWidth) - window.innerWidth) / 2),
-                contentOffsetY: Math.max(0, (window.outerHeight || window.innerHeight) - window.innerHeight)
+                device_pixel_ratio: window.devicePixelRatio || null,
+                page_zoom: (window.visualViewport && window.visualViewport.scale) || 1,
+                viewport_width: window.innerWidth || null,
+                viewport_height: window.innerHeight || null,
+                scroll_x: window.scrollX || 0,
+                scroll_y: window.scrollY || 0,
+                browser_window_x: window.screenX,
+                browser_window_y: window.screenY,
+                browser_window_width: window.outerWidth || null,
+                browser_window_height: window.outerHeight || null,
+                content_offset_x: Math.max(0, ((window.outerWidth || window.innerWidth) - window.innerWidth) / 2),
+                content_offset_y: Math.max(0, (window.outerHeight || window.innerHeight) - window.innerHeight)
             })''') or {}
         except Exception:
             geometry = {}

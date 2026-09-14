@@ -58,6 +58,21 @@ def test_missing_mapping_rejected():
         viewport_rect_to_screenshot(Rect(1, 1, 10, 10, CoordinateSpace.BROWSER_VIEWPORT), GeometryContext(screenshot_width=100, screenshot_height=100))
 
 
-def test_unsupported_coordinate_space_rejected():
+def test_all_declared_coordinate_spaces_have_explicit_transformations():
+    ctx = _ctx()
+    cases = [
+        Rect(1, 1, 10, 10, CoordinateSpace.BROWSER_VIEWPORT),
+        Rect(1, 1, 10, 10, CoordinateSpace.BROWSER_DOCUMENT),
+        Rect(1, 1, 10, 10, CoordinateSpace.BROWSER_WINDOW),
+        Rect(1, 1, 10, 10, CoordinateSpace.PHYSICAL_MONITOR),
+        Rect(1, 1, 10, 10, CoordinateSpace.VIRTUAL_DESKTOP),
+        Rect(1, 1, 10, 10, CoordinateSpace.SCREENSHOT_IMAGE),
+    ]
+    mapped = transform_sensitive_rectangles(cases, ctx)
+    assert len(mapped) == len(cases)
+    assert all(rect.space is CoordinateSpace.SCREENSHOT_IMAGE for rect in mapped)
+
+
+def test_out_of_bounds_transformation_is_rejected_not_silently_dropped():
     with pytest.raises(GeometryError):
-        transform_sensitive_rectangles([Rect(1, 1, 10, 10, CoordinateSpace.BROWSER_WINDOW)], _ctx())
+        transform_sensitive_rectangles([Rect(5000, 5000, 10, 10, CoordinateSpace.BROWSER_WINDOW)], _ctx())
