@@ -112,3 +112,26 @@ def test_cloud_command_binds_device_and_session_into_durable_ticket(tmp_path):
     assert ticket.session_id == session.id
     assert ticket.destination == 'person@example.com'
     assert ticket.data_classification == 'internal'
+
+
+def test_cloud_emergency_stop_invalidates_approval_after_stop_is_cleared(tmp_path):
+    relay, calls = make_relay(tmp_path)
+    issued = relay.issue_session('device-1', 'device-secret')
+    session = relay.sessions.authenticate(issued.payload['session_token'], 'ai:chat')
+
+    proposed = relay.command(session, 'do it', 'nonce-not-used-here')
+    approval_id = proposed.payload['approval_id']
+    assert relay.executor.approval_context(approval_id) is not None
+
+    stopped = relay.set_emergency_stop('x' * 40, True)
+    assert stopped.status == 200
+    assert relay.executor.tools.emergency_stop is True
+    assert relay.executor.approval_context(approval_id) is None
+
+    cleared = relay.set_emergency_stop('x' * 40, False)
+    assert cleared.status == 200
+    assert relay.executor.tools.emergency_stop is False
+    stale = relay.approval(session, approval_id, 'approve')
+    assert stale.status == 410
+    assert stale.payload['error'] == 'approval_unavailable'
+    assert calls == []
