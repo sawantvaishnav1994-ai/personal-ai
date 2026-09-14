@@ -1,23 +1,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import hashlib, json, re, time
+import hashlib
+import json
+from pathlib import Path
+import re
+import time
 from typing import Any, Callable
+import uuid
 
 from browser.observation import observe_page
 from desktop.operator_transactions import OperatorBinding, OperatorTransactionStore
 from security.policy_gateway import DecisionKind, PolicyGateway, PolicyOperation
-from security.policy_targets import TargetValidationError, normalize_origin, validate_file_metadata
+from security.policy_targets import TargetValidationError, canonical_path, normalize_origin, validate_file_metadata
 
 INJECTION_RE = re.compile(r'ignore .*instructions|system message|grant .*permission|reveal .*secret|override .*policy|disable .*security', re.I)
 SECRET_FIELD_RE = re.compile(r'password|passwd|secret|token|otp|passcode|pin|cvv|cvc|cc-number|cc-csc|private-key|api-key', re.I)
+CHALLENGE_RE = re.compile(r'captcha|verify (?:you are|you.?re) human|authenticator|multi[- ]factor|two[- ]factor|2fa|mfa|security challenge', re.I)
 CONSEQUENTIAL = {'form_submission','email_send','message_send','purchase','financial_transfer','public_publish','share','delete','destructive_delete','security_setting_modify','permission_change','legal_acceptance'}
-BLOCKED_UNLESS_EXPLICIT = CONSEQUENTIAL - {'form_submission'}
+STRONG_OWNER_ACTIONS = CONSEQUENTIAL - {'form_submission'}
 
 
 def digest(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def sanitize_download_filename(name: str) -> str:
+    value = str(name or '').strip().replace('\\','/')
+    base = value.rsplit('/',1)[-1].strip().strip('.')
+    if not base or base in {'.','..'} or '..' in value.split('/') or '/' in base or ':' in base or '\x00' in base:
+        raise ValueError('unsafe_download_name')
+    if len(base) > 180: base = base[:180]
+    if base.upper().split('.')[0] in {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}:
+        raise ValueError('unsafe_download_name')
+    return base
 
 
 @dataclass(frozen=True)
@@ -36,6 +53,7 @@ class BrowserAction:
     data_classification: str = 'public'
     operation_class: str = ''
     upload_path: str = ''
+    download_root: str = ''
     claimed_mime: str = ''
     parameters: dict[str, Any] = field(default_factory=dict)
 
@@ -51,7 +69,7 @@ class BrowserResult:
 
 
 class SafeBrowserOperator:
-    """Single W7.4 execution path combining W7.1, W7.2 and W7.3 authorities."""
+    """Single W7.4 execution path combining W7.1 transaction, W7.2 observation and W7.3 policy authority."""
 
     def __init__(self, browser, policy: PolicyGateway, transactions: OperatorTransactionStore,
                  binding: OperatorBinding, emergency_stop: Callable[[], bool] | None = None):
@@ -80,8 +98,13 @@ class SafeBrowserOperator:
         if self.emergency_stop(): return self._cancel(action,'emergency_stop_active')
 
         first=self._capture(action,'policy_evaluation'); op_class=self._classify(action,first['raw'])
-        if op_class in BLOCKED_UNLESS_EXPLICIT and action.operation_class!=op_class:
-            return self._deny(action,first,'approval_required')
+        text=str(first['raw'].get('visible_text') or '')
+        if CHALLENGE_RE.search(text) and action.kind not in {'open_url','back','forward','refresh','select_tab','close_tab','wait_for'}:
+            return self._deny(action,first,'owner_intervention_required')
+        if op_class in STRONG_OWNER_ACTIONS:
+            if action.operation_class != op_class: return self._deny(action,first,'approval_required')
+            if not reauthenticated: self._approval_state(action.transaction_id); return self._result(action,'reauthentication_required','reauthentication_required',first)
+            if not approved: self._approval_state(action.transaction_id); return self._result(action,'approval_required','approval_required',first)
 
         ops=self._policy_ops(action,first,op_class)
         decisions=[]
@@ -137,13 +160,15 @@ class SafeBrowserOperator:
                 self._recovery(action.transaction_id,reason); return self._result(action,'recovery_review_required','recovery_review_required',fresh,after)
             self.transactions.transition(action.transaction_id,'failed',error_code=reason); return self._result(action,'failed','verification_failed',fresh,after)
         self.transactions.transition(action.transaction_id,'completed')
-        return self._result(action,'completed','allow',fresh,after,{'origin':after['raw'].get('origin',''),'url':after['raw'].get('normalized_url',''),'tab_id':after['raw'].get('tab_id','')})
+        safe={'origin':after['raw'].get('origin',''),'url':after['raw'].get('normalized_url',''),'tab_id':after['raw'].get('tab_id','')}
+        if raw.get('download_sha256'): safe.update({'download_sha256':raw['download_sha256'],'download_size':raw['download_size'],'download_name':raw['download_name']})
+        return self._result(action,'completed','allow',fresh,after,safe)
 
     def _observe(self): self.browser.start(); return observe_page(self.browser.page)
 
     def _capture(self, action, reason):
         obs=self._observe(); now=time.time(); d=digest({'ctx':obs.get('browser_context_id'),'tab':obs.get('tab_id'),'origin':obs.get('origin'),'url':obs.get('normalized_url'),'dom':obs.get('dom_sha256'),'a11y':obs.get('accessibility_sha256'),'act':obs.get('actionable_digest'),'frames':obs.get('frame_origins_digest')})
-        oid=f'w74-{d[:20]}-{int(now*1000)}'
+        oid=f'w74-{uuid.uuid4().hex}'
         self.transactions.save_observation({'observation_id':oid,'transaction_id':action.transaction_id,'owner_id':self.binding.owner_id,'device_id':self.binding.device_id,'session_id':self.binding.session_id,'security_epoch':self.binding.security_epoch,'application_identity':'browser:chromium','application_name':'Chromium','process_identity':obs.get('browser_context_id') or 'browser-context-unavailable','window_identity':obs.get('tab_id') or 'browser-tab-unavailable','browser_context_identity':obs.get('browser_context_id',''),'browser_tab_identity':obs.get('tab_id',''),'browser_origin':obs.get('origin',''),'normalized_url':obs.get('normalized_url',''),'captured_at':now,'expires_at':now+120,'screenshot_evidence_ref':'visual_evidence_unavailable','screen_fingerprint':digest({'dom':obs.get('dom_sha256'),'a11y':obs.get('accessibility_sha256'),'act':obs.get('actionable_digest')}),'sanitized_dom_digest':obs.get('dom_sha256',''),'accessibility_tree_digest':obs.get('accessibility_sha256',''),'actionable_element_digest':obs.get('actionable_digest',''),'frame_origins_digest':obs.get('frame_origins_digest',''),'active_target_id':obs.get('active_target_id',''),'sensitivity':{'sensitive_region_count':obs.get('sensitive_region_count',0)},'capture_reason':reason,'capture_initiator':'w7.4_safe_browser_operator','observation_digest':d})
         return {'observation_id':oid,'digest':d,'raw':obs}
 
@@ -168,6 +193,9 @@ class SafeBrowserOperator:
         if a.upload_path:
             validate_file_metadata(a.upload_path,claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
             ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':self._file_digest(a.upload_path)},a.data_classification))
+        if a.kind=='download':
+            canonical_path(a.download_root,[a.download_root])
+            ops.append(PolicyOperation('download',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.download_root,'approved_roots':[a.download_root]},None,a.download_root,{'root_digest':digest(a.download_root)},a.data_classification))
         return ops
 
     def _bind_observation(self,op,c):
@@ -175,7 +203,8 @@ class SafeBrowserOperator:
 
     def _classify(self,a,obs):
         if a.operation_class:return a.operation_class
-        if a.upload_path:return 'external_upload'
+        if a.upload_path or a.kind=='upload':return 'external_upload'
+        if a.kind=='download':return 'download'
         if a.kind in {'open_url','back','forward','refresh','create_tab','select_tab','close_tab'}:return 'navigate'
         if a.kind=='click':
             t=self._target(obs,a.target_id) or {}; s=' '.join(str(t.get(k) or '') for k in ('text','label','name')).casefold()
@@ -196,7 +225,10 @@ class SafeBrowserOperator:
         if a.kind=='forward':p.go_forward(wait_until='domcontentloaded',timeout=a.timeout_ms);return {'url':p.url}
         if a.kind=='refresh':p.reload(wait_until='domcontentloaded',timeout=a.timeout_ms);return {'url':p.url}
         if a.kind=='create_tab':self.browser.page=self.browser.context.new_page();self.browser.page.goto(a.url,wait_until='domcontentloaded',timeout=a.timeout_ms);return {'url':self.browser.page.url}
-        if a.kind=='select_tab':pages=list(self.browser.context.pages);idx=int(a.tab_index if a.tab_index is not None else -1);self.browser.page=pages[idx];self.browser.page.bring_to_front();return {'url':self.browser.page.url}
+        if a.kind=='select_tab':
+            pages=list(self.browser.context.pages);idx=int(a.tab_index if a.tab_index is not None else -1)
+            if idx<0 or idx>=len(pages):raise IndexError('tab index out of range')
+            self.browser.page=pages[idx];self.browser.page.bring_to_front();return {'url':self.browser.page.url}
         if a.kind=='close_tab':
             if len(self.browser.context.pages)<=1:raise RuntimeError('refusing to close only tab')
             p.close();self.browser.page=self.browser.context.pages[0];return {'url':self.browser.page.url}
@@ -216,16 +248,29 @@ class SafeBrowserOperator:
         if a.kind=='select':loc.select_option(label=a.option,timeout=a.timeout_ms);return {'selected':True}
         if a.kind=='check':loc.check(timeout=a.timeout_ms);return {'checked':True}
         if a.kind=='uncheck':loc.uncheck(timeout=a.timeout_ms);return {'unchecked':True}
+        if a.kind=='upload':loc.set_input_files(a.upload_path,timeout=a.timeout_ms);return {'uploaded':True,'file_sha256':self._file_digest(a.upload_path)}
+        if a.kind=='download':
+            with p.expect_download(timeout=a.timeout_ms) as event: loc.click(timeout=a.timeout_ms)
+            dl=event.value; name=sanitize_download_filename(dl.suggested_filename); root=Path(a.download_root).expanduser().resolve(); root.mkdir(parents=True,exist_ok=True)
+            dest=root/name; stem,suffix=dest.stem,dest.suffix; n=1
+            while dest.exists(): dest=root/f'{stem} ({n}){suffix}'; n+=1
+            dl.save_as(str(dest)); canonical_path(str(dest),[str(root)]); validate_file_metadata(str(dest),claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
+            return {'download_sha256':self._file_digest(str(dest)),'download_size':dest.stat().st_size,'download_name':dest.name}
         raise ValueError('unsupported action')
 
     def _verify(self,a,before,after,raw):
         if before.get('browser_context_id')!=after.get('browser_context_id'):return False,'browser_session_changed'
+        if a.kind not in {'create_tab','select_tab','close_tab'} and before.get('tab_id')!=after.get('tab_id'):return False,'tab_substitution'
+        if a.kind not in {'open_url','back','forward','refresh','create_tab','select_tab'} and before.get('frame_origins_digest')!=after.get('frame_origins_digest'):return False,'iframe_origin_changed'
         if a.kind in {'open_url','create_tab'}:
             try: expected,actual=normalize_origin(a.url),normalize_origin(after.get('normalized_url') or after.get('origin') or '')
             except TargetValidationError:return False,'redirect_not_allowed'
-            if expected['scheme']=='https' and actual['scheme']!='https':return False,'redirect_not_allowed'
-            return (actual['origin']==expected['origin'],'navigation_verified' if actual['origin']==expected['origin'] else 'redirect_not_allowed')
+            if expected.scheme=='https' and actual.scheme!='https':return False,'redirect_not_allowed'
+            return (actual.value==expected.value,'navigation_verified' if actual.value==expected.value else 'redirect_not_allowed')
         if a.kind=='close_tab':return (before.get('tab_id')!=after.get('tab_id'),'tab_close_verified')
+        if a.kind=='select_tab':return (bool(after.get('tab_id')),'tab_select_verified')
+        if a.kind=='download':return (bool(raw.get('download_sha256')),'download_checksum_verified')
+        if a.kind=='upload':return (bool(raw.get('file_sha256')),'upload_digest_verified')
         if a.kind=='wait_for':return (bool(raw.get('condition_met')),'wait_condition_verified')
         if a.expected_text and a.expected_text not in str(after.get('visible_text') or ''):return False,'expected_postcondition_missing'
         if a.kind in {'click','select','check','uncheck'} and before.get('dom_sha256')==after.get('dom_sha256') and before.get('normalized_url')==after.get('normalized_url'):return False,'expected_postcondition_missing'
@@ -239,6 +284,7 @@ class SafeBrowserOperator:
         if a.value:d['value_digest']=digest(a.value)
         if a.option:d['option_digest']=digest(a.option)
         if a.upload_path:d['upload_path_digest']=digest(a.upload_path)
+        if a.download_root:d['download_root_digest']=digest(a.download_root)
         return d
     @staticmethod
     def _expected(a,op):return 'observable verified postcondition or recovery review' if op in CONSEQUENTIAL else 'DOM/accessibility readback'
@@ -251,10 +297,12 @@ class SafeBrowserOperator:
         return h.hexdigest()
 
     def _validate(self,a):
-        allowed={'open_url','back','forward','refresh','create_tab','select_tab','close_tab','click','type','select','check','uncheck','scroll','wait_for'}
+        allowed={'open_url','back','forward','refresh','create_tab','select_tab','close_tab','click','type','select','check','uncheck','scroll','wait_for','upload','download'}
         if a.kind not in allowed or not a.transaction_id:raise ValueError('invalid browser action')
         if a.kind in {'open_url','create_tab'} and not a.url:raise ValueError('URL required')
-        if a.kind in {'click','type','select','check','uncheck'} and not a.target_id:raise ValueError('stable target_id required')
+        if a.kind in {'click','type','select','check','uncheck','upload','download'} and not a.target_id:raise ValueError('stable target_id required')
+        if a.kind=='upload' and not a.upload_path:raise ValueError('upload_path required')
+        if a.kind=='download' and not a.download_root:raise ValueError('download_root required')
         if not 0<=a.timeout_ms<=30000:raise ValueError('timeout must be bounded')
 
     def _deny(self,a,before,reason):
