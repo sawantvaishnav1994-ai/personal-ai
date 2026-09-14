@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from desktop.operator_recovery import OperatorRecoveryStore, RecoveryLease
+from desktop.operator_recovery import OperatorRecoveryStore
 from desktop.operator_transactions import OperatorBinding
 from desktop.verification import VerificationOutcome, build_record, normalize_operator_result, sanitize_evidence
 
@@ -25,10 +25,10 @@ class RecoveryStep:
 
 
 class CrossOperatorCoordinator:
-    """W7.6 orchestration over existing W7.4/W7.5 execution callbacks only.
+    """Durable W7.6 orchestration over the frozen W7.4/W7.5 execution surfaces.
 
-    Callers supply browser/desktop execution and read-only verifier callbacks. This class does not
-    synthesize browser, desktop, file, clipboard or shell capabilities.
+    The authority callback must represent the existing W7.3 policy + Trusted Action Core path.
+    Missing authority fails closed; this coordinator never grants approval itself.
     """
     def __init__(self, recovery: OperatorRecoveryStore, binding: OperatorBinding, *,
                  browser_execute: Callable[[RecoveryStep], Any] | None=None,
@@ -39,7 +39,7 @@ class CrossOperatorCoordinator:
         self.recovery=recovery;self.binding=binding
         self.browser_execute=browser_execute;self.desktop_execute=desktop_execute
         self.verify=verify or self._default_verify
-        self.authority=authority or (lambda step,purpose: True)
+        self.authority=authority or (lambda step,purpose: False)
         self.emergency_stop=emergency_stop or (lambda:False)
 
     def run_step(self, transaction_id: str, step: RecoveryStep, *, worker_id: str='w76-worker') -> dict[str,Any]:
@@ -59,10 +59,8 @@ class CrossOperatorCoordinator:
                 return {'status':'already_recorded','dispatch':dispatch,'verification':latest}
             if self.emergency_stop():
                 self.recovery.emergency_stop();return {'status':'emergency_stop_active','dispatch_id':dispatch['dispatch_id']}
-            # The durable dispatch marker is written immediately before invoking the existing operator surface.
             self.recovery.mark_dispatched(lease,dispatch['dispatch_id'])
-            try:
-                raw=self._execute(step)
+            try:raw=self._execute(step)
             except Exception:
                 self.recovery.transition(transaction_id,'recovery_review_required',reason='dispatch_exception_outcome_unknown')
                 return {'status':'recovery_review_required','dispatch_id':dispatch['dispatch_id']}
@@ -78,8 +76,7 @@ class CrossOperatorCoordinator:
                                 observed_postcondition=observed,result=outcome,explanation=explanation,
                                 evidence_references=tuple(observed.get('evidence_references') or ()),
                                 verifier_identity=str(observed.get('verifier_identity') or 'w7.6.cross-operator'),
-                                verifier_version=str(observed.get('verifier_version') or '1'),
-                                confidence=observed.get('confidence'))
+                                verifier_version=str(observed.get('verifier_version') or '1'),confidence=observed.get('confidence'))
             saved=self.recovery.record_verification(lease,record)
             if outcome is VerificationOutcome.VERIFIED_SUCCESS:
                 self.recovery.transition(transaction_id,'active',checkpoint={'last_verified_action':action_id},resume_position=step.sequence+1)
@@ -96,7 +93,6 @@ class CrossOperatorCoordinator:
         decision=self.recovery.retry_decision(dispatch_id,idempotent=step.idempotent)
         if not decision['allowed']:return {'status':'retry_not_safe','reason':decision['reason']}
         if not self.authority(step,'retry'):return {'status':'blocked_before_dispatch','reason':'blocked_by_policy'}
-        # Retry receives a distinct idempotency key; original dispatch identity is retained separately.
         retried=RecoveryStep(step.sequence,step.operator,step.operation_class,step.target,
                             f'{step.idempotency_key}:retry:{self._digest({"dispatch_id":dispatch_id})[:12]}',
                             step.expected_postcondition,step.parameters,step.consequential,step.idempotent,step.compensation_category)
@@ -124,9 +120,7 @@ class CrossOperatorCoordinator:
         uncertain=[d for d in report['dispatches'] if d['state'] in {'dispatched','verifying'}]
         if not uncertain:return {'status':'verified_no_effect','reason':'no_unverified_dispatch'}
         outcomes=[]
-        for dispatch in uncertain:
-            observation=sanitize_evidence(read_only_verify(dispatch))
-            outcomes.append({'dispatch_id':dispatch['dispatch_id'],'observation':observation})
+        for dispatch in uncertain:outcomes.append({'dispatch_id':dispatch['dispatch_id'],'observation':sanitize_evidence(read_only_verify(dispatch))})
         return {'status':'recovery_review_required','reason':'read_only_evidence_collected_owner_review_required','outcomes':outcomes}
 
     def _execute(self, step: RecoveryStep):
@@ -140,10 +134,8 @@ class CrossOperatorCoordinator:
 
     @staticmethod
     def _default_verify(step: RecoveryStep, raw: Any) -> dict[str,Any]:
-        if isinstance(raw,dict):
-            return {'status':raw.get('status',''),'reason_code':raw.get('reason_code',''),'evidence_references':raw.get('evidence_references',[])}
+        if isinstance(raw,dict):return {'status':raw.get('status',''),'reason_code':raw.get('reason_code',''),'evidence_references':raw.get('evidence_references',[])}
         return {'status':getattr(raw,'status',''),'reason_code':getattr(raw,'reason_code','')}
 
     @staticmethod
-    def _digest(value:Any)->str:
-        return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),default=str).encode()).hexdigest()
+    def _digest(value:Any)->str:return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),default=str).encode()).hexdigest()

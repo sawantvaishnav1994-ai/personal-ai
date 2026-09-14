@@ -97,15 +97,19 @@ def build_record(*, transaction_id: str, action_id: str, dispatch_id: str, idemp
 
 
 def normalize_operator_result(result: Any, *, consequential: bool) -> tuple[VerificationOutcome, str]:
-    status = str(getattr(result, 'status', None) or (result or {}).get('status','') if isinstance(result, dict) else '').strip()
-    reason = str(getattr(result, 'reason_code', None) or (result or {}).get('reason_code','') if isinstance(result, dict) else '').strip()
+    if isinstance(result, dict):
+        status = str(result.get('status') or '').strip()
+        reason = str(result.get('reason_code') or '').strip()
+    else:
+        status = str(getattr(result, 'status', '') or '').strip()
+        reason = str(getattr(result, 'reason_code', '') or '').strip()
     if status in {'verified','verified_success','completed'}:
         return VerificationOutcome.VERIFIED_SUCCESS, 'The expected postcondition was independently verified.'
     if status in {'verified_no_effect','no_effect'}:
         return VerificationOutcome.VERIFIED_NO_EFFECT, 'Verification established that no side effect occurred.'
     if status in {'verified_partial','partially_completed'}:
         return VerificationOutcome.VERIFIED_PARTIAL, 'Only part of the expected postcondition was verified.'
-    if status in {'cancelled'}:
+    if status == 'cancelled':
         return VerificationOutcome.CANCELLED_BEFORE_DISPATCH, 'The action was cancelled before a consequential dispatch.'
     if status in {'blocked_by_policy','approval_required','reauthentication_required'}:
         return VerificationOutcome.BLOCKED_BEFORE_DISPATCH, 'The action was blocked before dispatch by an authority gate.'

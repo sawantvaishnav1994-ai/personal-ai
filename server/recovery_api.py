@@ -14,7 +14,6 @@ class RecoveryDecisionRequest(BaseModel):
     decision: str
     decision_id: str
     security_epoch: int = 0
-    reauthenticated: bool = False
 
 
 class RecoveryVerifyRequest(BaseModel):
@@ -37,9 +36,11 @@ class RecoveryReportResponse(BaseModel):
 
 
 def create_recovery_router(store: OperatorRecoveryStore, authenticate: Callable[[str,str], object], *,
-                           current_security_epoch: Callable[[],int] | None=None) -> APIRouter:
-    """Owner-visible Activities recovery API using the existing device authentication authority."""
+                           current_security_epoch: Callable[[],int] | None=None,
+                           consequential_authority: Callable[[OperatorBinding,str,str],bool] | None=None) -> APIRouter:
+    """Owner-visible recovery API. Consequential decisions fail closed unless TAC-backed authority is supplied."""
     router=APIRouter(prefix='/activities/recovery',tags=['recovery'])
+    authorize_consequential=consequential_authority or (lambda binding,decision,decision_id:False)
 
     def binding(authorization: str | None, device_id: str | None, session_id: str | None, security_epoch: int=0) -> OperatorBinding:
         if not authorization or not device_id or not session_id:raise HTTPException(status_code=401,detail='authentication_required')
@@ -48,9 +49,7 @@ def create_recovery_router(store: OperatorRecoveryStore, authenticate: Callable[
         except Exception:raise HTTPException(status_code=401,detail='authentication_required')
         epoch=int(security_epoch)
         if current_security_epoch is not None and epoch!=int(current_security_epoch()):raise HTTPException(status_code=409,detail='security_epoch_changed')
-        owner='owner'
-        if isinstance(ctx,dict):owner=str(ctx.get('owner_id') or ctx.get('user_id') or 'owner')
-        else:owner=str(getattr(ctx,'owner_id','owner'))
+        owner='owner' if not isinstance(ctx,dict) else str(ctx.get('owner_id') or ctx.get('user_id') or 'owner')
         return OperatorBinding(owner,str(device_id),str(session_id),epoch)
 
     @router.get('/{transaction_id}',response_model=RecoveryReportResponse)
@@ -63,14 +62,16 @@ def create_recovery_router(store: OperatorRecoveryStore, authenticate: Callable[
     @router.post('/{transaction_id}/decision')
     def decide(transaction_id: str, request: RecoveryDecisionRequest, authorization: str | None=Header(default=None), x_device_id: str | None=Header(default=None,alias='X-Device-ID'), x_session_id: str | None=Header(default=None,alias='X-Session-ID')):
         bind=binding(authorization,x_device_id,x_session_id,request.security_epoch)
-        if request.decision in CONSEQUENTIAL_OWNER_DECISIONS and not request.reauthenticated:raise HTTPException(status_code=409,detail='reauthentication_required')
+        reauthenticated=False
+        if request.decision in CONSEQUENTIAL_OWNER_DECISIONS:
+            if not authorize_consequential(bind,request.decision,request.decision_id):
+                raise HTTPException(status_code=409,detail='reauthentication_required')
+            reauthenticated=True
         try:
-            result,created=store.owner_decision(transaction_id,bind,decision=request.decision,decision_id=request.decision_id,reauthenticated=request.reauthenticated)
+            result,created=store.owner_decision(transaction_id,bind,decision=request.decision,decision_id=request.decision_id,reauthenticated=reauthenticated)
             return {'ok':True,'created':created,'decision':result}
         except KeyError:raise HTTPException(status_code=404,detail='recovery_not_found')
-        except PermissionError as exc:
-            code='reauthentication_required' if 'reauthentication' in str(exc) else 'recovery_decision_rejected'
-            raise HTTPException(status_code=409,detail=code)
+        except PermissionError:raise HTTPException(status_code=409,detail='recovery_decision_rejected')
         except ValueError:raise HTTPException(status_code=400,detail='invalid_recovery_decision')
 
     @router.post('/{transaction_id}/verify-again')

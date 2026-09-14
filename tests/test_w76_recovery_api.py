@@ -6,14 +6,14 @@ from desktop.operator_transactions import OperatorBinding,OperatorTransactionSto
 from server.recovery_api import create_recovery_router
 
 
-def setup(tmp_path):
+def setup(tmp_path,*,authority=None):
     txs=OperatorTransactionStore(tmp_path/'tx.sqlite3');binding=OperatorBinding('owner','device','session',0)
     txs.propose('tx',binding,goal='recover this',action_plan={'steps':[{'sequence':0,'kind':'copy'}]})
     store=OperatorRecoveryStore(tmp_path/'r.sqlite3',txs);store.ensure_transaction('tx',binding)
     def auth(token,device):
         if token!='Bearer good' or device!='device':raise PermissionError('bad')
         return {'owner_id':'owner'}
-    app=FastAPI();app.include_router(create_recovery_router(store,auth,current_security_epoch=lambda:0))
+    app=FastAPI();app.include_router(create_recovery_router(store,auth,current_security_epoch=lambda:0,consequential_authority=authority))
     return TestClient(app),store,binding
 
 
@@ -40,13 +40,20 @@ def test_recovery_report_rejects_security_epoch_change(tmp_path):
     assert response.status_code==409 and response.json()['detail']=='security_epoch_changed'
 
 
-def test_consequential_owner_decision_requires_reauth(tmp_path):
-    client,_,_=setup(tmp_path);response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'resume_safe_checkpoint','decision_id':'d','security_epoch':0,'reauthenticated':False})
+def test_consequential_owner_decision_fails_closed_without_trusted_authority(tmp_path):
+    client,_,_=setup(tmp_path);response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'resume_safe_checkpoint','decision_id':'d','security_epoch':0})
     assert response.status_code==409 and response.json()['detail']=='reauthentication_required'
 
 
-def test_owner_can_abandon(tmp_path):
-    client,store,_=setup(tmp_path);response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'abandon_transaction','decision_id':'d','security_epoch':0,'reauthenticated':False})
+def test_consequential_owner_decision_uses_trusted_authority_callback(tmp_path):
+    calls=[]
+    client,store,_=setup(tmp_path,authority=lambda b,d,i:(calls.append((b.device_id,d,i)),True)[1])
+    response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'resume_safe_checkpoint','decision_id':'d','security_epoch':0})
+    assert response.status_code==200 and calls==[('device','resume_safe_checkpoint','d')]
+
+
+def test_owner_can_abandon_without_consequential_dispatch(tmp_path):
+    client,store,_=setup(tmp_path);response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'abandon_transaction','decision_id':'d','security_epoch':0})
     assert response.status_code==200 and store.snapshot('tx')['state']=='abandoned_by_owner'
 
 
