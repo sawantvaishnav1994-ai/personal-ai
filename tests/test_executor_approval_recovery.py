@@ -120,3 +120,21 @@ def test_security_epoch_invalidation_prevents_stale_execution(tmp_path):
     with pytest.raises(PermissionError):
         restarted.approve(approval_id, device_id='device-1', session_id='session-1')
     assert calls == []
+
+
+def test_emergency_stop_invalidates_approval_even_after_stop_is_cleared(tmp_path):
+    calls = []
+    executor = build_executor(tmp_path, calls)
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it', device_id='device-1', session_id='session-1')
+    approval_id = proposed.value.approval_id
+    epoch_before = executor.approvals.current_security_epoch()
+
+    executor.tools.set_emergency_stop(True)
+    assert executor.approvals.current_security_epoch() == epoch_before + 1
+    assert executor.approval_context(approval_id) is None
+
+    executor.tools.set_emergency_stop(False)
+    with pytest.raises(PermissionError):
+        executor.approve(approval_id, device_id='device-1', session_id='session-1')
+    assert calls == []
