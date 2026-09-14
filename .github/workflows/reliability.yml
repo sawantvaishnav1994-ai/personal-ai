@@ -15,6 +15,8 @@ jobs:
       - run: pip-audit -r requirements.txt
       - run: python -m compileall -q app agent automation browser core dashboard desktop devices future_intelligence integrations knowledge memory models security server tools ui updates vision voice packaging
       - run: pytest -q
+      - name: Isolated encrypted backup/restore qualification
+        run: pytest -q tests/test_isolated_recovery.py tests/test_v10_recovery.py
   soak:
     runs-on: ubuntu-latest
     steps:
