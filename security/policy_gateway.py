@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import dataclass,field
 from enum import Enum
 from pathlib import Path
@@ -11,36 +10,31 @@ from security.policy_targets import TargetValidationError,application_rule_match
 
 class DecisionKind(str,Enum):
     ALLOW='allow';DENY='deny';APPROVAL_REQUIRED='approval_required';REAUTHENTICATION_REQUIRED='reauthentication_required';RECOVERY_REVIEW_REQUIRED='recovery_review_required'
-
 @dataclass(frozen=True)
 class PolicyOperation:
     operation:str;owner_id:str='owner';device_id:str|None=None;session_id:str|None=None;security_epoch:int=0;target_type:str='destination';target_identity:dict[str,Any]=field(default_factory=dict);application:dict[str,Any]|None=None;destination:str='';parameters:dict[str,Any]=field(default_factory=dict);data_classification:str='public';observation_id:str='';observation_digest:str='';outcome_state:str='not_dispatched'
     def parameter_digest(self)->str:return digest(self.parameters)
     def target_digest(self)->str:return digest({'target_type':self.target_type,'target_identity':self.target_identity,'destination':self.destination})
-    def binding(self,policy_digest:str)->dict:
-        return {'owner_id':self.owner_id,'device_id':self.device_id,'session_id':self.session_id,'security_epoch':int(self.security_epoch),'operation':self.operation,'target_digest':self.target_digest(),'parameter_digest':self.parameter_digest(),'data_classification':normalize_classification(self.data_classification),'application_digest':digest(self.application or {}),'destination':self.destination,'observation_id':self.observation_id,'observation_digest':self.observation_digest,'policy_digest':policy_digest}
-
+    def binding(self,policy_digest:str)->dict:return {'owner_id':self.owner_id,'device_id':self.device_id,'session_id':self.session_id,'security_epoch':int(self.security_epoch),'operation':self.operation,'target_digest':self.target_digest(),'parameter_digest':self.parameter_digest(),'data_classification':normalize_classification(self.data_classification),'application_digest':digest(self.application or {}),'destination':self.destination,'observation_id':self.observation_id,'observation_digest':self.observation_digest,'policy_digest':policy_digest}
+    def trusted_action_binding(self,policy_digest:str,*,expires_at:float,max_uses:int)->dict:
+        payload=self.binding(policy_digest);payload['expires_at']=float(expires_at);payload['maximum_uses']=max(1,int(max_uses));return payload
 @dataclass(frozen=True)
 class PolicyDecision:
     decision:DecisionKind;reason_code:str;explanation:str;policy_digest:str;policy_ids:tuple[str,...]=();policy_versions:tuple[int,...]=();max_uses:int=1
     @property
     def allowed(self)->bool:return self.decision is DecisionKind.ALLOW
     def safe_dict(self)->dict:return {'decision':self.decision.value,'reason_code':self.reason_code,'explanation':self.explanation,'policy_digest':self.policy_digest,'policy_ids':list(self.policy_ids),'policy_versions':list(self.policy_versions),'max_uses':self.max_uses}
-
 _CLASS_LEVEL={'public':0,'personal':1,'sensitive':2,'secret':3,NEVER_STORE:4}
 _EXTERNAL_TRANSFER={'external_upload','form_submission','email_send','message_send','share','public_publish','clipboard_transfer'}
 _HIGH_RISK={'delete','destructive_delete','security_setting_modify','permission_change','purchase','financial_transfer','legal_acceptance','public_publish'}
 _DURABLE_STORE={'local_file_write','download','memory_write','evidence_write'}
 _STRONG_APPROVAL={'purchase','financial_transfer','legal_acceptance','public_publish','permission_change','security_setting_modify'}
 _EXPLANATIONS={'application_not_allowed':'This application is not in the owner-approved application policy.','application_changed':'The application identity changed after it was approved.','domain_not_allowed':'This website origin is not in the owner-approved domain policy.','redirect_not_allowed':'Navigation changed to an origin that is not explicitly permitted.','path_outside_allowed_root':'This file path is outside an owner-approved root or cannot be safely verified.','destination_not_allowed':'This destination is not explicitly allowed by owner policy.','sensitive_transfer_requires_approval':'Sensitive data transfer requires explicit owner approval.','secret_transfer_blocked':'Secret data is not permitted to leave an approved private boundary.','clipboard_access_blocked':'Clipboard access is not explicitly permitted by owner policy.','reauthentication_required':'Recent owner reauthentication is required for this action.','emergency_stop_active':'The owner Emergency Stop is active.','policy_changed':'The effective policy changed after authorization; approval must be obtained again.','recovery_review_required':'The system cannot safely determine the prior action outcome; owner review is required before retrying.','policy_not_found':'No owner policy permits this operation. Personal AI defaults to deny.','explicit_policy_deny':'An explicit owner deny policy blocks this operation.','device_session_mismatch':'The policy does not apply to this device or session.','approval_required':'This operation requires explicit owner approval.','allow':'The operation is permitted by the current owner policy.','never_store_blocked':'NEVER_STORE data cannot be written to durable memory or evidence.','clipboard_changed':'Clipboard contents changed after authorization; approval is no longer valid.'}
-
 def normalize_classification(value:str)->str:
     normalized=normalize_storage_policy(value);normalized={'internal':'personal','private':'sensitive','neverstore':NEVER_STORE}.get(normalized,normalized);return normalized if normalized in _CLASS_LEVEL else 'personal'
-
 class PolicyGateway:
     """Single W7.3 default-deny policy evaluation path. Execution stays in later W7 operators."""
-    def __init__(self,path:str|Path,*,emergency_stop:Callable[[],bool]|None=None,security_epoch_provider:Callable[[],int]|None=None):
-        self.store=PolicyStore(path);self._emergency_stop=emergency_stop or (lambda:False);self._security_epoch_provider=security_epoch_provider
+    def __init__(self,path:str|Path,*,emergency_stop:Callable[[],bool]|None=None,security_epoch_provider:Callable[[],int]|None=None):self.store=PolicyStore(path);self._emergency_stop=emergency_stop or (lambda:False);self._security_epoch_provider=security_epoch_provider
     def schema_version(self)->int:return self.store.schema_version()
     def evaluate(self,operation:PolicyOperation,*,approved:bool=False,reauthenticated:bool=False,expected_policy_digest:str='',expected_clipboard_digest:str='',now:float|None=None)->PolicyDecision:
         ts=time.time() if now is None else float(now)
@@ -96,7 +90,9 @@ class PolicyGateway:
     def mark_unknown_outcome(self,permit_id:str,reason:str='unknown_outcome')->None:self.store.mark_recovery_review(permit_id,reason)
     def add_policy(self,**kwargs)->dict:return self.store.upsert_policy(**kwargs)
     def revoke_policy(self,policy_id:str,**kwargs)->bool:return self.store.revoke_policy(policy_id,**kwargs)
+    def set_policy_active(self,policy_id:str,**kwargs)->bool:return self.store.set_policy_active(policy_id,**kwargs)
     def reset_to_safe_defaults(self,owner_id:str,**kwargs)->int:return self.store.reset_owner(owner_id,**kwargs)
+    def trusted_action_binding(self,operation:PolicyOperation,decision:PolicyDecision,*,expires_at:float|None=None)->dict:return operation.trusted_action_binding(decision.policy_digest,expires_at=float(expires_at if expires_at is not None else time.time()+120),max_uses=decision.max_uses)
     def owner_snapshot(self,owner_id:str)->dict:return {'policies':self.store.list_policies(owner_id,include_inactive=True),'recent_use':self.store.recent_audit(owner_id,50),'safe_default':'deny','schema_version':self.store.schema_version()}
     def _validate_target(self,operation:PolicyOperation,*,expected_clipboard_digest:str)->str|None:
         try:
