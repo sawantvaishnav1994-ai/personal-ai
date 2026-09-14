@@ -58,6 +58,13 @@ class PolicyStore:
             con.execute('BEGIN IMMEDIATE');row=con.execute('SELECT * FROM operator_policies WHERE policy_id=? AND owner_id=?',(policy_id,owner_id)).fetchone()
             if not row:con.rollback();return False
             version=int(row['version'])+1;con.execute('UPDATE operator_policies SET active=0,revoked_at=?,updated_at=?,version=?,actor=? WHERE policy_id=?',(now,now,version,actor,policy_id));self._audit_con(con,'policy_revoked',owner_id=owner_id,policy_id=policy_id,version=version,details={'actor':actor});con.commit();return True
+    def set_policy_active(self,policy_id:str,*,owner_id:str,enabled:bool,actor:str='owner',reauthenticated:bool=False)->bool:
+        if not reauthenticated:raise PermissionError('reauthentication_required')
+        now=time.time()
+        with self._lock,self._con() as con:
+            con.execute('BEGIN IMMEDIATE');row=con.execute('SELECT version FROM operator_policies WHERE policy_id=? AND owner_id=?',(policy_id,owner_id)).fetchone()
+            if not row:con.rollback();return False
+            con.execute('UPDATE operator_policies SET active=?,revoked_at=?,updated_at=?,version=version+1,actor=? WHERE policy_id=?',(1 if enabled else 0,None if enabled else now,now,actor,policy_id));self._audit_con(con,'policy_enabled' if enabled else 'policy_disabled',owner_id=owner_id,policy_id=policy_id,version=int(row['version'])+1,details={'actor':actor});con.commit();return True
     def reset_owner(self,owner_id:str,*,actor:str='owner',reauthenticated:bool=False)->int:
         if not reauthenticated:raise PermissionError('reauthentication_required')
         now=time.time()
