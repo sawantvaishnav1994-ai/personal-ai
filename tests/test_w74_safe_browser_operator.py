@@ -191,7 +191,7 @@ def test_wait_timeout_is_bounded(env):
 def test_upload_mime_validation_runs_before_dispatch(env,tmp_path):
     b,p,t,bind,op=env; f=tmp_path/'x.png'; f.write_text('not png')
     p.add_policy(owner_id='owner',target_type='path',target_identity={'root':str(tmp_path)},allowed_operations=['external_upload'],security_epoch=7,reauthenticated=True)
-    with pytest.raises(Exception): op._policy_ops(BrowserAction('click','tx-up',target_id='target-1',upload_path=str(f),claimed_mime='image/png',parameters={'approved_roots':[str(tmp_path)]}),obs(b.page),'external_upload')
+    with pytest.raises(Exception): op._policy_ops(BrowserAction('click','tx-up',target_id='target-1',upload_path=str(f),claimed_mime='image/png',parameters={'approved_roots':[str(tmp_path)]}),{'raw':obs(b.page)},'external_upload')
 
 
 def test_transaction_binding_rejects_other_device(env):
@@ -202,7 +202,7 @@ def test_transaction_binding_rejects_other_device(env):
 
 def test_policy_change_invalidates_expected_snapshot(env):
     b,p,t,bind,op=env; c=op._capture(BrowserAction('open_url','tx-pol',url='https://example.com/x'),'test')
-    operation=op._policy_ops(BrowserAction('open_url','tx-pol',url='https://example.com/x'),c['raw'],'navigate')[0]
+    operation=op._policy_ops(BrowserAction('open_url','tx-pol',url='https://example.com/x'),c,'navigate')[0]
     d=p.evaluate(operation); assert d.allowed
     p.add_policy(owner_id='owner',target_type='domain',target_identity={'scheme':'https','host':'example.com','port':443},denied_operations=['navigate'],security_epoch=7,reauthenticated=True,priority=999)
     assert p.evaluate(operation,expected_policy_digest=d.policy_digest).reason_code=='policy_changed'
