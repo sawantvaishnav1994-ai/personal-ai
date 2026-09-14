@@ -2,10 +2,8 @@ from pathlib import Path
 import inspect
 import re
 
-from core.permissions import ActionRisk
 from security.policy_store import PolicyStore
 from tools import desktop_file
-from ui.settings_panel import SettingsPanel
 
 
 PRODUCTION_FILES=(
@@ -45,6 +43,6 @@ def test_w75_side_effect_tool_cannot_drop_below_external_side_effect_risk():
 
 
 def test_existing_owner_settings_surface_exposes_w75_policy_targets_and_recovery_audit():
-    source=inspect.getsource(SettingsPanel).lower()
+    source=Path('ui/settings_panel.py').read_text(encoding='utf-8').lower()
     for token in ('application','path','clipboard','recent','revoke','reset'):
         assert token in source
