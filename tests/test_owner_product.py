@@ -13,7 +13,7 @@ from server.owner_product import owner_product_router
 
 
 class Executor:
-    def chat(self, prompt, cancel_event=None):
+    def chat(self, prompt, cancel_event=None, **kwargs):
         return f'done:{prompt}'
 
 
@@ -77,6 +77,29 @@ def test_owner_memory_lifecycle_and_audit(tmp_path):
     assert 'memory.created' in actions
     assert 'memory.corrected' in actions
     assert 'memory.deleted' in actions
+
+
+def test_owner_api_refuses_to_create_or_mark_durable_never_store_memory(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+
+    refused = client.post('/iphone/api/memory', json={
+        'type': 'fact',
+        'subject': 'Temporary secret',
+        'content': 'Do not retain this',
+        'sensitivity': 'never_store',
+    })
+    assert refused.status_code == 409
+    assert runtime['memory'].graph()['nodes'] == []
+
+    created = client.post('/iphone/api/memory', json={
+        'type': 'fact', 'subject': 'Stored', 'content': 'Owner chose to retain this',
+    })
+    memory_id = created.json()['id']
+    update = client.patch(
+        f'/iphone/api/memory/{memory_id}', json={'sensitivity': 'never_store'}
+    )
+    assert update.status_code == 409
+    assert runtime['memory'].get(memory_id)['sensitivity'] == 'normal'
 
 
 def test_owner_knowledge_lifecycle_and_citations(tmp_path):

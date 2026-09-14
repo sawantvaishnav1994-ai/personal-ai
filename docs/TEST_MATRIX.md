@@ -40,6 +40,19 @@ SHA: `78c7e9d6d848f0dcc93ee4f1f281fad4eff970f5`
 
 Observed successful workflow families include CI, P3 iPhone PWA, Android Instrumentation, iOS Companion, Package Validation, and Reliability and Security. Automated evidence does not replace physical P3 qualification.
 
+### PR #22 W2/W3 predecessor head
+
+SHA: `5b6fc87572ca592d3d3f59bcfd3b44405f5222d7`
+
+| Workflow | Run ID | Result |
+| --- | ---: | --- |
+| CI #553 | 34810145820 | PASS |
+| Reliability and Security #142 | 34810145825 | PASS |
+| P3 iPhone PWA #110 | 34810145848 | PASS |
+| Android Instrumentation #141 | 34810145821 | PASS |
+| Package Validation #141 | 34810145839 | PASS |
+| iOS Companion #123 | 34810145830 | PASS |
+
 ## Current test coverage by workstream
 
 | Workstream | Existing evidence | Status | Required additions |
@@ -49,9 +62,9 @@ Observed successful workflow families include CI, P3 iPhone PWA, Android Instrum
 | W3 conversation | grounded conversation + owner-product tests | PARTIAL | refresh/browser-close/server-restart/cross-device continuation; rename/search/archive/delete/export full lifecycle |
 | W3 voice | P3 PWA automation tests | QUALIFICATION | physical endpoint detection, barge-in, stop speaking, auto-return, mic errors, reconnect, cancellation while thinking, timeout/invalid response |
 | W3 devices | registry/owner-product tests | PARTIAL | simultaneous trusted browsers; lost-device controls; global session revoke; re-auth critical path; per-device audit |
-| W4 memory | memory/grounding tests | PARTIAL | NEVER_STORE, retention boundaries, duplicate/contradiction owner correction, explainable retrieval path, export/delete restart persistence |
+| W4 memory | memory/grounding/NEVER_STORE tests | PARTIAL | exact-head CI for NEVER_STORE; explainable retrieval path; export/delete production restart persistence |
 | W4 knowledge | `tests/test_knowledge.py` + grounded conversation | PARTIAL | OCR/image policy, versioning/re-ingest, access-control negatives, delete object integrity, durable restart/redeploy |
-| W5 workflows | `tests/test_workflow_recovery.py` + CI | PARTIAL | durable approval wait across restart; concurrency limits; budget limits; owner override; partial completion; idempotent resume |
+| W5 workflows | recovery + authority-binding tests | PARTIAL | exact-head CI for authority propagation; concurrency/cost budgets; idempotent resume; production restart evidence |
 | W6 connectors | integration/tool tests using mocks/config checks | PARTIAL | provider-contract tests, scope declarations, health/revocation, read-only live qualification, controlled write approval tests |
 | W7 computer operator | tool tests | PARTIAL | sandbox/app/domain/path allowlist, clipboard/secret protection, before/after verification, rollback/recovery, accessibility-vs-coordinate policy |
 | W8 models | `tests/test_model_router.py`, dialogue evaluation | PARTIAL | private-route negative tests, provider health/failover matrix, explicit fallback audit, concurrency/latency on self-hosted endpoint |

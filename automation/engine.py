@@ -99,6 +99,16 @@ class AutomationEngine:
                     FOREIGN KEY(workflow_id) REFERENCES workflows(id)
                 )'''
             )
+            run_columns = {row['name'] for row in con.execute('PRAGMA table_info(workflow_runs)')}
+            run_additions = {
+                'owner_id': 'TEXT',
+                'device_id': 'TEXT',
+                'session_id': 'TEXT',
+                'reauthenticated_at': 'REAL',
+            }
+            for name, definition in run_additions.items():
+                if name not in run_columns:
+                    con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
             con.execute('CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id,started_at)')
 
     def _recover_interrupted_runs(self):
@@ -243,7 +253,18 @@ class AutomationEngine:
         if event_name:
             self.trigger(event_name, dict(event.get('payload') or {}))
 
-    def run_workflow(self, workflow_id: str, *, trigger_payload=None, context=None, background=False):
+    def run_workflow(
+        self,
+        workflow_id: str,
+        *,
+        trigger_payload=None,
+        context=None,
+        background=False,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        reauthenticated_at: float | None = None,
+    ):
         workflow = self.workflow(workflow_id)
         if not workflow['enabled']:
             raise RuntimeError('workflow is disabled')
@@ -254,9 +275,23 @@ class AutomationEngine:
         stamp = now()
         with self._con() as con:
             con.execute(
-                '''INSERT INTO workflow_runs(id,workflow_id,status,trigger_json,context_json,current_step,completed_steps_json,result_json,error,pending_approval_id,started_at,updated_at,completed_at)
-                   VALUES(?,?, 'queued', ?, ?, 0, '[]', NULL, NULL, NULL, ?, ?, NULL)''',
-                (run_id, workflow_id, json.dumps(trigger_payload or {}), json.dumps(run_context, default=str), stamp, stamp),
+                '''INSERT INTO workflow_runs(
+                    id,workflow_id,status,trigger_json,context_json,current_step,completed_steps_json,
+                    result_json,error,pending_approval_id,started_at,updated_at,completed_at,
+                    owner_id,device_id,session_id,reauthenticated_at)
+                   VALUES(?,?, 'queued', ?, ?, 0, '[]', NULL, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?)''',
+                (
+                    run_id,
+                    workflow_id,
+                    json.dumps(trigger_payload or {}),
+                    json.dumps(run_context, default=str),
+                    stamp,
+                    stamp,
+                    owner_id,
+                    device_id,
+                    session_id,
+                    reauthenticated_at,
+                ),
             )
         if background:
             self._workflow_pool.submit(self._continue_run, run_id)
@@ -288,7 +323,7 @@ class AutomationEngine:
                     return
                 step = steps[index]
                 try:
-                    result = self._execute_workflow_step(run_id, step, context)
+                    result = self._execute_workflow_step(run_id, step, context, run)
                 except ExecutionCancelled:
                     self._update_run(run_id, status='cancelled', error='cancelled by owner', completed_at=now())
                     self._emit('workflow.cancelled', run_id=run_id, workflow_id=workflow['id'], reason='owner_cancelled')
@@ -298,7 +333,7 @@ class AutomationEngine:
                     self._emit('workflow.approval_required', run_id=run_id, workflow_id=workflow['id'], approval_id=approval.approval_id, tool=approval.tool_name)
                     return
                 except Exception as exc:
-                    rollback = self._rollback(workflow, completed, context)
+                    rollback = self._rollback(workflow, completed, context, run)
                     self._update_run(run_id, status='failed', error=str(exc), context_json=json.dumps(context, default=str), completed_steps_json=json.dumps(completed, default=str), result_json=json.dumps({'rollback': rollback}, default=str), completed_at=now())
                     self._emit('workflow.failed', run_id=run_id, workflow_id=workflow['id'], error=str(exc), rollback=rollback)
                     return
@@ -319,7 +354,26 @@ class AutomationEngine:
         finally:
             lock.release()
 
-    def _execute_workflow_step(self, run_id: str, step: dict, context: dict):
+    @staticmethod
+    def _authority_kwargs(run: dict):
+        fields = ('owner_id', 'device_id', 'session_id', 'reauthenticated_at')
+        return {field: run.get(field) for field in fields if run.get(field) is not None}
+
+    @staticmethod
+    def _assert_authority(
+        run: dict,
+        *,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+    ):
+        supplied = {'owner_id': owner_id, 'device_id': device_id, 'session_id': session_id}
+        for field, value in supplied.items():
+            expected = run.get(field)
+            if expected is not None and value != expected:
+                raise PermissionError(f'workflow {field.removesuffix("_id")} identity mismatch')
+
+    def _execute_workflow_step(self, run_id: str, step: dict, context: dict, run: dict):
         kind = step['kind']
         if kind == 'condition':
             return {'matched': evaluate_condition(step['condition'], context)}
@@ -343,7 +397,12 @@ class AutomationEngine:
         for attempt in range(retries + 1):
             cancel_event = threading.Event()
             self._run_cancel_events[run_id] = cancel_event
-            future = self._step_pool.submit(self.executor.chat, prompt, cancel_event=cancel_event)
+            future = self._step_pool.submit(
+                self.executor.chat,
+                prompt,
+                cancel_event=cancel_event,
+                **self._authority_kwargs(run),
+            )
             try:
                 reply = future.result(timeout=timeout)
                 self._run_cancel_events.pop(run_id, None)
@@ -375,26 +434,66 @@ class AutomationEngine:
                 rendered = rendered.replace(token, str(value))
         return rendered
 
-    def approve_run(self, run_id: str, approval_id: str):
+    def approve_run(
+        self,
+        run_id: str,
+        approval_id: str,
+        *,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        reauthenticated_at: float | None = None,
+    ):
         run = self._run(run_id)
         if run['status'] != 'waiting_approval' or run['pending_approval_id'] != approval_id:
             raise PermissionError('run is not waiting for this approval')
-        result = self.executor.approve(approval_id)
+        self._assert_authority(
+            run,
+            owner_id=owner_id,
+            device_id=device_id,
+            session_id=session_id,
+        )
+        authority = self._authority_kwargs(run)
+        if reauthenticated_at is not None:
+            authority['reauthenticated_at'] = reauthenticated_at
+        result = self.executor.approve(approval_id, **authority)
         self._update_run(run_id, status='queued', pending_approval_id=None)
         self._workflow_pool.submit(self._continue_run, run_id, approved_result=result)
         return {'run_id': run_id, 'approval_id': approval_id, 'resumed': True}
 
-    def reject_run(self, run_id: str, approval_id: str):
+    def reject_run(
+        self,
+        run_id: str,
+        approval_id: str,
+        *,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+    ):
         run = self._run(run_id)
         if run['status'] != 'waiting_approval' or run['pending_approval_id'] != approval_id:
             raise PermissionError('run is not waiting for this approval')
-        self.executor.reject(approval_id)
+        self._assert_authority(
+            run,
+            owner_id=owner_id,
+            device_id=device_id,
+            session_id=session_id,
+        )
+        self.executor.reject(approval_id, **self._authority_kwargs(run))
         self._update_run(run_id, status='cancelled', pending_approval_id=None, completed_at=now(), error='user rejected approval')
         self._emit('workflow.cancelled', run_id=run_id, workflow_id=run['workflow_id'], reason='approval_rejected')
         return {'run_id': run_id, 'cancelled': True}
 
-    def cancel_run(self, run_id: str):
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+    ):
         run = self._run(run_id)
+        self._assert_authority(run, owner_id=owner_id, device_id=device_id, session_id=session_id)
         if run['status'] in {'completed', 'failed', 'cancelled'}:
             return {'run_id': run_id, 'cancelled': run['status'] == 'cancelled', 'status': run['status']}
         cancel_event = self._run_cancel_events.get(run_id)
@@ -411,14 +510,23 @@ class AutomationEngine:
             cancel_event.set()
         if run['status'] == 'waiting_approval' and run.get('pending_approval_id') and self.executor:
             try:
-                self.executor.reject(run['pending_approval_id'])
+                self.executor.reject(run['pending_approval_id'], **self._authority_kwargs(run))
             except Exception:
                 pass
         self._emit('workflow.cancelled', run_id=run_id, workflow_id=run['workflow_id'], reason='owner_cancelled')
         return {'run_id': run_id, 'cancelled': True, 'status': 'cancelled'}
 
-    def resume_run(self, run_id: str, *, background: bool = True):
+    def resume_run(
+        self,
+        run_id: str,
+        *,
+        background: bool = True,
+        owner_id: str | None = None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+    ):
         run = self._run(run_id)
+        self._assert_authority(run, owner_id=owner_id, device_id=device_id, session_id=session_id)
         if run['status'] not in {'recovery_required', 'interrupted'}:
             raise RuntimeError('workflow run is not waiting for recovery')
         workflow = self.workflow(run['workflow_id'])
@@ -437,7 +545,7 @@ class AutomationEngine:
             self._continue_run(run_id)
         return {'run_id': run_id, 'resumed': True, 'checkpoint': int(run['current_step'])}
 
-    def _rollback(self, workflow: dict, completed: list[dict], context: dict):
+    def _rollback(self, workflow: dict, completed: list[dict], context: dict, run: dict):
         results = []
         by_position = {int(step['position']): step for step in workflow['steps']}
         for item in reversed(completed):
@@ -446,7 +554,7 @@ class AutomationEngine:
                 continue
             prompt = self._render(str(step['rollback_prompt']), context)
             try:
-                reply = self.executor.chat(prompt)
+                reply = self.executor.chat(prompt, **self._authority_kwargs(run))
                 results.append({'step': item.get('step'), 'ok': True, 'reply': reply})
             except Exception as exc:
                 results.append({'step': item.get('step'), 'ok': False, 'error': str(exc)})
@@ -466,7 +574,13 @@ class AutomationEngine:
                 rows = con.execute('SELECT * FROM workflow_runs WHERE workflow_id=? ORDER BY started_at DESC LIMIT ?', (workflow_id, limit)).fetchall()
             else:
                 rows = con.execute('SELECT * FROM workflow_runs ORDER BY started_at DESC LIMIT ?', (limit,)).fetchall()
-        return [dict(row) for row in rows]
+        output = []
+        for row in rows:
+            item = dict(row)
+            item.pop('session_id', None)
+            item.pop('reauthenticated_at', None)
+            output.append(item)
+        return output
 
     def _update_run(self, run_id: str, **fields):
         if not fields:

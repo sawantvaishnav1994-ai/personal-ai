@@ -8,9 +8,9 @@ This matrix intentionally excludes capabilities that have sufficient implementat
 | --- | --- | --- | --- | --- | --- |
 | P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | production runtime has no attached volume; data root defaults to container home | add hosted-storage guard + diagnostics, then attach durable storage and run restart/redeploy proof |
 | P0 | W1 | Backup/restore qualification | PARTIAL | service exists but no current isolated restore/checksum evidence | add automated backup/restore test and production-like isolated restore procedure |
-| P0 | W2 | Durable pending approvals | PARTIAL | approval tickets + paused execution state live in process memory | persist approval intent/state atomically under data root |
-| P0 | W2 | Full permit binding | PARTIAL | current approval binds execution/tool/parameter hash only | add owner, device, session, security epoch, destination, classification, issuance/expiry/max-use |
-| P0 | W2 | Atomic replay prevention | PARTIAL | in-memory pop prevents local reuse but does not survive restart or distributed execution | use durable transaction/unique consumption record; add race/restart tests |
+| P0 | W2 | Durable pending approvals | PARTIAL | implementation and restart tests pass; production durability is blocked by missing Railway volume | attach durable production storage and execute restart/redeploy proof |
+| P0 | W2 | Full permit binding | PARTIAL | owner/device/session/epoch/destination/classification binding is implemented and automated-tested | qualify concrete connectors and production sessions |
+| P0 | W2 | Atomic replay prevention | PARTIAL | durable one-use transaction/race tests pass | complete production persistence and distributed deployment proof |
 | P0 | W2 | Verification contracts | PARTIAL | executor treats successful handler return as successful action | tool contract must expose verifiable outcome and rollback metadata; reject model-only success |
 | P0 | W2 | Security epoch / global revocation | PLANNED/PARTIAL | device revoke exists; security epoch binding is not present in current approval flow | add durable epoch and enforce it across sessions/permits |
 | P0 | W3 | Production conversation durability | PARTIAL | SQLite implementation exists but main Railway service is ephemeral | complete W1 and physical restart/redeploy tests |
@@ -18,11 +18,11 @@ This matrix intentionally excludes capabilities that have sufficient implementat
 | P0 | W3 | Physical voice P3 | QUALIFICATION | automated P3 is green but required physical evidence missing | execute P3 protocol without fabricating evidence |
 | P1 | W3 | Conversation lifecycle completeness | PARTIAL | persistence/continuity exists; title/search/archive/export lifecycle needs evidence | inspect APIs/UI, add missing operations and tests |
 | P1 | W3 | Re-authentication for critical actions | PARTIAL | owner password/passkey exist but critical action re-auth is not globally enforced | add Trusted Action Core re-auth requirement by risk |
-| P1 | W4 | NEVER_STORE policy | PARTIAL/PLANNED | current memory model has sensitivity/retention but no authoritative NEVER_STORE enforcement seen | implement policy at extraction/write/retrieval boundaries |
+| P1 | W4 | NEVER_STORE policy | PARTIAL | extraction/write/retrieval enforcement and local regression tests implemented | obtain exact-head CI and production persistence evidence |
 | P1 | W4 | Explainable retrieval path | PARTIAL | retrieval usage/confidence exists; owner-facing complete explanation contract needs verification | standardize retrieval explanation payload + tests/UI |
 | P1 | W4 | Knowledge OCR/images | STUB/PLANNED | current ingestion extracts TXT/MD/CSV/JSON/PDF/DOCX/XLSX text; image OCR is not implemented in `knowledge/store.py` | implement bounded OCR ingestion where supported with provenance |
 | P1 | W4 | Knowledge versioning | PARTIAL | checksum dedupe/update metadata exist, but document-version lineage is not explicit | add version lineage/supersession with tests |
-| P1 | W5 | Approval wait survives restart | PARTIAL | workflows persist `pending_approval_id`, executor approval ticket does not | fix after durable Trusted Action Core |
+| P1 | W5 | Approval wait/session binding | PARTIAL | approval durability exists and workflow initiating authority is now persisted/propagated locally | obtain exact-head CI; qualify restart and cross-session rejection on deployed durable storage |
 | P1 | W5 | Workflow budgets/concurrency | PARTIAL | retry/timeout/pools exist; explicit per-workflow cost/time/concurrency budget schema incomplete | add persisted budgets + enforcement/tests |
 | P1 | W6 | Stable connector declaration contract | PARTIAL | integrations exist, but provider/auth/scopes/risk/classification/health/revocation declarations are not uniformly authoritative | introduce connector manifest contract and read-first tests |
 | P1 | W6 | Live Google/Gmail/Calendar/Drive/Sheets OAuth | BLOCKED | owner consent/credentials required | continue mocks/adapters; request owner only when live qualification is reached |

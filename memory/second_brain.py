@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import math
 
 from memory.knowledge_graph import KnowledgeGraph
+from memory.policy import is_never_store, require_storable
 
 
 @dataclass
@@ -52,6 +53,7 @@ class SecondBrain:
             return float(default)
 
     def remember(self, candidate: MemoryCandidate) -> str:
+        require_storable(sensitivity=candidate.sensitivity, metadata=candidate.metadata)
         exact = self.store.search(candidate.content[:120], limit=10)
         for row in exact:
             if row['content'].strip().lower() == candidate.content.strip().lower():
@@ -245,7 +247,7 @@ class SecondBrain:
     def extract_candidates(self, user_text: str, assistant_text: str | None = None):
         if not self.models:
             return []
-        prompt = f'''Extract only durable user facts, preferences, people, projects, goals, decisions or events explicitly supported by USER TEXT. Never treat assistant claims as user facts. Return JSON exactly like:\n{{"memories":[{{"type":"fact|preference|project|person|goal|decision|event|note","subject":"...","content":"...","confidence":0.0,"importance":0.0,"sensitivity":"normal|sensitive","occurred_at":null,"evidence":[],"tags":[]}}]}}\nUSER TEXT:\n{user_text}'''
+        prompt = f'''Extract only durable user facts, preferences, people, projects, goals, decisions or events explicitly supported by USER TEXT. Never treat assistant claims as user facts. If the owner says not to remember, retain, or store something, classify it as never_store. Return JSON exactly like:\n{{"memories":[{{"type":"fact|preference|project|person|goal|decision|event|note","subject":"...","content":"...","confidence":0.0,"importance":0.0,"sensitivity":"normal|sensitive|secret|never_store","occurred_at":null,"evidence":[],"tags":[]}}]}}\nUSER TEXT:\n{user_text}'''
         try:
             data = self.models.json(prompt, system='Return conservative memory candidates as JSON only. Do not infer unsupported personal facts.')
         except Exception:
@@ -267,7 +269,10 @@ class SecondBrain:
                     evidence=list(item.get('evidence') or []),
                     metadata={},
                 )
-                if candidate.subject and candidate.content:
+                if candidate.subject and candidate.content and not is_never_store(
+                    sensitivity=candidate.sensitivity,
+                    metadata=candidate.metadata,
+                ):
                     output.append(candidate)
             except Exception:
                 pass
