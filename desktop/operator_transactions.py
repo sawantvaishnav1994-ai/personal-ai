@@ -20,7 +20,7 @@ TRANSITIONS = {
     'approval_required': {'permitted', 'failed', 'cancelled'},
     'permitted': {'executing', 'failed', 'cancelled'},
     'executing': {'verifying', 'failed', 'cancelled', 'recovery_review_required'},
-    'verifying': {'completed', 'failed', 'recovery_review_required'},
+    'verifying': {'completed', 'failed', 'cancelled', 'recovery_review_required'},
     'recovery_review_required': {'failed', 'cancelled'},
     'completed': set(), 'failed': set(), 'cancelled': set(),
 }
@@ -253,14 +253,18 @@ class OperatorTransactionStore:
             if prior:
                 if prior['parameter_hash'] != parameter_hash or prior['kind'] != kind:
                     con.rollback(); raise PermissionError('operator action ID is already bound to different parameters')
-                con.rollback(); return dict(prior), False
+                item = dict(prior); con.rollback(); return item, False
             con.execute('''INSERT INTO operator_actions(action_id,transaction_id,sequence,kind,parameter_hash,expected_postcondition,state,verified,evidence_json,error_code,started_at,completed_at)
                            VALUES(?,?,?,?,?,?,'executing',0,'{}','',?,NULL)''',
                         (action_id, transaction_id, int(sequence), str(kind), str(parameter_hash), str(expected_postcondition or '')[:2000], now))
             con.execute('UPDATE operator_transactions SET checkpoint_index=?,updated_at=? WHERE transaction_id=?', (int(sequence)-1, now, transaction_id))
             self._audit(con, transaction_id, 'action.started', action_id=action_id, payload={'sequence': int(sequence), 'kind': str(kind), 'parameter_hash': str(parameter_hash)})
             con.commit()
-        return dict(self.actions(transaction_id)[-1]), True
+        return {
+            'action_id': action_id, 'transaction_id': transaction_id, 'sequence': int(sequence),
+            'kind': str(kind), 'parameter_hash': str(parameter_hash), 'expected_postcondition': str(expected_postcondition or '')[:2000],
+            'state': 'executing', 'verified': False, 'evidence': {}, 'error_code': '', 'started_at': now, 'completed_at': None,
+        }, True
 
     def finish_action(self, action_id: str, *, verified: bool, evidence=None, error_code=''):
         now = time.time(); safe_evidence = dict(evidence or {})
