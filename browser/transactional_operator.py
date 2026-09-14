@@ -29,6 +29,25 @@ class TransactionalBrowserOperator:
             raise PermissionError('trusted browser transaction binding is required')
         return OperatorBinding(owner_id=str(context['owner_id']),device_id=str(context['device_id']),session_id=str(context['session_id']),security_epoch=int(context['security_epoch']),conversation_id=str(context.get('conversation_id') or ''),workflow_id=str(context.get('workflow_id') or ''))
 
+    def _node_nonce(self,path:str)->str:
+        if not path:return ''
+        adapter=getattr(self.safe,'adapter',None)
+        locator=getattr(adapter,'locator',None)
+        if not callable(locator):return ''
+        try:
+            value=locator(path).evaluate(r'''(el) => {
+              if (!window.__personalAiNodeIds) {
+                Object.defineProperty(window,'__personalAiNodeIds',{value:new WeakMap(),configurable:false});
+                Object.defineProperty(window,'__personalAiNodeSeq',{value:{n:0},configurable:false});
+              }
+              let id=window.__personalAiNodeIds.get(el);
+              if (!id) { id='node-'+(++window.__personalAiNodeSeq.n); window.__personalAiNodeIds.set(el,id); }
+              return id;
+            }''')
+            return str(value or '')[:120]
+        except Exception:
+            return ''
+
     def prepare(self,action:str,parameters:dict,*,requires_approval:bool)->dict:
         incoming=dict(parameters or {})
         context=dict(incoming.get('_trusted_context') or {})
@@ -39,6 +58,7 @@ class TransactionalBrowserOperator:
         # fields were already stripped by ToolRegistry before this call.
         prepared['_trusted_context']=context
         prepared['_trusted_reauthenticated']=reauthenticated
+        prepared['_target_node_nonce']=self._node_nonce(str(prepared.get('_target_path') or ''))
         txid=new_transaction_id()
         public={str(k):v for k,v in prepared.items() if not str(k).startswith('_')}
         plan={
@@ -49,6 +69,7 @@ class TransactionalBrowserOperator:
                 'destination':str(prepared.get('destination') or ''),
                 'target_id':str(prepared.get('target_id') or ''),
                 'observation_digest':str(prepared.get('_observation_digest') or ''),
+                'node_nonce_digest':_digest(prepared.get('_target_node_nonce') or ''),
                 'expected_postcondition':'fresh browser postcondition must be verified and recorded',
             }],
         }
@@ -98,6 +119,12 @@ class TransactionalBrowserOperator:
         plan=tx.get('plan') or {}
         if str(plan.get('canonical_plan_digest') or '') != str(params.get('_browser_plan_digest') or ''):
             raise PermissionError('browser plan digest changed after preparation')
+        expected_nonce=str(params.get('_target_node_nonce') or '')
+        if expected_nonce:
+            fresh_nonce=self._node_nonce(str(params.get('_target_path') or ''))
+            if not fresh_nonce or fresh_nonce!=expected_nonce:
+                if tx['state'] not in {'completed','failed','cancelled','recovery_review_required'}:self.store.transition(txid,'failed',error_code='element_changed')
+                raise BrowserSafetyError('element_changed','The approved DOM node was replaced after authorization.')
         if tx['state']=='approval_required':
             # Reaching a side-effecting handler means the existing Trusted Action
             # Core consumed the exact one-use approval ticket first.
