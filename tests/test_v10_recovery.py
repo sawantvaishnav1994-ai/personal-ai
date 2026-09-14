@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -137,6 +138,84 @@ def test_restore_validates_all_databases_before_overwriting_owner_files(tmp_path
         service(data).restore(archive)
     assert (data / 'note.txt').read_text() == 'original'
     assert not (data / 'broken.sqlite3').exists()
+
+
+def test_restore_rolls_back_all_replaced_files_when_late_replace_fails(tmp_path, monkeypatch):
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'a.txt').write_text('backup-a')
+    (source / 'b.txt').write_text('backup-b')
+    archive = service(source).create('rollback.paibackup')
+
+    target = tmp_path / 'target'
+    target.mkdir()
+    (target / 'a.txt').write_text('owner-a')
+    (target / 'b.txt').write_text('owner-b')
+
+    import recovery.backup as backup_module
+
+    real_replace = backup_module.os.replace
+    restore_replaces = 0
+
+    def injected_replace(src, dst):
+        nonlocal restore_replaces
+        if str(src).endswith('.restore'):
+            restore_replaces += 1
+            if restore_replaces == 2:
+                raise OSError('simulated disk failure')
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(backup_module.os, 'replace', injected_replace)
+    with pytest.raises(BackupError, match='rolled back'):
+        service(target).restore(archive)
+
+    assert (target / 'a.txt').read_text() == 'owner-a'
+    assert (target / 'b.txt').read_text() == 'owner-b'
+
+
+def test_restore_refuses_existing_symlink_destination(tmp_path):
+    if not hasattr(os, 'symlink'):
+        pytest.skip('symlink unsupported')
+
+    source = tmp_path / 'source'
+    source.mkdir()
+    nested = source / 'nested'
+    nested.mkdir()
+    (nested / 'note.txt').write_text('safe backup')
+    archive = service(source).create('symlink.paibackup')
+
+    target = tmp_path / 'target'
+    target.mkdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    try:
+        (target / 'nested').symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip('symlink creation not permitted')
+
+    with pytest.raises(BackupError, match='unsafe restore destination'):
+        service(target).restore(archive)
+    assert not (outside / 'note.txt').exists()
+
+
+def test_backup_skips_symlinked_source_files(tmp_path):
+    if not hasattr(os, 'symlink'):
+        pytest.skip('symlink unsupported')
+    data = tmp_path / 'data'
+    data.mkdir()
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('must not be backed up')
+    link = data / 'linked.txt'
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip('symlink creation not permitted')
+    (data / 'normal.txt').write_text('included')
+
+    manifest = service(data).inspect(service(data).create('symlink-source.paibackup'))
+    paths = {item['path'] for item in manifest['files']}
+    assert 'normal.txt' in paths
+    assert 'linked.txt' not in paths
 
 
 def test_legacy_backup_detects_payload_tampering(tmp_path):
