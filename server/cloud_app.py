@@ -11,14 +11,11 @@ from server.cloud_security import cloud_security_router
 from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
-from server.pwa_conversations import pwa_conversation_router
+from server.memory_knowledge_inspection import memory_knowledge_inspection_router
 from server.pwa_security import pwa_security_router
 from server.pwa_session_middleware import PwaSessionMiddleware
 from server.session_bound_executor import SessionBoundExecutor
 
-# Hosted Personal AI must prove that its data root is backed by a real durable
-# mount before any SQLite database, knowledge object, approval state or audit
-# store is opened. Local/desktop development remains unaffected.
 storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
 runtime['storage_status'] = storage_status
@@ -33,10 +30,7 @@ async def lifespan(app):
         async def evaluate_model():
             result = await asyncio.to_thread(runtime['model_evaluation'].run)
             safe = {key: value for key, value in result.items() if key != 'cases'}
-            safe['case_results'] = [
-                {'case': item['case'], 'passed': item['passed'], 'error_code': item['error_code']}
-                for item in result['cases']
-            ]
+            safe['case_results'] = [{'case': item['case'], 'passed': item['passed'], 'error_code': item['error_code']} for item in result['cases']]
             print(json.dumps({'event': 'model.dialogue_evaluation', **safe}), flush=True)
         evaluation_task = asyncio.create_task(evaluate_model())
     try:
@@ -49,29 +43,14 @@ async def lifespan(app):
         runtime['telemetry'].persist()
         runtime['apns'].close()
 
-app=create_app(
-    runtime['executor'],
-    settings,
-    device_registry=runtime['device_registry'],
-    device_gateway=runtime['device_gateway'],
-    second_brain=runtime['second_brain'],
-    automations=runtime['automations'],
-    runtime=runtime,
-)
-app.add_middleware(
-    PwaSessionMiddleware,
-    sessions=runtime['pwa_sessions'],
-    device_registry=runtime['device_registry'],
-    cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)),
-)
-# Keep the approved iPhone router unchanged while binding every executor call
-# to the middleware-authenticated, revocable browser session.
+app=create_app(runtime['executor'], settings, device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'], second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime)
+app.add_middleware(PwaSessionMiddleware, sessions=runtime['pwa_sessions'], device_registry=runtime['device_registry'], cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)))
 pwa_runtime = dict(runtime)
 pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'])
 app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(pwa_security_router(runtime))
-app.include_router(pwa_conversation_router(runtime))
 app.include_router(cloud_security_router(runtime))
+app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(owner_product_router(runtime))
 app.include_router(capability_console_router(runtime))
 app.router.lifespan_context=lifespan

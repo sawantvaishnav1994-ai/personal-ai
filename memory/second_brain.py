@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import math
 
 from memory.knowledge_graph import KnowledgeGraph
@@ -44,6 +45,10 @@ class SecondBrain:
         self.models = models
         self.vector_store = vector_store
         self.kg = KnowledgeGraph(store)
+        try:
+            store.second_brain = self
+        except Exception:
+            pass
 
     @staticmethod
     def _bounded(value, default=0.5):
@@ -51,6 +56,22 @@ class SecondBrain:
             return max(0.0, min(1.0, float(value)))
         except (TypeError, ValueError):
             return float(default)
+
+    @staticmethod
+    def _json_list(value):
+        if isinstance(value, list):
+            return value
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+
+    @staticmethod
+    def _iso_now():
+        return datetime.now(timezone.utc).isoformat()
 
     def remember(self, candidate: MemoryCandidate) -> str:
         require_storable(sensitivity=candidate.sensitivity, metadata=candidate.metadata)
@@ -129,6 +150,19 @@ class SecondBrain:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _source_age_days(row: dict):
+        raw = row.get('occurred_at') or row.get('created_at')
+        if not raw:
+            return 0.0
+        try:
+            dt = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 86400.0)
+        except Exception:
+            return 0.0
+
     def salience(self, row: dict, semantic_score: float | None = None):
         memory_type = str(row.get('type', 'note')).lower()
         half_life = self.HALF_LIFE_DAYS.get(memory_type, 240.0)
@@ -151,45 +185,136 @@ class SecondBrain:
             score *= 0.28
         return max(0.0, min(1.0, score)), decay
 
-    def context(self, query: str, limit: int = 8) -> list[dict]:
+    def _explanation_maps(self):
+        graph = self.store.graph()
+        relationship_counts: dict[str, int] = {}
+        for edge in graph.get('edges', []):
+            for key in ('source_id', 'target_id'):
+                memory_id = edge.get(key)
+                if memory_id:
+                    relationship_counts[memory_id] = relationship_counts.get(memory_id, 0) + 1
+        conflict_map: dict[str, list[dict]] = {}
+        try:
+            conflicts = self.store.conflicts(1000)
+        except Exception:
+            conflicts = []
+        for conflict in conflicts:
+            for key in ('older_id', 'newer_id'):
+                memory_id = conflict.get(key)
+                if memory_id:
+                    conflict_map.setdefault(memory_id, []).append(conflict)
+        return relationship_counts, conflict_map
+
+    def _retrieval_explanation(self, row: dict, *, query: str, salience_score: float, decay: float, relationship_count: int, conflicts: list[dict], used_at: str | None):
+        semantic_score = row.get('semantic_score')
+        state = 'historical' if row.get('valid_to') else 'active'
+        contradiction_state = 'none'
+        if row.get('superseded_by'):
+            contradiction_state = 'superseded'
+        elif any(str(item.get('resolution', '')).lower() == 'unresolved' for item in conflicts):
+            contradiction_state = 'unresolved_conflict'
+        elif conflicts:
+            contradiction_state = str(conflicts[0].get('resolution') or 'resolved')
+
+        reasons = []
+        if semantic_score is not None:
+            reasons.append(f"semantic match {float(semantic_score):.3f}")
+        else:
+            reasons.append('lexical/subject match')
+        reasons.append(f"salience {float(salience_score):.3f}")
+        if row.get('verified'):
+            reasons.append('owner-verified')
+        if state == 'historical':
+            reasons.append('historical memory retained with reduced rank')
+        age_days = round(self._source_age_days(row), 3)
+        if age_days < 7:
+            reasons.append('recent')
+        elif age_days > 365:
+            reasons.append('older memory with recency decay')
+        if relationship_count:
+            reasons.append(f'{relationship_count} graph relationship(s) available')
+        if contradiction_state != 'none':
+            reasons.append(f'contradiction state: {contradiction_state}')
+
+        return {
+            'retrieved': True,
+            'memory_id': row.get('id'),
+            'subject': row.get('subject'),
+            'type': row.get('type'),
+            'source': row.get('source'),
+            'source_timestamp': row.get('occurred_at') or row.get('created_at'),
+            'confidence': float(row.get('confidence') or 0.0),
+            'verified': bool(row.get('verified')),
+            'sensitivity': row.get('sensitivity') or 'normal',
+            'age_days': age_days,
+            'recency_decay': round(float(decay), 6),
+            'semantic_score': round(float(semantic_score), 6) if semantic_score is not None else None,
+            'salience_score': round(float(salience_score), 6),
+            'relationship_count': int(relationship_count),
+            'relationship_contribution': 0.0,
+            'memory_state': state,
+            'contradiction_state': contradiction_state,
+            'superseded_by': row.get('superseded_by'),
+            'selection_reason': '; '.join(reasons),
+            'retrieval_query': query,
+            'used_at': used_at,
+            'evidence_references': self._json_list(row.get('evidence_json')),
+        }
+
+    def context(self, query: str, limit: int = 8, *, allowed_sensitivities: set[str] | None = None) -> list[dict]:
+        query = str(query or '').strip()
         combined = {}
-        if self.vector_store:
+        if self.vector_store and query:
             try:
                 graph_nodes = {node['id']: node for node in self.store.graph().get('nodes', [])}
                 for hit in self.vector_store.search(query, limit=max(limit * 3, 12)):
                     if hit['memory_id'] in graph_nodes:
-                        combined[hit['memory_id']] = {
-                            **graph_nodes[hit['memory_id']],
-                            'semantic_score': hit['score'],
-                        }
+                        combined[hit['memory_id']] = {**graph_nodes[hit['memory_id']], 'semantic_score': hit['score']}
             except Exception:
                 pass
         for row in self.store.search(query, limit=max(limit * 3, 12), active_only=False):
             combined.setdefault(row['id'], row)
-        if not combined:
+        if not combined and query:
             for word in [word for word in query.split() if len(word) > 3][:6]:
                 for row in self.store.search(word, limit=max(limit * 2, 8), active_only=False):
                     combined.setdefault(row['id'], row)
 
+        allowed = {str(item).lower() for item in allowed_sensitivities} if allowed_sensitivities is not None else None
         ranked = []
         for row in combined.values():
+            sensitivity = str(row.get('sensitivity') or 'normal').lower()
+            if sensitivity == 'never_store' or (allowed is not None and sensitivity not in allowed):
+                continue
             score, decay = self.salience(row, row.get('semantic_score'))
-            ranked.append(
-                {
-                    **row,
-                    'salience_score': round(score, 6),
-                    'decay_factor': round(decay, 6),
-                    'memory_state': 'historical' if row.get('valid_to') else 'active',
-                }
-            )
+            ranked.append({**row, 'salience_score': round(score, 6), 'decay_factor': round(decay, 6), 'memory_state': 'historical' if row.get('valid_to') else 'active'})
         ranked.sort(key=lambda item: (item['salience_score'], item.get('updated_at') or ''), reverse=True)
         selected = ranked[: max(1, int(limit))]
+        relationship_counts, conflict_map = self._explanation_maps()
         for row in selected:
+            used_at = None
             try:
-                self.store.record_usage(row['id'], query=query, score=row['salience_score'])
+                usage_id = self.store.record_usage(row['id'], query=query, score=row['salience_score'])
+                if usage_id:
+                    usage = self.store.usage(row['id'], 1)
+                    used_at = usage[0].get('used_at') if usage else self._iso_now()
             except Exception:
                 pass
+            row['retrieval_explanation'] = self._retrieval_explanation(
+                row,
+                query=query,
+                salience_score=row['salience_score'],
+                decay=row['decay_factor'],
+                relationship_count=relationship_counts.get(row['id'], 0),
+                conflicts=conflict_map.get(row['id'], []),
+                used_at=used_at,
+            )
         return selected
+
+    def explain_retrieval(self, memory_id: str, query: str, *, allowed_sensitivities: set[str] | None = None, candidate_limit: int = 100):
+        for row in self.context(query, max(1, min(int(candidate_limit), 500)), allowed_sensitivities=allowed_sensitivities):
+            if row.get('id') == memory_id:
+                return row.get('retrieval_explanation')
+        return None
 
     def temporal(self, query: str = '', *, start=None, end=None, memory_type=None, limit=50):
         rows = self.store.temporal_search(query, start=start, end=end, memory_type=memory_type, limit=limit)
@@ -216,11 +341,7 @@ class SecondBrain:
             'decay_factor': round(decay, 6),
             'usage_history': self.store.usage(memory_id, 100),
             'relationships': self.related(memory_id, depth=1),
-            'conflicts': [
-                item
-                for item in self.store.conflicts(500)
-                if item['older_id'] == memory_id or item['newer_id'] == memory_id
-            ],
+            'conflicts': [item for item in self.store.conflicts(500) if item['older_id'] == memory_id or item['newer_id'] == memory_id],
         }
 
     def delete(self, memory_id: str):
@@ -233,11 +354,7 @@ class SecondBrain:
         return deleted
 
     def apply_retention(self, *, older_than_days: int, sensitivity: str | None = None, dry_run: bool = True):
-        result = self.store.apply_retention(
-            older_than_days=older_than_days,
-            sensitivity=sensitivity,
-            dry_run=True,
-        )
+        result = self.store.apply_retention(older_than_days=older_than_days, sensitivity=sensitivity, dry_run=True)
         if not dry_run:
             for memory_id in result['memory_ids']:
                 self.delete(memory_id)
@@ -269,10 +386,7 @@ class SecondBrain:
                     evidence=list(item.get('evidence') or []),
                     metadata={},
                 )
-                if candidate.subject and candidate.content and not is_never_store(
-                    sensitivity=candidate.sensitivity,
-                    metadata=candidate.metadata,
-                ):
+                if candidate.subject and candidate.content and not is_never_store(sensitivity=candidate.sensitivity, metadata=candidate.metadata):
                     output.append(candidate)
             except Exception:
                 pass
