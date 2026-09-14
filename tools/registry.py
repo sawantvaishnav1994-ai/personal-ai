@@ -43,8 +43,8 @@ class ToolRegistry:
     def ensure_recovery_authority(self):
         if self.recovery_authority is not None:return self.recovery_authority
         if self._data_root is None:raise RuntimeError('recovery authority requires local data directory')
-        from recovery.operator_recovery import RecoveryAuthority
-        self.recovery_authority=RecoveryAuthority(self._data_root/'operator-transactions.sqlite3',emergency_stop=lambda:self.emergency_stop,policy_gateway=self.policy_gateway,security_epoch_provider=self.current_security_epoch)
+        from recovery.recovery_authority import DurableRecoveryAuthority
+        self.recovery_authority=DurableRecoveryAuthority(self._data_root/'operator-transactions.sqlite3',emergency_stop=lambda:self.emergency_stop,policy_gateway=self.policy_gateway,security_epoch_provider=self.current_security_epoch)
         return self.recovery_authority
     def set_emergency_stop(self,enabled:bool):
         previous=self.emergency_stop;self.emergency_stop=bool(enabled)
@@ -60,8 +60,7 @@ class ToolRegistry:
     def policy_snapshot(self,owner_id='owner'):
         if self.policy_gateway is None:return {'policies':[],'recent_use':[],'safe_default':'deny','schema_version':None}
         return self.policy_gateway.owner_snapshot(owner_id)
-    def recovery_snapshot(self,transaction_id):
-        return self.ensure_recovery_authority().owner_view(transaction_id)
+    def recovery_snapshot(self,transaction_id):return self.ensure_recovery_authority().owner_view(transaction_id)
     def register(self,tool:Tool):
         if tool.name in self._tools:raise ValueError(f'Duplicate tool {tool.name}')
         if tool.minimum_risk is not None and int(tool.risk)<int(tool.minimum_risk):tool.risk=Risk(int(tool.minimum_risk))
