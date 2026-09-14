@@ -5,6 +5,8 @@ from desktop.observation_policy_v72 import *  # noqa: F401,F403
 
 
 def build_observation_record(*, binding, transaction_id, application, screen, browser, reason, initiator):
+    if not dict(application or {}).get('available'):
+        raise core.ObservationSafetyError('application_unavailable', 'foreground application identity is unavailable')
     value = dict(screen or {})
     evidence_ref = str(value.get('screenshot_evidence_ref') or '')
     observation_id = str(value.get('observation_id') or '')
