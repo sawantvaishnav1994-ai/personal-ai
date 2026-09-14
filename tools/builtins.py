@@ -8,6 +8,7 @@ from tools import (
     files,
     integrations,
     google_read,
+    google_write,
     memory_tools,
     notifications,
     proactive,
@@ -36,6 +37,7 @@ def register_builtin_tools(
     files.register(registry, settings)
     integrations.register(registry, integration_adapters)
     google_read.register(registry, integration_adapters)
+    google_write.register(registry, integration_adapters)
     web.register(registry)
     system.register(registry)
     memory_tools.register(registry, memory, second_brain=second_brain)

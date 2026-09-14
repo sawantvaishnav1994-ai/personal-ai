@@ -10,7 +10,7 @@ def test_builtin_manifests_include_drive_sheets():
 def test_registry_exposes_read_only_missing_scopes(tmp_path):
  class State:
   def health(self,c):return {'state':'not_configured','granted_scopes':[],'revocation_status':'none'}
- r=IntegrationRegistry(state_store=State());r.register_manifest(drive_manifest());r.register_manifest(sheets_manifest());items={x['id']:x for x in r.list()};assert items['drive']['read_only'] and items['drive']['missing_scopes']==list(drive_manifest().required_oauth_scopes);assert items['sheets']['read_only']
+ r=IntegrationRegistry(state_store=State());r.register_manifest(drive_manifest());r.register_manifest(sheets_manifest());items={x['id']:x for x in r.list()};assert items['drive']['missing_scopes']==list(drive_manifest().required_oauth_scopes);assert not items['drive']['read_only'] and not items['sheets']['read_only'];assert any(not o['write_enabled'] for o in items['drive']['operations'] if o['effect']!='read')
 
 def test_tools_register_drive_sheets_read_only(tmp_path):
  class D:

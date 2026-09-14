@@ -21,12 +21,30 @@ class OAuthAccountManager:
         if p.scheme not in {'https','http'}: raise ValueError('OAuth redirect scheme is invalid')
         if p.scheme=='http' and p.hostname not in {'127.0.0.1','localhost'}: raise ValueError('OAuth redirect must use HTTPS')
         return uri
+    def _existing_token_record(self,provider_id):
+        try:
+            raw=self.vault.get(f'oauth:{provider_id}')
+            return json.loads(raw) if raw else {}
+        except Exception:return {}
+    @staticmethod
+    def _scope_record(previous,token,requested):
+        prev_confirmed=set(previous.get('confirmed_granted_scopes') or previous.get('granted_scopes') or [])
+        raw_scope=token.get('scope')
+        current=set(str(raw_scope).split()) if raw_scope else set(token.get('granted_scopes') or requested or [])
+        confirmed=prev_confirmed|current
+        reduced=sorted(prev_confirmed-current) if prev_confirmed and current else []
+        token['granted_scopes']=sorted(current)
+        token['confirmed_granted_scopes']=sorted(confirmed)
+        token['scope_reduction_detected']=bool(reduced)
+        token['reduced_scopes']=reduced
+        return token
     def begin(self,p:OAuthProvider,*,owner_id='owner',device_id=None,session_id=None,connector_id=None,scopes=None,redirect_uri=None,security_epoch=None,relink_intent='connect',nonce=None)->dict:
         redirect=self._validate_redirect(redirect_uri); requested=list(scopes or p.scopes); state=secrets.token_urlsafe(32); verifier=secrets.token_urlsafe(48); challenge=self._challenge(verifier); nonce=nonce or secrets.token_urlsafe(24); epoch=int(self.security_epoch_provider() if security_epoch is None else security_epoch)
         if self.state_store:
             self.state_store.create_oauth(state=state,verifier=verifier,owner_id=owner_id,device_id=device_id,session_id=session_id,connector_id=connector_id or p.id,provider_id=p.id,scopes=requested,challenge=challenge,nonce=nonce,redirect_uri=redirect,security_epoch=epoch,relink_intent=relink_intent)
         else:self._pending[state]=(p,verifier,time.time()+600,redirect)
         q={'client_id':p.client_id,'redirect_uri':redirect,'response_type':'code','scope':' '.join(requested),'state':state,'code_challenge':challenge,'code_challenge_method':'S256','access_type':'offline','prompt':'consent','nonce':nonce}
+        if p.id=='google':q['include_granted_scopes']='true'
         return {'state':state,'url':p.authorize_url+'?'+urllib.parse.urlencode(q),'expires_in':600,'connector_id':connector_id or p.id}
     def complete(self,state:str,code:str,provider:OAuthProvider|None=None,*,owner_id='owner',device_id=None,session_id=None,connector_id=None,security_epoch=None)->dict:
         if not code or len(str(code))>8192: raise ValueError('OAuth authorization code is invalid')
@@ -53,13 +71,13 @@ class OAuthAccountManager:
             if self.state_store:self.state_store.audit('oauth.failed',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'provider':p.id,'reason':'token_exchange_failed'})
             raise
         if not isinstance(token,dict) or not token.get('access_token'): raise RuntimeError('OAuth provider returned no access token')
-        token.setdefault('granted_scopes',str(token.get('scope') or ' '.join(requested)).split())
-        self._store(p.id,token)
+        previous=self._existing_token_record(p.id); token=self._scope_record(previous,token,requested); self._store(p.id,token)
         if self.state_store:
-            self.state_store.set_health(connector_id or p.id,'healthy',scopes=token['granted_scopes'],success=True)
-            self.state_store.audit('oauth.completed',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'provider':p.id,'scopes':token['granted_scopes']})
-            self.state_store.audit('connector.connected',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'provider':p.id}); self.state_store.audit('scopes.granted',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'scopes':token['granted_scopes']})
-        return {'connected':True,'provider':p.id,'scopes':token['granted_scopes']}
+            health='insufficient_scope' if token.get('scope_reduction_detected') else 'healthy'
+            self.state_store.set_health(connector_id or p.id,health,scopes=token['granted_scopes'],success=health=='healthy',error_code='scope_reduced' if health!='healthy' else None,error_message='Previously granted Google scopes are missing; reconnect before dispatch.' if health!='healthy' else None)
+            self.state_store.audit('oauth.completed',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'provider':p.id,'scopes':token['granted_scopes'],'confirmed_scope_union':token['confirmed_granted_scopes'],'scope_reduction_detected':bool(token.get('scope_reduction_detected'))})
+            self.state_store.audit('connector.connected',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'provider':p.id}); self.state_store.audit('scopes.granted',connector_id=connector_id or p.id,owner_id=owner_id,device_id=device_id,session_id=session_id,payload={'scopes':token['granted_scopes'],'confirmed_scope_union':token['confirmed_granted_scopes']})
+        return {'connected':True,'provider':p.id,'scopes':token['granted_scopes'],'confirmed_scope_union':token['confirmed_granted_scopes'],'scope_reduction_detected':bool(token.get('scope_reduction_detected')),'reduced_scopes':token.get('reduced_scopes',[])}
     def _store(self,provider_id,token):self.vault.set(f'oauth:{provider_id}',json.dumps(token))
     def token_record(self,provider:OAuthProvider):
         raw=self.vault.get(f'oauth:{provider.id}')
@@ -82,8 +100,9 @@ class OAuthAccountManager:
             if self.state_store:
                 self.state_store.set_health(p.id,'authentication_expired',error_code='refresh_failed',error_message='Account reconnect required'); self.state_store.audit('token.refresh_failed',connector_id=p.id,payload={'provider':p.id})
             raise
-        fresh.setdefault('refresh_token',refresh); fresh['expires_at']=time.time()+float(fresh.get('expires_in',3600))-30; fresh.setdefault('granted_scopes',token.get('granted_scopes',[])); self._store(p.id,fresh)
-        if self.state_store:self.state_store.set_health(p.id,'healthy',scopes=fresh.get('granted_scopes',[]),success=True); self.state_store.audit('token.refreshed',connector_id=p.id,payload={'provider':p.id})
+        fresh.setdefault('refresh_token',refresh); fresh['expires_at']=time.time()+float(fresh.get('expires_in',3600))-30; fresh=self._scope_record(token,fresh,token.get('granted_scopes',[])); self._store(p.id,fresh)
+        if self.state_store:
+            health='insufficient_scope' if fresh.get('scope_reduction_detected') else 'healthy'; self.state_store.set_health(p.id,health,scopes=fresh.get('granted_scopes',[]),success=health=='healthy',error_code='scope_reduced' if health!='healthy' else None,error_message='Previously granted Google scopes are missing; reconnect before dispatch.' if health!='healthy' else None); self.state_store.audit('token.refreshed',connector_id=p.id,payload={'provider':p.id,'scopes':fresh.get('granted_scopes',[]),'confirmed_scope_union':fresh.get('confirmed_granted_scopes',[])})
         return fresh
     def unlink(self,provider_id,*,provider:OAuthProvider|None=None,connector_id=None,owner_id='owner',device_id=None,session_id=None,attempt_provider_revocation=True):
         token=None

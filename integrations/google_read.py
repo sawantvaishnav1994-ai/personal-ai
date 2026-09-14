@@ -6,7 +6,7 @@ from integrations.gateway import ConnectorError
 
 class GoogleDriveAdapter(BearerREST):
     manifest=drive_manifest()
-    FILE_FIELDS='id,name,mimeType,owners(displayName,emailAddress),createdTime,modifiedTime,size,md5Checksum,version,webViewLink'
+    FILE_FIELDS='id,name,mimeType,parents,owners(displayName,emailAddress),createdTime,modifiedTime,size,md5Checksum,version,webViewLink'
     MAX_FILE_BYTES=10*1024*1024
     GOOGLE_DOC='application/vnd.google-apps.document'; GOOGLE_SHEET='application/vnd.google-apps.spreadsheet'
     DOWNLOADABLE={'text/plain','text/csv','application/json','application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
@@ -111,4 +111,3 @@ class GoogleSheetsAdapter(BearerREST):
         total=sum(len(r) for vr in vrs if isinstance(vr,dict) for r in (vr.get('values') or []) if isinstance(r,list))
         if total>self.MAX_CELLS:raise ConnectorError('range_too_large','Returned batch values exceed configured limits.','degraded',413,False)
         self.audit('sheets.values.batch_read',payload={'spreadsheet_id':sid,'ranges':[x['range'] for x in checked],'cells':total,'value_mode':str(value_mode).lower()},**self._ctx(ctx));return {'spreadsheet_id':sid,'value_ranges':vrs,'value_mode':str(value_mode).lower(),'retrieval_time':time.time()}
-

@@ -157,33 +157,48 @@ def calendar_manifest():
     ), token_revocation_supported=True, healthcheck_operation='calendar.read', configuration_requirements=('google_client_id',))
 
 def drive_manifest():
-    scope=('https://www.googleapis.com/auth/drive.readonly',)
+    read_scope=('https://www.googleapis.com/auth/drive.readonly',)
+    write_scope=('https://www.googleapis.com/auth/drive.file',)
     ops=(
-        _op('drive.files.list','read','read_only',approval='none',scopes=scope,page=True,max_pages=10,max_items=1000),
-        _op('drive.files.search','read','read_only',approval='none',scopes=scope,page=True,max_pages=10,max_items=1000),
-        _op('drive.files.metadata','read','read_only',approval='none',scopes=scope),
-        _op('drive.files.read','read','read_only',approval='none',scopes=scope),
-        _op('drive.files.download','read','read_only',approval='none',scopes=scope),
-        _op('drive.files.export','read','read_only',approval='none',scopes=scope),
+        _op('drive.files.list','read','read_only',approval='none',scopes=read_scope,page=True,max_pages=10,max_items=1000),
+        _op('drive.files.search','read','read_only',approval='none',scopes=read_scope,page=True,max_pages=10,max_items=1000),
+        _op('drive.files.metadata','read','read_only',approval='none',scopes=read_scope),
+        _op('drive.files.read','read','read_only',approval='none',scopes=read_scope),
+        _op('drive.files.download','read','read_only',approval='none',scopes=read_scope),
+        _op('drive.files.export','read','read_only',approval='none',scopes=read_scope),
+        _op('drive.files.create','consequential','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('drive_parent','drive_file'),verify=True),
+        _op('drive.files.upload','consequential','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('drive_parent','drive_file'),verify=True),
+        _op('drive.files.rename','write','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('drive_file',),verify=True),
+        _op('drive.files.update_content','write','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('drive_file',),verify=True),
     )
-    return ConnectorManifest('drive','Google Drive','google',1,'oauth2_pkce',scope,(),ops,
-        token_revocation_supported=True,healthcheck_operation='drive.files.list',configuration_requirements=('google_client_id',),read_only=True,
-        scope_reasons=((scope[0],'Read metadata and content only for owner-selected Drive files; no create, update, delete, share or permission access.'),),
-        content_limits=(('max_file_bytes',10*1024*1024),('max_pages',10),('max_results',1000)),
+    return ConnectorManifest('drive','Google Drive','google',1,'oauth2_pkce',read_scope,write_scope,ops,
+        token_revocation_supported=True,healthcheck_operation='drive.files.list',configuration_requirements=('google_client_id',),read_only=False,
+        scope_reasons=(
+            (read_scope[0],'Read metadata and content only for owner-selected Drive files.'),
+            (write_scope[0],'Create and update only files created by or explicitly opened/selected for Personal AI; does not grant blanket delete/share/permission control.'),
+        ),
+        content_limits=(('max_file_bytes',10*1024*1024),('max_pages',10),('max_results',1000),('max_filename_chars',255)),
         supported_content_types=('text/plain','text/csv','application/json','application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet'))
 
 def sheets_manifest():
-    scope=('https://www.googleapis.com/auth/spreadsheets.readonly',)
+    read_scope=('https://www.googleapis.com/auth/spreadsheets.readonly',)
+    write_scope=('https://www.googleapis.com/auth/spreadsheets',)
     ops=(
-        _op('sheets.spreadsheets.metadata','read','read_only',approval='none',scopes=scope),
-        _op('sheets.worksheets.list','read','read_only',approval='none',scopes=scope),
-        _op('sheets.values.read','read','read_only',approval='none',scopes=scope),
-        _op('sheets.values.batch_read','read','read_only',approval='none',scopes=scope),
+        _op('sheets.spreadsheets.metadata','read','read_only',approval='none',scopes=read_scope),
+        _op('sheets.worksheets.list','read','read_only',approval='none',scopes=read_scope),
+        _op('sheets.values.read','read','read_only',approval='none',scopes=read_scope),
+        _op('sheets.values.batch_read','read','read_only',approval='none',scopes=read_scope),
+        _op('sheets.spreadsheets.create','consequential','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('spreadsheet',),verify=True),
+        _op('sheets.values.update','write','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('spreadsheet_range',),verify=True),
+        _op('sheets.values.append','consequential','external_side_effect',approval='required',reauth=True,scopes=write_scope,allowed=('public','internal','sensitive'),prohibited=('secret','restricted'),dest=('spreadsheet_range',),verify=True),
     )
-    return ConnectorManifest('sheets','Google Sheets','google',1,'oauth2_pkce',scope,(),ops,
-        token_revocation_supported=True,configuration_requirements=('google_client_id',),read_only=True,
-        scope_reasons=((scope[0],'Read spreadsheet metadata and explicitly requested ranges only; no write, append, clear, formatting, sheet creation/deletion or sharing.'),),
-        content_limits=(('max_worksheets',100),('max_ranges',10),('max_rows',1000),('max_columns',100),('max_cells',50000),('max_response_bytes',2*1024*1024)),
+    return ConnectorManifest('sheets','Google Sheets','google',1,'oauth2_pkce',read_scope,write_scope,ops,
+        token_revocation_supported=True,configuration_requirements=('google_client_id',),read_only=False,
+        scope_reasons=(
+            (read_scope[0],'Read spreadsheet metadata and explicitly requested ranges.'),
+            (write_scope[0],'Create spreadsheets and update/append bounded RAW values. This scope can edit spreadsheets accessible to the connected account; delete, clear, sharing and structural batchUpdate remain prohibited by Personal AI policy.'),
+        ),
+        content_limits=(('max_worksheets',20),('max_ranges',10),('max_rows',1000),('max_columns',100),('max_cells',50000),('max_write_cells',10000),('max_append_rows',500),('max_request_bytes',1024*1024),('max_response_bytes',2*1024*1024)),
         supported_content_types=('application/vnd.google-apps.spreadsheet','text/csv'))
 
 def slack_manifest():

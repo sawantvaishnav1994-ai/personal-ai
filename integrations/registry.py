@@ -40,6 +40,14 @@ class IntegrationRegistry:
             state=self.state_store.health(x.id) if self.state_store else state
         elif not x.configured: state={**state,'state':'not_configured'}
         return healthy,state
+    def sync_provider_scopes(self,provider,scopes):
+        granted=sorted(set(scopes or []))
+        for manifest in self.manifests.list():
+            if manifest.provider!=provider:continue
+            missing=sorted(set(manifest.required_oauth_scopes)-set(granted))
+            state='insufficient_scope' if missing else 'healthy'
+            if self.state_store:self.state_store.set_health(manifest.connector_id,state,scopes=granted,success=not missing,error_code='insufficient_scope' if missing else None,error_message='Connected account is missing required scopes' if missing else None)
+        return granted
     def list(self):
         out=[]
         manifests={m.connector_id:m for m in self.manifests.list()}
@@ -54,7 +62,8 @@ class IntegrationRegistry:
                 missing=set(manifest.required_oauth_scopes)-set(state.get('granted_scopes',[]))
                 if missing:state={**state,'state':'insufficient_scope','last_error_message':'Connected account is missing required scopes'}
             if manifest:
-                operations=[{'name':o.name,'effect':o.effect,'risk':o.risk,'approval':o.approval,'requires_reauth':o.requires_reauth,'prohibited':o.prohibited,'verification':o.verification_supported,'rollback':o.rollback_available} for o in manifest.operations]
+                gset=set(state.get('granted_scopes',[]))
+                operations=[{'name':o.name,'effect':o.effect,'risk':o.risk,'approval':o.approval,'requires_reauth':o.requires_reauth,'prohibited':o.prohibited,'verification':o.verification_supported,'rollback':o.rollback_available,'required_scopes':list(o.required_scopes),'missing_scopes':sorted(set(o.required_scopes)-gset),'scope_satisfied':not bool(set(o.required_scopes)-gset),'write_enabled':o.effect in {'write','consequential','destructive'} and not o.prohibited and not bool(set(o.required_scopes)-gset)} for o in manifest.operations]
                 capabilities=[o.name for o in manifest.operations]
             granted=list(state.get('granted_scopes',[])); required=list(manifest.required_oauth_scopes) if manifest else []; optional=list(manifest.optional_oauth_scopes) if manifest else []; missing=sorted(set(required)-set(granted))
             out.append({'id':connector_id,'name':name,'provider':manifest.provider if manifest else connector_id,'configured':configured,'capabilities':capabilities,'operations':operations,'healthy':healthy,'state':state.get('state'),'granted_scopes':granted,'missing_scopes':missing,'last_success_at':state.get('last_success_at'),'last_checked_at':state.get('last_checked_at'),'last_error':state.get('last_error_message'),'last_error_code':state.get('last_error_code'),'revocation_status':state.get('revocation_status','none'),'auth_type':manifest.authentication_type if manifest else None,'required_scopes':required,'optional_scopes':optional,'scope_reasons':[{'scope':a,'reason':b} for a,b in (manifest.scope_reasons if manifest else ())],'read_only':bool(manifest.read_only) if manifest else False,'content_limits':dict(manifest.content_limits) if manifest else {}})

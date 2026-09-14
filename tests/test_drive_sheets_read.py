@@ -28,12 +28,12 @@ class Session:
 def store(tmp_path):return ConnectorStateStore(tmp_path/'c.sqlite3',vault=Vault())
 def gateway(store,seq):return ConnectorGateway(store,session=Session(seq),sleep=lambda _:None,random_fn=lambda:0.5)
 
-def test_drive_manifest_read_only_least_privilege():
- m=drive_manifest();m.validate();assert m.read_only and m.required_oauth_scopes==('https://www.googleapis.com/auth/drive.readonly',);assert all(o.effect=='read' for o in m.operations)
+def test_drive_manifest_read_scope_remains_least_privilege():
+ m=drive_manifest();m.validate();assert m.required_oauth_scopes==('https://www.googleapis.com/auth/drive.readonly',);assert all(o.effect=='read' for o in m.operations if o.name in {'drive.files.list','drive.files.search','drive.files.metadata','drive.files.read','drive.files.download','drive.files.export'})
 def test_drive_manifest_has_scope_reason_and_limits():
  m=drive_manifest();assert dict(m.scope_reasons)[m.required_oauth_scopes[0]] and m.limit('max_file_bytes')==10*1024*1024
-def test_sheets_manifest_read_only_least_privilege():
- m=sheets_manifest();m.validate();assert m.read_only and m.required_oauth_scopes==('https://www.googleapis.com/auth/spreadsheets.readonly',);assert all(o.effect=='read' for o in m.operations)
+def test_sheets_manifest_read_scope_remains_least_privilege():
+ m=sheets_manifest();m.validate();assert m.required_oauth_scopes==('https://www.googleapis.com/auth/spreadsheets.readonly',);assert all(o.effect=='read' for o in m.operations if o.name.startswith('sheets.') and o.name not in {'sheets.spreadsheets.create','sheets.values.update','sheets.values.append'})
 def test_drive_list_and_search(store):
  g=gateway(store,[R(data={'files':[{'id':'1'}]}),R(data={'files':[{'id':'2'}]})]);a=GoogleDriveAdapter('t',gateway=g)
  assert a.list_files()['files'][0]['id']=='1';assert a.list_files(q="name contains 'x'")['files'][0]['id']=='2'

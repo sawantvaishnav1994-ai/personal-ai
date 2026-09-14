@@ -50,6 +50,11 @@ class ToolRegistry:
     def destination(parameters):
         params=parameters or {}
         # external attendees make calendar writes externally consequential
+        sid=params.get('spreadsheet_id'); rng=params.get('range')
+        if sid not in (None,'') and rng not in (None,''):return f'{str(sid)[:500]}#{str(rng)[:500]}'
+        fid=params.get('file_id'); parent=params.get('parent_id'); filename=params.get('filename')
+        if fid not in (None,''):return f'file:{str(fid)[:800]}'
+        if filename not in (None,'') and parent not in (None,''):return f'parent:{str(parent)[:500]}/name:{str(filename)[:400]}'
         event=params.get('event')
         if isinstance(event,dict) and event.get('attendees'):
             emails=[str(x.get('email','')) for x in event['attendees'] if isinstance(x,dict) and x.get('email')]

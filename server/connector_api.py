@@ -45,7 +45,20 @@ def connector_router(runtime):
     def oauth_complete(connector_id:str,body:OAuthCompleteBody,pa_device:str|None=Cookie(default=None),pa_token:str|None=Cookie(default=None)):
         ctx=auth(pa_device,pa_token,'device:admin'); info=item(connector_id); provider=providers.get(info['provider'])
         if not oauth or not provider:raise HTTPException(409,'OAuth client configuration is not available for this connector')
-        try:return oauth.complete(body.state,body.code,provider,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,connector_id=connector_id,security_epoch=runtime['executor'].approvals.current_security_epoch())
+        try:
+            result=oauth.complete(body.state,body.code,provider,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,connector_id=connector_id,security_epoch=runtime['executor'].approvals.current_security_epoch())
+            scopes=result.get('scopes') or []
+            if hasattr(integrations,'sync_provider_scopes'):integrations.sync_provider_scopes(info['provider'],scopes)
+            try:
+                token=oauth.token(provider)
+                for adapter_id,adapter in (runtime.get('integration_adapters') or {}).items():
+                    try:
+                        manifest=integrations.manifests.get(adapter_id)
+                    except Exception:
+                        continue
+                    if manifest.provider==info['provider'] and hasattr(adapter,'set_token'):adapter.set_token(token,granted_scopes=scopes)
+            except Exception:pass
+            return result
         except PermissionError as exc:raise HTTPException(403,str(exc)) from exc
         except ValueError as exc:raise HTTPException(422,str(exc)) from exc
         except Exception as exc:raise HTTPException(502,'The provider could not complete account connection') from exc

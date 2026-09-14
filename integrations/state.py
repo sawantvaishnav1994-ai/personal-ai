@@ -30,8 +30,8 @@ class ConnectorStateStore:
             "CREATE INDEX IF NOT EXISTS idx_oauth_binding ON oauth_transactions(device_id,session_id,status,expires_at)",
             """CREATE TABLE IF NOT EXISTS connector_operations(
               operation_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,device_id TEXT,session_id TEXT,connector_id TEXT NOT NULL,operation_name TEXT NOT NULL,
-              parameter_hash TEXT NOT NULL,destination TEXT NOT NULL DEFAULT '',idempotency_key TEXT NOT NULL UNIQUE,provider_request_id TEXT,provider_resource_id TEXT,
-              dispatch_time REAL,state TEXT NOT NULL,verification_state TEXT NOT NULL DEFAULT 'not_started',rollback_available INTEGER NOT NULL DEFAULT 0,
+              parameter_hash TEXT NOT NULL,destination TEXT NOT NULL DEFAULT '',idempotency_key TEXT NOT NULL UNIQUE,provider_account TEXT NOT NULL DEFAULT '',content_checksum TEXT NOT NULL DEFAULT '',provider_request_id TEXT,provider_resource_id TEXT,
+              dispatch_time REAL,state TEXT NOT NULL,verification_state TEXT NOT NULL DEFAULT 'not_started',verification_evidence_json TEXT NOT NULL DEFAULT '{}',rollback_available INTEGER NOT NULL DEFAULT 0,
               retry_decision TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',created_at REAL NOT NULL,updated_at REAL NOT NULL)""",
             "CREATE INDEX IF NOT EXISTS idx_connector_operations_lookup ON connector_operations(connector_id,operation_name,created_at)",
         ]
@@ -43,6 +43,10 @@ class ConnectorStateStore:
                 additions={'revocation_status':"TEXT NOT NULL DEFAULT 'none'",'last_error_code':'TEXT','last_error_message':'TEXT'}
                 for name,definition in additions.items():
                     if name not in cols: con.execute(f'ALTER TABLE connector_health ADD COLUMN {name} {definition}')
+                opcols={r['name'] for r in con.execute('PRAGMA table_info(connector_operations)')}
+                opadd={'provider_account':"TEXT NOT NULL DEFAULT ''",'content_checksum':"TEXT NOT NULL DEFAULT ''",'verification_evidence_json':"TEXT NOT NULL DEFAULT '{}'"}
+                for name,definition in opadd.items():
+                    if name not in opcols: con.execute(f'ALTER TABLE connector_operations ADD COLUMN {name} {definition}')
                 con.commit()
             except Exception:
                 con.rollback()
@@ -93,33 +97,47 @@ class ConnectorStateStore:
         if self.vault:
             try:self.vault.delete('oauth-txn:'+digest)
             except Exception:pass
-    def propose_operation(self,*,owner_id='owner',device_id=None,session_id=None,connector_id,operation_name,parameter_hash,destination='',idempotency_key=None,rollback_available=False):
+    def propose_operation(self,*,owner_id='owner',device_id=None,session_id=None,connector_id,operation_name,parameter_hash,destination='',idempotency_key=None,rollback_available=False,provider_account='',content_checksum=''):
         key=idempotency_key or str(uuid.uuid4())
         stamp=_now(); opid=str(uuid.uuid4())
         with self._con() as con:
             con.execute('BEGIN IMMEDIATE'); existing=con.execute('SELECT * FROM connector_operations WHERE idempotency_key=?',(key,)).fetchone()
-            if existing: con.rollback(); return dict(existing),False
-            con.execute('''INSERT INTO connector_operations(operation_id,owner_id,device_id,session_id,connector_id,operation_name,parameter_hash,destination,idempotency_key,provider_request_id,provider_resource_id,dispatch_time,state,verification_state,rollback_available,retry_decision,result_json,created_at,updated_at)
-              VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,'proposed','not_started',?,'','{}',?,?)''',(opid,owner_id,device_id,session_id,connector_id,operation_name,parameter_hash,destination,key,int(bool(rollback_available)),stamp,stamp)); con.commit()
+            if existing: con.rollback(); return self._decode_operation(existing),False
+            con.execute("""INSERT INTO connector_operations(operation_id,owner_id,device_id,session_id,connector_id,operation_name,parameter_hash,destination,idempotency_key,provider_account,content_checksum,provider_request_id,provider_resource_id,dispatch_time,state,verification_state,verification_evidence_json,rollback_available,retry_decision,result_json,created_at,updated_at)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,'proposed','not_started','{}',?,'','{}',?,?)""",(opid,owner_id,device_id,session_id,connector_id,operation_name,parameter_hash,destination,key,str(provider_account or '')[:500],str(content_checksum or '')[:200],int(bool(rollback_available)),stamp,stamp)); con.commit()
+        self.audit('operation.proposed',connector_id=connector_id,owner_id=owner_id,device_id=device_id,session_id=session_id,correlation_id=opid,payload={'operation':operation_name,'destination':destination,'provider_account':str(provider_account or '')[:200],'content_checksum':str(content_checksum or '')[:100]})
         return self.operation(opid),True
-    def transition_operation(self,operation_id,state,*,verification_state=None,provider_request_id=None,provider_resource_id=None,retry_decision=None,result=None):
+
+    def transition_operation(self,operation_id,state,*,verification_state=None,verification_evidence=None,provider_request_id=None,provider_resource_id=None,retry_decision=None,result=None):
         if state not in OPERATION_STATES: raise ValueError('invalid connector operation state')
         stamp=_now(); fields=['state=?','updated_at=?']; vals=[state,stamp]
         if state=='dispatched': fields+=['dispatch_time=?']; vals+=[stamp]
         for name,val in [('verification_state',verification_state),('provider_request_id',provider_request_id),('provider_resource_id',provider_resource_id),('retry_decision',retry_decision)]:
             if val is not None: fields.append(name+'=?'); vals.append(str(val)[:500])
+        if verification_evidence is not None: fields.append('verification_evidence_json=?'); vals.append(_json(verification_evidence))
         if result is not None: fields.append('result_json=?'); vals.append(_json(result))
         vals.append(operation_id)
         with self._con() as con: con.execute('BEGIN IMMEDIATE'); cur=con.execute('UPDATE connector_operations SET '+','.join(fields)+' WHERE operation_id=?',vals); con.commit()
         if cur.rowcount!=1: raise KeyError(operation_id)
         return self.operation(operation_id)
+    @staticmethod
+    def _decode_operation(row):
+        d=dict(row); d['result']=json.loads(d.pop('result_json') or '{}'); d['verification_evidence']=json.loads(d.pop('verification_evidence_json','{}') or '{}'); return d
     def operation(self,operation_id):
         with self._con() as con: row=con.execute('SELECT * FROM connector_operations WHERE operation_id=?',(operation_id,)).fetchone()
         if not row: raise KeyError(operation_id)
-        d=dict(row); d['result']=json.loads(d.pop('result_json') or '{}'); return d
+        return self._decode_operation(row)
     def by_idempotency(self,key):
         with self._con() as con: row=con.execute('SELECT * FROM connector_operations WHERE idempotency_key=?',(key,)).fetchone()
-        return dict(row) if row else None
+        return self._decode_operation(row) if row else None
+    def recovery_required(self,connector_id=None):
+        q="SELECT * FROM connector_operations WHERE state IN ('outcome_unknown','recovery_review_required','verification_pending','verification_failed')";args=[]
+        if connector_id:q+=' AND connector_id=?';args.append(connector_id)
+        q+=' ORDER BY created_at ASC'
+        with self._con() as con: rows=con.execute(q,args).fetchall()
+        return [self._decode_operation(r) for r in rows]
+
+
 
 
 def invalidate_device_transactions(path:Path,device_id:str):

@@ -65,3 +65,24 @@ def test_oauth_redirect_allowlist(env):
     with pytest.raises(ValueError):m.begin(p,connector_id='gmail',redirect_uri='https://evil/cb')
 def test_legacy_oauth_begin_still_works():
     v=Vault();m=OAuthAccountManager(v);p=OAuthProvider('x','https://a','https://t','cid',['one']);o=m.begin(p);assert o['state'] in m._pending and 'code_challenge=' in o['url']
+
+def test_google_begin_requests_incremental_scope_preservation(env):
+    import urllib.parse
+    v,s=env;m=OAuthAccountManager(v,state_store=s,allowed_redirects={'https://ok/cb'});p=OAuthProvider('google','https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token','id',['scope'])
+    o=m.begin(p,connector_id='drive',scopes=['new.scope'],redirect_uri='https://ok/cb',owner_id='owner',device_id='d',session_id='s',security_epoch=1)
+    q=urllib.parse.parse_qs(urllib.parse.urlparse(o['url']).query);assert q['include_granted_scopes']==['true'] and q['scope']==['new.scope']
+
+def test_google_scope_union_preserved_and_reduction_detected(env,monkeypatch):
+    class Resp:
+        def __init__(self,scope):self.scope=scope
+        def raise_for_status(self):pass
+        def json(self):return {'access_token':'new','scope':self.scope,'refresh_token':'r'}
+    v,s=env;p=OAuthProvider('google','https://a','https://t','id',['new'])
+    v.set('oauth:google',json.dumps({'access_token':'old','granted_scopes':['gmail','calendar'],'confirmed_granted_scopes':['gmail','calendar']}))
+    m=OAuthAccountManager(v,state_store=s,allowed_redirects={'https://ok/cb'})
+    o=m.begin(p,connector_id='drive',scopes=['drive'],redirect_uri='https://ok/cb',owner_id='owner',device_id='d',session_id='ss',security_epoch=0)
+    monkeypatch.setattr('integrations.oauth.requests.post',lambda *a,**k:Resp('gmail calendar drive'))
+    r=m.complete(o['state'],'code',p,connector_id='drive',owner_id='owner',device_id='d',session_id='ss',security_epoch=0);assert set(r['confirmed_scope_union'])=={'gmail','calendar','drive'} and not r['scope_reduction_detected']
+    o2=m.begin(p,connector_id='drive',scopes=['drive'],redirect_uri='https://ok/cb',owner_id='owner',device_id='d',session_id='ss',security_epoch=0)
+    monkeypatch.setattr('integrations.oauth.requests.post',lambda *a,**k:Resp('drive'))
+    r2=m.complete(o2['state'],'code2',p,connector_id='drive',owner_id='owner',device_id='d',session_id='ss',security_epoch=0);rec=m.token_record(p);assert r2['scope_reduction_detected'] and set(rec['confirmed_granted_scopes'])=={'gmail','calendar','drive'} and rec['granted_scopes']==['drive']
