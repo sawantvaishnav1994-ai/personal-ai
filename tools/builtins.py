@@ -36,6 +36,10 @@ def register_builtin_tools(
     continuity_service=None,
     integration_adapters=None,
 ):
+    # Some tests/embedded surfaces construct ToolRegistry with only autonomy
+    # settings and supply the durable data directory here. Bind once, before
+    # any W7 operator/recovery authority is initialized.
+    registry.bind_data_root(settings.data_dir)
     files.register(registry, settings)
     desktop_file.register(registry, settings)
     # W7.6 recovery extends the W7.1 transaction database. Initialize it only
