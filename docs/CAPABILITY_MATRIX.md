@@ -10,7 +10,7 @@ Statuses describe implementation/qualification honestly; automated validation do
 | Trusted devices/sessions | PARTIAL | binding/revocation tests | physical multi-browser incomplete | current branch | physical trust qualification |
 | Conversation continuity | PARTIAL | automated tests | main runtime non-durable | current branch | production restart proof |
 | Memory / Knowledge | PARTIAL | W4 + W6 provenance tests | durable/live-source qualification pending | current branch | production/live qualification |
-| Trusted Action Core | PARTIAL | durable binding/replay/epoch/reauth tests; W7.1 operator binding reuses it | live operational proof partial | W5/W7.1 | W7.2-W7.6 + physical qualification |
+| Trusted Action Core | PARTIAL | durable binding/replay/epoch/reauth tests; W7.1/W7.2 operator binding reuses it | live operational proof partial | W5/W7.2 | W7.3-W7.6 + physical qualification |
 | Workflow budgets/concurrency/idempotency | PARTIAL | W5 automated validated | production volume absent | W5 | production durable qualification |
 | Connector manifest/runtime/OAuth | PARTIAL | W6.1-W6.3 + hosted callback prep + Gmail scope repair automated validated | real Google account not yet qualified | `ae1b3c12...` | isolated live-provider qualification when paid infrastructure resumes |
 | Gmail read/search | AUTOMATED VALIDATED / LIVE PENDING | `gmail.readonly` operation/gateway regressions + full CI | not live Google verified | `ae1b3c12...` | harmless live qualification |
@@ -29,8 +29,9 @@ Statuses describe implementation/qualification honestly; automated validation do
 | Apps & Tools connector management | PARTIAL | scope/health/read-write/approval/reauth/recovery UI tests | live owner UX pending | W6.3+ | live account UX |
 | Slack / Home Assistant | PARTIAL | common contract foundations | provider-specific qualification incomplete | W6.1 | later provider batch |
 | GitHub / Microsoft 365 connectors | PARTIAL/PLANNED | architecture supports providers | live/adapter scope incomplete | current | future bounded connector batches |
-| W7.1 Durable Operator Transaction Core | AUTOMATED VALIDATED | durable SQLite operator transactions/actions/audit, trusted owner/device/session/epoch/conversation binding, idempotency, restart recovery, cancellation/deadline/Emergency Stop, redaction; full repo 471 PASS + 6/6 workflows | physical desktop/browser qualification not yet performed | `fe52b6ff...` | W7.2 observation/application context |
-| Computer operator overall | PARTIAL | Observe→Understand→Act→Verify foundations + W7.1 durable transaction core | W7.2-W7.6 and physical safe-operation evidence pending | current | continue bounded W7 batches |
+| W7.1 Durable Operator Transaction Core | AUTOMATED VALIDATED | durable SQLite operator transactions/actions/audit, trusted owner/device/session/epoch/conversation binding, idempotency, restart recovery, cancellation/deadline/Emergency Stop, redaction; full repo 471 PASS + 6/6 workflows | physical desktop/browser qualification not performed | `fe52b6ff...` | frozen automated baseline |
+| W7.2 Observation/Application Context Safety | AUTOMATED VALIDATED | 58 focused W7.2 cases; full repo 530 PASS; exact-head 6/6 workflows; typed coordinate spaces; browser-native masking; sanitized evidence guard; app/window/browser/tab/origin/target freshness binding | physical desktop/browser and production qualification not performed | `3d9f5a4f...` | documentation-head 6/6, then W7.3 |
+| Computer operator overall | PARTIAL | W7.1 durable core + W7.2 exact-head observation/evidence safety validated | W7.3-W7.6 and physical safe-operation evidence pending | `3d9f5a4f...` | continue bounded W7 batches after docs gate |
 | Provider abstraction | PARTIAL | router/dialogue tests | Gemini temporary | current | W8 health/failover/observability after W7 |
 | Backup/recovery | PARTIAL | isolated encrypted restore workflow | production durable restore absent | current | production volume gate |
 | Production durable storage | BLOCKED | fail-closed hosted storage guard exists | main Railway runtime has no volume | deployed head | attach `/data` only at approved production gate |
@@ -50,11 +51,20 @@ W6 software is **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED / LIVE OAUTH QUA
 - Validated W7.1 baseline: `0092051edff451476a032da3934f72d459a75ae1`.
 - Final W7.1 implementation: `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc`.
 - Full repository: **471 passed, 7 warnings**.
-- CI #645 / `34861953280`: PASS.
-- Reliability and Security #188 / `34861953222`: PASS.
-- P3 iPhone PWA #156 / `34861953080`: PASS.
-- Android Instrumentation #187 / `34861953260`: PASS.
-- Package Validation #187 / `34861953264`: PASS.
-- iOS Companion #169 / `34861953258`: PASS.
+- Required implementation workflows: 6/6 PASS.
 
-W7.1 is **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**. It does not imply W7 overall, physical browser/desktop, or production qualification.
+## W7.2 exact implementation evidence
+
+- Validated W7.1 documentation baseline: `526b249c54f5726421ecd8e2b6773916b5eed1a0`.
+- Recovered W7.2 WIP: `f41aba85cf236800e1fc7ead0665448d9246e20d`.
+- Final implementation: `3d9f5a4f21cf59307758f261d6291a4b7a36003b`.
+- Focused W7.2 coverage: **58 PASS**.
+- Full repository: **530 passed, 7 warnings**.
+- CI #700 / `34869967548`: PASS.
+- Reliability and Security #197 / `34869967279`: PASS.
+- P3 iPhone PWA #165 / `34869967422`: PASS.
+- Android Instrumentation #196 / `34869967534`: PASS.
+- Package Validation #196 / `34869967417`: PASS.
+- iOS Companion #178 / `34869967290`: PASS.
+
+W7.2 software implementation is **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at the implementation-head gate. It is not physical-device verified or production verified, and W7 overall remains partial. The documentation-only head must independently pass the same six workflows before W7.3 begins.
