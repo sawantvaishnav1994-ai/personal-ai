@@ -100,7 +100,7 @@ class PolicyGateway:
             elif operation.target_type=='path':
                 roots=list(operation.target_identity.get('approved_roots') or [])
                 if not roots:return 'path_outside_allowed_root'
-                canonical_path(str(operation.target_identity.get('path') or operation.destination),roots,allow_network=bool(operation.target_identity.get('allow_network',False)),path_is_reparse=bool(operation.target_identity.get('path_is_reparse',False)))
+                canonical_path(str(operation.target_identity.get('path') or operation.destination),roots,allow_network=bool(operation.target_identity.get('allow_network',False)),path_is_reparse=bool(operation.target_identity.get('path_is_reparse',False)),path_is_mounted=bool(operation.target_identity.get('path_is_mounted',False)),allow_mounted=bool(operation.target_identity.get('allow_mounted',False)))
                 file_path=operation.target_identity.get('file_for_validation')
                 if file_path:validate_file_metadata(str(file_path),claimed_mime=str(operation.target_identity.get('claimed_mime') or ''),max_bytes=int(operation.target_identity.get('max_bytes') or 50*1024*1024))
             elif operation.target_type=='clipboard':
@@ -120,7 +120,7 @@ class PolicyGateway:
             if operation.target_type=='path':
                 root=str(rule.get('root') or '');candidate=str(operation.target_identity.get('path') or operation.destination)
                 if not root:return False
-                canonical_path(candidate,[root],allow_network=bool(rule.get('allow_network',False)),path_is_reparse=bool(operation.target_identity.get('path_is_reparse',False)));return True
+                canonical_path(candidate,[root],allow_network=bool(rule.get('allow_network',False)),path_is_reparse=bool(operation.target_identity.get('path_is_reparse',False)),path_is_mounted=bool(operation.target_identity.get('path_is_mounted',False)),allow_mounted=bool(rule.get('allow_mounted',False)));return True
             if operation.target_type=='clipboard':
                 expected=str(rule.get('destination') or '');actual=str(operation.destination or operation.target_identity.get('destination') or '');return not expected or expected==actual
             expected=str(rule.get('identity') or rule.get('destination') or '');actual=str(operation.destination or operation.target_identity.get('identity') or '');return bool(expected and expected==actual)
