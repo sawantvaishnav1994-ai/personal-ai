@@ -10,6 +10,7 @@ def register(reg, models, settings, *, second_brain=None, events=None):
         settings.data_dir,
         second_brain=second_brain,
         events=events,
+        emergency_stop=lambda: bool(getattr(reg, 'emergency_stop', False)),
     )
     reg.register(
         Tool(
@@ -33,13 +34,16 @@ def register(reg, models, settings, *, second_brain=None, events=None):
     reg.register(
         Tool(
             'computer_execute',
-            'Execute a bounded, transactional, visually verified desktop task; params: goal,max_steps,monitor. Requires consequential-action authority.',
-            lambda p: computer.execute(
-                str(p['goal']),
-                max_steps=int(p.get('max_steps', 8)),
-                monitor=int(p.get('monitor', 1)),
-            ),
+            'Execute only the exact Personal AI prepared, owner-approved, durable and visually verified desktop plan; params: goal,max_steps,monitor,timeout_seconds.',
+            lambda p: computer.execute_prepared(p),
             Risk.EXTERNAL_SIDE_EFFECT,
+            rollback_description='No generic automatic rollback is promised. Individual reversible desktop actions may be compensated only when technically safe and separately authorized.',
+            verification_required=True,
+            requires_reauth=True,
+            minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,
+            prepare=computer.prepare_execution,
+            on_reject=computer.reject_execution,
+            requires_trusted_context=True,
         )
     )
     return computer
