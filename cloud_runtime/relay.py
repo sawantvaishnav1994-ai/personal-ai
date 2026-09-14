@@ -71,6 +71,14 @@ class SecureCloudRelay:
     def set_emergency_stop(self,owner_secret:str,enabled:bool):
         if not self.owner.verify(owner_secret):return RelayResult(401,{'error':'owner_auth_failed'})
         self.sessions.set_emergency_stop(enabled)
+        # Cloud emergency stop is global, not merely a relay flag. Synchronize the
+        # authoritative tool registry so all surfaces stop and every pending
+        # action permit is invalidated before a future clear can resume work.
+        tools=getattr(self.executor,'tools',None)
+        if tools is not None and hasattr(tools,'set_emergency_stop'):
+            tools.set_emergency_stop(enabled)
+        elif enabled and hasattr(self.executor,'invalidate_pending_approvals'):
+            self.executor.invalidate_pending_approvals()
         self.memory.audit('cloud','emergency_stop',{'enabled':enabled})
         if self.events:self.events.emit('emergency.stop',enabled=enabled)
         return RelayResult(200,{'emergency_stop':enabled})
