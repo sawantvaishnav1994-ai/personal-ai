@@ -15,6 +15,8 @@ from server.memory_knowledge_inspection import memory_knowledge_inspection_route
 from server.pwa_security import pwa_security_router
 from server.pwa_session_middleware import PwaSessionMiddleware
 from server.session_bound_executor import SessionBoundExecutor
+from server.workflow_budget_api import workflow_budget_router
+from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
 
 storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
@@ -36,15 +38,12 @@ async def lifespan(app):
     try:
         yield
     finally:
-        if evaluation_task and not evaluation_task.done():
-            evaluation_task.cancel()
-        runtime['voice'].stop()
-        runtime['automations'].stop()
-        runtime['telemetry'].persist()
-        runtime['apns'].close()
+        if evaluation_task and not evaluation_task.done(): evaluation_task.cancel()
+        runtime['voice'].stop(); runtime['automations'].stop(); runtime['telemetry'].persist(); runtime['apns'].close()
 
 app=create_app(runtime['executor'], settings, device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'], second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime)
 app.add_middleware(PwaSessionMiddleware, sessions=runtime['pwa_sessions'], device_registry=runtime['device_registry'], cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)))
+app.add_middleware(WorkflowBudgetUiMiddleware)
 pwa_runtime = dict(runtime)
 pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'])
 app.include_router(iphone_pwa_router(pwa_runtime, settings))
@@ -52,5 +51,7 @@ app.include_router(pwa_security_router(runtime))
 app.include_router(cloud_security_router(runtime))
 app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(owner_product_router(runtime))
+app.include_router(workflow_budget_router(runtime))
+app.include_router(workflow_budget_ui_router())
 app.include_router(capability_console_router(runtime))
 app.router.lifespan_context=lifespan
