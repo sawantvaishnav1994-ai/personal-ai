@@ -28,7 +28,7 @@ def test_cross_operator_uses_existing_desktop_surface_for_file(tmp_path):
 
 
 def test_missing_authority_defaults_to_deny(tmp_path):
-    txs=OperatorTransactionStore(tmp_path/'tx.sqlite3');binding=OperatorBinding('owner','device','session',0);txs.propose('tx',binding,goal='x',action_plan={'steps':[]})
+    txs=OperatorTransactionStore(tmp_path/'tx.sqlite3');binding=OperatorBinding('owner','device','session',0);txs.propose('tx',binding,goal='x',action_plan={'steps':[{'sequence':0,'kind':'copy'}]})
     store=OperatorRecoveryStore(tmp_path/'r.sqlite3',txs);called=[]
     op=CrossOperatorCoordinator(store,binding,desktop_execute=lambda s:called.append(1))
     assert op.run_step('tx',step())['status']=='blocked_before_dispatch' and called==[]
