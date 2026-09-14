@@ -4,126 +4,100 @@ Baseline date: 2026-09-15
 
 ## W7 validated history
 
-| Batch | Exact implementation SHA | Focused/full evidence | Required workflows |
-| --- | --- | ---: | --- |
-| W7.1 Durable Operator Transaction Core | `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` | 471 full PASS | implementation + documentation gates complete |
-| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f9e1587fe5a68d3923f15d0425ef81715` | 85 focused PASS; 557 full PASS, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.3 Allowlists / Data-Safety Policies | `893db9efd3a0c3838c31d13eda0f9b04f3710ee6` | 45 focused PASS; 602 full PASS, 8 warnings; scratch 81 PASS non-release | implementation + documentation 6/6 PASS |
-| W7.4 Safe Browser Operator | `839cc9d55f73d0a88f8869a64cf11809ba7e9e3d` | **52 focused PASS; 654 full PASS, 8 warnings** | **implementation 6/6 PASS; documentation pending** |
+| Batch | Implementation SHA | Focused / full evidence | Required workflow gates |
+| --- | --- | --- | --- |
+| W7.1 Durable Operator Transaction Core | `fe52b6ff...` | 471 full PASS | implementation + documentation complete |
+| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f...` | 85 focused; 557 full, 8 warnings | implementation + documentation 6/6 PASS |
+| W7.3 Allowlists / Data-Safety Policies | `893db9ef...` | 45 focused; 602 full, 8 warnings; scratch 81 non-release | implementation + documentation 6/6 PASS |
+| W7.4 Safe Browser Operator | `839cc9d5...` | 52 focused; 654 full, 8 warnings | implementation + documentation 6/6 PASS |
+| W7.5 Safe Desktop / File Operator | `f794373c68b07aae23d7c4cb258f02a765100bb5` | **55 focused PASS; 709 full PASS, 8 warnings** | implementation 6/6 PASS; documentation pending |
 
-## W7.3 final evidence
+## W7.5 focused coverage
 
-Final documentation SHA: `72408596db75b3e07b031ddc9a86502a0177902e`.
+### Architecture / authority
+- reuses W7.1 durable transaction, audit, cancellation and restart recovery;
+- reuses W7.2 owner/device/session/security-epoch observation binding and TTL;
+- reuses W7.3 default-deny application/path/clipboard policy and temporary permit store;
+- reuses W7.4 verification/recovery/no-blind-retry conventions;
+- side effects are exposed only through a trusted-context, external-side-effect tool requiring recent reauthentication and the existing Trusted Action approval path.
 
-Documentation workflows: CI #744 / `34881398264`, Reliability and Security #208 / `34881398407`, P3 #176 / `34881398376`, Android #207 / `34881398344`, Package #207 / `34881398448`, iOS #189 / `34881398242` — **6/6 PASS**.
+### Windows application / window safety
+- unsupported platforms fail closed rather than fabricate success;
+- absolute executable path required; canonical executable identity and SHA-256 verified;
+- executable replacement/publisher-version mismatch policy behavior covered;
+- arguments remain separate; shell execution/PATH resolution/elevation escape prohibited;
+- launch/focus/window state verified; foreground window rechecked immediately before input;
+- stale/hidden/disabled/changed controls rejected;
+- unsaved-work close requires explicit approval;
+- UIA/accessibility/control identity is preferred; verified visual coordinate fallback is restricted to click.
 
-W7.3 final classification: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
+### Filesystem safety
+- metadata, bounded text read, create file/dir, copy, move, rename, list, checksum, trash and permanent-delete contracts;
+- canonical approved roots and source/destination checks;
+- traversal, symlink swap, reparse/junction, unexpected mount, UNC/network default, ADS, reserved-name and hard-link mutation protections;
+- destination collision/no-blind-overwrite;
+- temporary-file confinement and atomic replacement where possible;
+- file-size, disk-space, MIME/signature and checksum verification;
+- structured/binary documents rejected from direct model-text interpretation;
+- trash retains recovery metadata; permanent delete truthfully reports irreversible/no rollback.
 
-## W7.4 focused coverage
+### Input / clipboard safety
+- verified foreground target required for keyboard/mouse input;
+- no background injection, hooks or keylogging;
+- bounded click/scroll and allowlisted shortcuts;
+- Emergency Stop immediately before input and held-input cleanup on failure/cancellation;
+- clipboard read/write are separate, on-demand capabilities;
+- sequence/change detection, size bound, secret/private-key/token classification, exact destination binding and no raw clipboard content in normal audit;
+- secret external transfer is blocked unless the exact W7.3 policy allows its classification/destination.
 
-### Authority and policy composition
+### Recovery / adversarial coverage
+- process-name spoofing and executable replacement;
+- malicious/unsafe launch arguments and shell capability absence;
+- window/control replacement and coordinate-fallback rejection;
+- file path attacks, hard links, collision, source/destination replacement and checksum failures;
+- clipboard race/secret/oversize/unauthorized destination;
+- owner/device/session/security-epoch and policy-change binding;
+- observation expiry, Emergency Stop, cancellation, duplicate dispatch and restart recovery;
+- unknown consequential outcomes become `recovery_review_required` and are not blindly retried;
+- evidence/audit redaction and no background monitoring.
 
-- reuses W7.1 durable transaction/recovery authority;
-- reuses W7.2 bounded browser observation, stable target identity and sanitized evidence contract;
-- reuses W7.3 default-deny policy gateway and one-use permit storage;
-- policy is re-evaluated against the exact fresh pre-dispatch observation and expected policy digest;
-- one-use permit is issued/consumed only after fresh-observation binding;
-- owner/device/session/security-epoch mismatch remains fail-closed.
+## Exact implementation validation
 
-### DOM/accessibility/visual targeting
+Implementation SHA: `f794373c68b07aae23d7c4cb258f02a765100bb5`.
 
-- exact DOM locator is first priority;
-- accessibility role/name target is second priority;
-- coordinate fallback is third priority, click-only, and requires explicit verified visual target identity;
-- detached, hidden, covered, disabled, sensitive and materially moved targets are rejected;
-- same-label/changed-target and stale target identity cases are covered.
-
-### Navigation security
-
-- approved URL navigation, back/forward/refresh and bounded tab operations;
-- origin verification before/after navigation;
-- HTTPS downgrade rejection;
-- cross-origin redirect rejection unless W7.3 policy explicitly permits final destination;
-- credential-bearing URL rejection;
-- localhost/private-IP default deny through W7.3;
-- browser-context/tab substitution detection;
-- iframe-origin digest change detection;
-- stale-page/context rejection.
-
-### Prompt-injection and challenge resistance
-
-- visible webpage text is explicitly labelled `untrusted_web_content`;
-- malicious text cannot modify policy/approval state;
-- prompt-injection indicators are surfaced as metadata only;
-- CAPTCHA, MFA, authenticator and security-challenge states pause with `owner_intervention_required` rather than bypassing controls.
-
-### Form/secret/upload/download safety
-
-- password/OTP/payment/secret-like fields are rejected for automation;
-- form submission is separately classified as consequential;
-- email/message send, purchase, financial transfer, public publish, share, deletion, account/security/permission changes and legal acceptance require explicit operation class + applicable policy + recent reauthentication + owner approval or remain blocked;
-- upload path/domain permission plus MIME/signature/size checks occur before dispatch;
-- unsafe download traversal/absolute/Windows-drive/backslash/colon/reserved filenames are rejected;
-- duplicate download names do not overwrite existing files;
-- final download is confined to canonical owner-approved root and is MIME/signature/size validated;
-- download checksum and size are retained as bounded evidence.
-
-### Verification/recovery
-
-- fresh policy-evaluation observation;
-- fresh pre-dispatch observation;
-- exact context/target comparison before input;
-- Emergency Stop immediately before dispatch;
-- postcondition observation/readback after action;
-- navigation, tab, upload, download and DOM/accessibility postconditions checked;
-- duplicate dispatch and uncertain consequential outcomes become `recovery_review_required`;
-- process/browser restart recovery returns safe recovery review and does not blind-retry;
-- cancellation and bounded wait/timeout paths are covered.
-
-### Privacy / no background monitoring
-
-- no cookie collection;
-- no local/session storage collection;
-- no credential/token extraction;
-- no background monitoring thread or timer;
-- observations remain on-demand and use W7.2 sanitized evidence.
-
-## Counts and release evidence
-
-Focused committed W7.4 test count: **52 PASS**.
-
-Exact implementation SHA `839cc9d55f73d0a88f8869a64cf11809ba7e9e3d`:
-- `pip check`: PASS;
-- compileall: PASS;
-- `pytest -q`: **654 passed, 8 warnings**;
-- standalone JavaScript syntax: N/A because no standalone `.js` file changed;
-- migration/schema: no W7.4 storage migration; W7.3 schema **73** retained; restart recovery regression PASS.
-
-## Exact-head workflows — W7.4 implementation
+- Focused W7.5 tests: **55 PASS**.
+- `pytest -q`: **709 passed, 8 warnings**.
+- `pip check`: PASS.
+- `compileall`: PASS.
+- standalone JavaScript syntax: N/A — no standalone JS changed.
+- schema/migration: no W7.5 migration; schema remains **73**; W7.1 transaction and W7.3 policy stores are reused.
+- automated Windows result: contract tests PASS and `windows-latest` Package Validation installer build PASS; not real-world Windows operator verification.
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #780 | `34884812596` | PASS |
-| Reliability and Security | #212 | `34884812653` | PASS |
-| P3 iPhone PWA | #180 | `34884812640` | PASS |
-| Android Instrumentation | #211 | `34884812752` | PASS |
-| Package Validation | #211 | `34884812643` | PASS |
-| iOS Companion | #193 | `34884812616` | PASS |
+| CI | #790 | `34889547472` | PASS |
+| Reliability and Security | #214 | `34889547513` | PASS |
+| P3 iPhone PWA | #182 | `34889547586` | PASS |
+| Android Instrumentation | #213 | `34889547464` | PASS |
+| Package Validation | #213 | `34889547577` | PASS |
+| iOS Companion | #195 | `34889547565` | PASS |
 
 Implementation gate: **6/6 PASS**.
 
-## Security defects found and repaired during W7.4
+## Security defects found and repaired
 
-1. One-use permit initially preceded fresh pre-dispatch observation; fixed so permit binding is exact and fresh.
-2. Typed W7.3 `NormalizedOrigin` was initially handled as a mapping in browser verification; corrected at the typed contract.
-3. Download filename sanitization initially missed Windows drive syntax under non-Windows CI; fixed with explicit cross-platform rejection.
-4. Recovered browser transactions initially reached a raw invalid-state error; now they return `recovery_review_required` immediately with no redispatch.
-5. Prompt injection, overlay/clickjacking, detached/replaced target, tab/frame substitution, HTTPS downgrade, credential/private-network destination, challenge, upload/download confinement and visual fallback are covered by explicit regressions.
+1. Symlink identity could be lost by canonical resolution before adapter checks; raw path components are now checked before resolution.
+2. Trash/delete initially conflicted with a test expectation; the stronger W7.3 recent-reauth rule was preserved and the test/contract corrected.
+3. Composite file operations initially interleaved policy evaluation and permit consumption, changing policy-use counters mid-check; all policy checks are completed before permit consumption.
+4. Hard-linked mutation targets now fail closed for owner review.
+5. Type/select require verified control identity; raw coordinate fallback is click-only and needs explicit verified visual evidence.
+6. Clipboard observations persist hashes/classification/sequence, not raw secret content; sequence changes fail closed.
+7. Interrupted/duplicate consequential actions enter recovery review instead of blind redispatch.
 
-## Evidence boundaries
+## Current classification / boundary
 
-W7.4 is currently **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
+W7.5: **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
 
-It is not physical-device verified, production verified, live OAuth verified, or complete W7. Production, Railway and the existing iPhone qualification service were unchanged. W6 live OAuth remains blocked/deferred pending future owner approval for isolated paid infrastructure.
+Not claimed: real-world Windows verified, physical-device verified, production verified, live OAuth verified, or complete W7. Production, Railway and the existing iPhone qualification service remain unchanged.
 
-W7.5 Desktop and File Operator may begin only from the final validated W7.4 documentation SHA after the second 6/6 workflow gate.
+Exact W7.6 dependency: begin only from the final W7.5 documentation SHA after documentation-head 6/6 PASS.

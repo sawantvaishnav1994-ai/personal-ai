@@ -2,54 +2,49 @@
 
 Baseline date: 2026-09-15
 
-Statuses distinguish automated software evidence from live-provider, physical-device and production evidence.
+Statuses distinguish automated software evidence from real-world Windows, physical-device, live-provider and production evidence.
 
-| Capability | Status | Automated evidence | Live/production evidence | Exact SHA | Next action |
-| --- | --- | --- | --- | --- | --- |
-| Home / AI Core | QUALIFICATION | UI/PWA workflows green | physical UX incomplete | deployed UI head | preserve frozen design; physical P3 |
-| Trusted devices/sessions | PARTIAL | binding/revocation tests | physical multi-browser incomplete | current branch | physical trust qualification |
-| Conversation continuity | PARTIAL | automated tests | main runtime non-durable | current branch | production restart proof |
-| Memory / Knowledge | PARTIAL | W4 + W6 provenance tests | durable/live-source qualification pending | current branch | production/live qualification |
-| Trusted Action Core | PARTIAL | durable binding/replay/epoch/reauth tests; W7.1-W7.4 reuse it | live operational proof partial | W5/W7.4 | W7.5-W7.6 + physical qualification |
-| Google connector software scope | AUTOMATED VALIDATED / LIVE PENDING | W6 connector/OAuth/Drive/Sheets/Gmail software gates green | real Google account qualification deferred | W6 | resume only when isolated paid infrastructure is approved |
-| Isolated connector qualification environment | BLOCKED | deployment requirements/code guards prepared | owner-deferred paid infrastructure | current | OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED |
-| W7.1 Durable Operator Transaction Core | AUTOMATED VALIDATED | durable transaction/action/audit authority; idempotency, recovery, cancellation, deadline, Emergency Stop | physical operator qualification not performed | `fe52b6ff...` | frozen automated baseline |
-| W7.2 Observation/Application Context Safety | AUTOMATED VALIDATED | 85 focused PASS; 557 full PASS; implementation + documentation gates 6/6 | physical desktop/browser and production qualification not performed | `2a05e1da...` docs head | frozen automated baseline |
-| W7.3 Allowlists and Data-Safety Policies | AUTOMATED VALIDATED | 45 focused PASS; 602 full PASS, 8 warnings; implementation + documentation gates 6/6; supplementary scratch 81 PASS non-release | not physical-device, production or live-OAuth verified | `72408596...` docs head | frozen automated baseline |
-| W7.3 Policy Gateway | AUTOMATED VALIDATED | authoritative default-deny application/domain/path/clipboard/data gateway; stable reasons; policy digest; one-use permit; Emergency Stop/security epoch/recovery | live operation not qualified | `72408596...` | frozen policy authority for W7.4+ |
-| W7.4 Safe Browser Operator | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | **52 focused PASS; 654 full PASS, 8 warnings; implementation workflows 6/6 PASS** | browser physical/production qualification not performed | `839cc9d5...` | documentation-head 6/6, then freeze W7.4 |
-| W7.4 DOM/Accessibility/Visual Browser Safety | IMPLEMENTATION-HEAD AUTOMATED VALIDATED | DOM first; accessibility second; verified click-only coordinate fallback; stable target/context binding; redirect/tab/frame/challenge protections; bounded upload/download verification; recovery review/no blind retry | real-site/physical-browser qualification pending | `839cc9d5...` | preserve for W7.5; complete docs gate |
-| Computer operator overall | PARTIAL | W7.1 transactions + W7.2 observation + W7.3 policy + W7.4 browser execution automated evidence | W7.5-W7.6 and physical safe-operation evidence pending | `839cc9d5...` | W7.5 only after W7.4 docs 6/6 |
-| Provider abstraction | PARTIAL | router/dialogue tests | production failover qualification pending | current branch | W8 after W7 |
-| Backup/recovery | PARTIAL | isolated encrypted restore workflow | production durable restore absent | current branch | production volume gate |
-| Production durable storage | BLOCKED | fail-closed hosted storage guard exists | main runtime lacks approved durable volume | deployed head | attach only at approved production gate |
-| Windows / Android / iOS distribution | QUALIFICATION/BLOCKED | package/mobile workflows green | signed/physical evidence incomplete | current branch | signing + physical qualification |
-| Physical P3 | BLOCKED | automated P3 green | mandatory real-device evidence incomplete | current branch | execute physical protocol |
+| Capability | Status | Automated evidence | Remaining boundary | Exact SHA / next |
+| --- | --- | --- | --- | --- |
+| Home / AI Core | QUALIFICATION | UI/PWA workflows green | physical UX incomplete | frozen design |
+| Trusted Action Core | PARTIAL | durable binding/replay/epoch/reauth; reused by W7.1-W7.5 | live operational proof partial | preserve authority |
+| W7.1 Durable Operator Transaction Core | AUTOMATED VALIDATED | durable transaction/action/audit, cancellation, recovery, Emergency Stop | physical qualification pending | frozen |
+| W7.2 Observation / Sensitive Evidence | AUTOMATED VALIDATED | 85 focused; 557 full | physical desktop/browser proof pending | `2a05e1da...` docs |
+| W7.3 Allowlists / Data-Safety Policies | AUTOMATED VALIDATED | 45 focused; 602 full; implementation + docs 6/6 | physical policy qualification pending | `72408596...` docs |
+| W7.4 Safe Browser Operator | AUTOMATED VALIDATED | 52 focused; 654 full; implementation + docs 6/6 | real-site/physical-browser proof pending | `745952cb...` docs |
+| W7.5 Safe Desktop and File Operator | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | **55 focused PASS; 709 full PASS, 8 warnings; implementation workflows 6/6 PASS** | real-world Windows/physical/production qualification pending | implementation `f794373c...` |
+| Computer operator overall | PARTIAL | W7.1-W7.5 automated authorities integrated | W7.6 + physical/production qualification remain | W7.6 after W7.5 docs gate |
+| Google connector software scope | AUTOMATED VALIDATED / LIVE PENDING | W6 software gates green | real Google account qualification owner-deferred with paid isolated infrastructure | preserve blocker |
+| Production durable storage | BLOCKED | fail-closed hosted guard exists | approved production volume absent | future production gate |
+| Physical P3 | BLOCKED | automated P3 green | mandatory real-device evidence incomplete | physical protocol |
 
-## W7.3 frozen evidence
+## W7.5 implementation evidence
 
-- Baseline: `2a05e1da4777cdb2393759bd650b264735b1ec97`.
-- Implementation: `893db9efd3a0c3838c31d13eda0f9b04f3710ee6`.
-- Final documentation: `72408596db75b3e07b031ddc9a86502a0177902e`.
-- Schema: **73**, additive/restart-safe from 72.
-- Focused: **45 PASS**; supplementary scratch **81 PASS, non-release only**; full: **602 passed, 8 warnings**.
-- Implementation and documentation workflow gates: **6/6 PASS each**.
-- Final W7.3 classification: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
+- W7.4 baseline: `745952cbdc0ab25b93db6dbb3e5324b48fe7837b`.
+- W7.5 implementation: `f794373c68b07aae23d7c4cb258f02a765100bb5`.
+- Exact implementation files: `desktop/file_operator.py`, `desktop/input_clipboard.py`, `desktop/platform_adapter.py`, `desktop/safe_desktop_operator.py`, `tools/desktop_file.py`, `tools/builtins.py`, `tests/test_w75_file_operator.py`, `tests/test_w75_release_gate.py`, `tests/test_w75_safe_desktop_operator.py`, `tests/test_w75_tool_integration.py`.
+- No W7.5 database migration; W7.3 policy schema remains **73** and W7.1 transaction storage is reused.
+- Focused committed W7.5 tests: **55 PASS**.
+- Full repository: **709 passed, 8 warnings**; `pip check` PASS; compileall PASS; no standalone JavaScript changed.
+- Automated Windows evidence: Windows adapter/identity contracts are covered by focused tests and Package Validation built the `windows-latest` installer successfully. This is **not** real-world Windows operator verification.
+- Implementation workflows: CI #790 / `34889547472`; Reliability and Security #214 / `34889547513`; P3 #182 / `34889547586`; Android #213 / `34889547464`; Package #213 / `34889547577`; iOS #195 / `34889547565` — **6/6 PASS**.
 
-## W7.4 implementation evidence
+## W7.5 security contract
 
-- Baseline: `72408596db75b3e07b031ddc9a86502a0177902e`.
-- Implementation: `839cc9d55f73d0a88f8869a64cf11809ba7e9e3d`.
-- Exact changed files: `browser/safe_operator.py`, `tests/test_w74_browser_security_edges.py`, `tests/test_w74_release_gate.py`, `tests/test_w74_safe_browser_operator.py`, `tests/test_w74_target_fallbacks.py`.
-- No schema migration; W7.3 policy schema remains **73**.
-- Focused committed W7.4 tests: **52 PASS**.
-- Full repository: **654 passed, 8 warnings**; `pip check` PASS; compileall PASS; standalone JS gate N/A.
-- Implementation exact-head workflows: CI #780 / `34884812596`; Reliability and Security #212 / `34884812653`; P3 #180 / `34884812640`; Android #211 / `34884812752`; Package #211 / `34884812643`; iOS #193 / `34884812616` — **6/6 PASS**.
+W7.5 composes W7.1 transaction/recovery authority, W7.2 fresh observation/evidence binding, W7.3 default-deny application/path/clipboard policy, W7.4 no-blind-retry verification conventions, and the Trusted Action Core. It does not expose a generic shell or unrestricted filesystem.
 
-W7.4 uses one authoritative browser execution path composed from W7.1 transaction authority, W7.2 observation/evidence safety and W7.3 default-deny policy. Web content is untrusted. Sensitive/challenge fields are owner-only, strong side effects require explicit operation class + policy + reauthentication + approval, and unknown consequential outcomes require recovery review without blind retry.
+Application launch requires an absolute canonical executable and verified identity/hash; arguments remain separate and shell execution is prohibited. Desktop input requires a fresh verified foreground window/control; coordinate fallback is click-only and must be backed by verified W7.2-style visual identity. Clipboard is on-demand only, bounded, sequence-checked, classification-aware and raw secret content is excluded from durable audit.
 
-W7.4 currently classifies as **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
+File operations are separated into bounded capabilities. Paths are canonical-root checked and hardened against traversal, symlinks, reparse/junctions, unexpected mounts, UNC/network defaults, ADS/reserved names and hard-link mutation risk. Copy/create use temporary confinement/checksums/no-blind-overwrite; binary/structured documents are rejected from direct model-text reading. Trash is a compensating action; permanent deletion is irreversible and retains W7.3 high-risk reauthentication/approval requirements.
 
-Not claimed: physical-device verified, production verified, live OAuth verified, or complete W7. Production, Railway and the existing iPhone qualification service are unchanged. W6 live OAuth remains blocked/deferred pending future owner approval for isolated paid infrastructure.
+Security defects repaired during W7.5 include symlink identity loss before canonical resolution, preservation of W7.3 delete reauthentication, composite policy snapshot/permit ordering, hard-link mutation checks, strict control/visual-target identity, clipboard race/redaction handling and restart/duplicate-dispatch recovery.
 
-W7.5 may begin only from the final W7.4 documentation SHA after its independent six-workflow gate passes.
+## Boundaries
+
+W7.5 does not enable unrestricted Command Prompt/PowerShell, arbitrary shell commands, elevation/UAC bypass, registry/service/driver modification, antivirus/firewall disabling, credential/cookie extraction, shutdown/restart, software installation, arbitrary process killing, covert monitoring or unrestricted filesystem access.
+
+Production, Railway and the existing iPhone qualification service are unchanged. W6 live OAuth remains blocked/deferred by owner-approved paid-infrastructure deferral.
+
+Current truthful W7.5 classification: **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
+
+W7.6 may begin only from the final W7.5 documentation SHA after that exact documentation head independently passes all six required workflows.

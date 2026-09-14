@@ -4,49 +4,49 @@ Baseline date: 2026-09-15
 
 | Priority | Workstream | Item | Current status | Why not complete | Next bounded action |
 | --- | --- | --- | --- | --- | --- |
-| P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | main runtime still lacks approved persistent `/data` | attach only at approved production gate; restart/redeploy/backup/restore proof |
-| P0 | W3/W12 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute exact physical protocol |
-| P1 | W4 | Real OCR/provider qualification | PARTIAL | bounded OCR contract exists; real provider/docs not qualified | qualify approved OCR path |
-| P1 | W5 | Workflow production durability | PARTIAL | automated validated; main production volume absent | durable production operational proof |
-| P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED | owner postponed paid isolated infrastructure | preserve checkpoint and resume only after future owner approval |
-| P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real account/consent deliberately not connected without isolated durable service | execute prepared package only after owner-approved service exists |
-| P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation exact-head validation complete | frozen automated baseline |
-| P1 | W7.2 | Observation/application context + sensitive evidence | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation automated gates complete | frozen automated baseline; physical qualification remains separate |
-| P1 | W7.3 | Allowlists and data-safety policies | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation exact-head 6/6; final docs `72408596...` | frozen automated policy baseline |
-| P1 | W7.3 | Physical application/domain/path/clipboard qualification | QUALIFICATION PENDING | automated policy evidence is not physical Windows/browser/filesystem proof | later physical qualification; do not misclassify automated evidence |
-| P1 | W7.4 | Safe Browser Operator | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `839cc9d5...`; 52 focused PASS; 654 full PASS, 8 warnings; implementation workflows 6/6 PASS | complete documentation-only exact-head 6/6, then freeze W7.4 |
-| P1 | W7.4 | Physical/real-site browser operator qualification | QUALIFICATION PENDING | automated DOM/accessibility/visual fallback and policy evidence is not real-site/physical-browser proof | later physical qualification; preserve no-bypass boundaries |
-| P1 | W7.5 | Desktop and File Operator | BLOCKED ON W7.4 DOC GATE | must start from final frozen W7.4 documentation SHA and reuse W7.1-W7.4 authorities | begin only after W7.4 documentation 6/6 |
-| P1 | W7.6 | Verification and recovery | PARTIAL | W7.1-W7.4 foundations validated at software level; full end-to-end desktop/file recovery remains | complete after W7.5 |
-| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | begin after W7 automated work |
-| P1 | W8 | Self-hosted private endpoint | BLOCKED | no approved GPU host | later infrastructure prerequisite |
-| P1 | W9 | Governed proactivity | PARTIAL | engine exists | quiet hours/frequency/why/suggestion-vs-action controls after W8 |
-| P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | harden unsigned artifacts; sign when prerequisites exist |
-| P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, W7.5-W7.6, production/physical/signing gates remain | continue independent engineering; no merge/promotion yet |
+| P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | approved production volume absent | attach only at future approved production gate |
+| P0 | W3/W12 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute physical protocol later |
+| P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED | owner postponed paid isolated infrastructure | preserve checkpoint |
+| P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real account/consent deliberately not connected | resume only after owner approval |
+| P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation gates complete | frozen |
+| P1 | W7.2 | Observation/application context + sensitive evidence | RESOLVED FOR AUTOMATED SCOPE | automated gates complete | frozen; physical qualification separate |
+| P1 | W7.3 | Allowlists and data-safety policies | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
+| P1 | W7.4 | Safe Browser Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6; final docs `745952cb...` | frozen |
+| P1 | W7.4 | Physical/real-site browser qualification | QUALIFICATION PENDING | automated evidence is not real-site/physical proof | later physical qualification |
+| P1 | W7.5 | Safe Desktop and File Operator | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `f794373c...`; 55 focused PASS; 709 full PASS, 8 warnings; implementation workflows 6/6 | complete docs-only 6/6, then freeze |
+| P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows adapter contracts and Windows packaging are automated evidence only | later real-device Windows qualification |
+| P1 | W7.6 | Verification and recovery | PARTIAL / NEXT | W7.1-W7.5 provide durable foundations; final cross-operator recovery qualification remains | begin only after W7.5 docs 6/6 |
+| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | after W7 automated scope |
+| P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | future signing gate |
+| P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, W7.6, production/physical/signing gates remain | no merge/promotion yet |
 
-## W7.3 frozen evidence
+## W7.5 exact implementation evidence
 
-- Baseline: `2a05e1da4777cdb2393759bd650b264735b1ec97`.
-- Implementation: `893db9efd3a0c3838c31d13eda0f9b04f3710ee6`.
-- Final documentation: `72408596db75b3e07b031ddc9a86502a0177902e`.
-- Schema **73**; focused **45 PASS**; supplementary scratch **81 PASS non-release**; full **602 passed, 8 warnings**.
-- Implementation workflows 6/6 and documentation workflows 6/6.
-- Final W7.3 classification: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
+- Baseline: `745952cbdc0ab25b93db6dbb3e5324b48fe7837b`.
+- Implementation: `f794373c68b07aae23d7c4cb258f02a765100bb5`.
+- Exact changed files: `desktop/file_operator.py`, `desktop/input_clipboard.py`, `desktop/platform_adapter.py`, `desktop/safe_desktop_operator.py`, `tools/desktop_file.py`, `tools/builtins.py`, `tests/test_w75_file_operator.py`, `tests/test_w75_release_gate.py`, `tests/test_w75_safe_desktop_operator.py`, `tests/test_w75_tool_integration.py`.
+- No W7.5 schema migration; policy schema remains **73** and W7.1 transaction storage is reused.
+- Focused W7.5: **55 PASS**.
+- Full repository: **709 passed, 8 warnings**; `pip check` PASS; compileall PASS; JS N/A.
+- Automated Windows evidence: adapter/security contracts covered in focused tests; `windows-latest` Package Validation installer build PASS. **Not real-world Windows verified**.
+- Implementation workflows: CI #790 / `34889547472`, Reliability/Security #214 / `34889547513`, P3 #182 / `34889547586`, Android #213 / `34889547464`, Package #213 / `34889547577`, iOS #195 / `34889547565` — **6/6 PASS**.
 
-## W7.4 exact implementation evidence
+## W7.5 resolved automated-scope capabilities
 
-- Baseline: `72408596db75b3e07b031ddc9a86502a0177902e`.
-- Implementation: `839cc9d55f73d0a88f8869a64cf11809ba7e9e3d`.
-- Exact changed files: `browser/safe_operator.py`, `tests/test_w74_browser_security_edges.py`, `tests/test_w74_release_gate.py`, `tests/test_w74_safe_browser_operator.py`, `tests/test_w74_target_fallbacks.py`.
-- No storage migration; schema remains **73**.
-- Focused W7.4: **52 PASS**.
-- Full repository CI: **654 passed, 8 warnings**; `pip check` PASS; compileall PASS; JS N/A.
-- Exact implementation workflows: CI #780 / `34884812596`, Reliability/Security #212 / `34884812653`, P3 #180 / `34884812640`, Android #211 / `34884812752`, Package #211 / `34884812643`, iOS #193 / `34884812616` — **6/6 PASS**.
+- default-deny application/path/clipboard policy is mandatory;
+- absolute/canonical executable identity and separate argument validation; no `shell=True`, unrestricted shell, elevation or PATH execution;
+- verified foreground/window/control identity; visual coordinate fallback limited to verified click;
+- bounded file roots and separate read/write/copy/move/rename/trash/delete operations;
+- traversal/symlink/reparse/mount/UNC/ADS/reserved-name/hard-link defenses;
+- checksum/MIME/size/disk-space/no-overwrite/temporary confinement checks;
+- clipboard read/write separation, bounded content, sequence race detection and secret-safe audit;
+- Emergency Stop/cancellation cleanup and restart/unknown-outcome recovery review;
+- truthful rollback classes: reversible, compensating action, manual recovery, irreversible.
 
-W7.4 security repairs include fresh-observation permit binding, typed origin verification, cross-platform unsafe download-name rejection, restart recovery/no-blind-retry handling, prompt-injection untrusted-content labeling, challenge owner-intervention handling, stable target/overlay/tab/frame checks, secret-field blocking, upload/download confinement, and restricted verified coordinate fallback.
+## Remaining boundaries
 
-Production, Railway and the existing iPhone qualification service remain unchanged. W6 live OAuth remains blocked/deferred under the owner-approved paid-infrastructure decision.
+W7.5 does not qualify unrestricted shell, admin elevation, UAC bypass, registry/service/driver/security modification, shutdown/restart, software installation, arbitrary process killing, credential/cookie extraction, covert monitoring or unrestricted filesystem access. Those remain blocked.
 
-Still not: physical-device verified, production verified, live OAuth verified, or complete W7.
+Production, Railway and the existing iPhone qualification service are unchanged. W6 live OAuth remains blocked/deferred by the owner-approved paid-infrastructure decision.
 
-Exact W7.5 dependency: the W7.4 documentation-only SHA must independently pass all six required workflows before W7.5 begins.
+Exact W7.6 dependency: final W7.5 documentation SHA must pass all six documentation workflows before W7.6 begins.
