@@ -36,6 +36,8 @@ class ScreenUnderstanding:
     @staticmethod
     def _clip_redaction(image, box):
         try:
+            if bool(box.get('full_screen')):
+                return (0, 0, image.width, image.height)
             x = max(0, int(box.get('x', 0))); y = max(0, int(box.get('y', 0)))
             w = max(0, int(box.get('width', 0))); h = max(0, int(box.get('height', 0)))
             right = min(image.width, x + w); bottom = min(image.height, y + h)
