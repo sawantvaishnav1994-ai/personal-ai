@@ -27,9 +27,11 @@ def digest(value: Any) -> str:
 
 
 def sanitize_download_filename(name: str) -> str:
-    value = str(name or '').strip().replace('\\','/')
-    base = value.rsplit('/',1)[-1].strip().strip('.')
-    if not base or base in {'.','..'} or '..' in value.split('/') or '/' in base or ':' in base or '\x00' in base:
+    raw = str(name or '').strip()
+    if not raw or '\x00' in raw or '/' in raw or '\\' in raw or ':' in raw or re.match(r'^[A-Za-z]:', raw):
+        raise ValueError('unsafe_download_name')
+    base = raw.strip().strip('.')
+    if not base or base in {'.','..'} or base.startswith('..'):
         raise ValueError('unsafe_download_name')
     if len(base) > 180: base = base[:180]
     if base.upper().split('.')[0] in {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}:
