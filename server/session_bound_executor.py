@@ -45,6 +45,10 @@ class SessionBoundExecutor:
         current = getattr(approvals, 'current_security_epoch', None)
         return int(current()) if callable(current) else 0
 
+    def _approval_context(self, approval_id: str) -> dict:
+        lookup = getattr(self._executor, 'approval_context', None)
+        return dict(lookup(approval_id) or {}) if callable(lookup) else {}
+
     def _operator_context(self, context, metadata):
         return OperatorRequestContext(
             owner_id=str(metadata.get('owner_id') or 'owner'),
@@ -82,7 +86,7 @@ class SessionBoundExecutor:
     def approve(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        approval_context = self._executor.approval_context(approval_id) or {}
+        approval_context = self._approval_context(approval_id)
         metadata = dict(kwargs)
         metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
         metadata.setdefault('owner_id', 'owner')
@@ -99,7 +103,7 @@ class SessionBoundExecutor:
     def reject(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        approval_context = self._executor.approval_context(approval_id) or {}
+        approval_context = self._approval_context(approval_id)
         metadata = dict(kwargs)
         metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
         metadata.setdefault('owner_id', 'owner')
