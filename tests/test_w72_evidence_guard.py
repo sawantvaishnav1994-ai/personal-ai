@@ -8,6 +8,7 @@ from PIL import Image
 from desktop.evidence_geometry import COORDINATE_SPACE_VERSION
 from vision.screen_understanding import EvidenceGuardError, SanitizedEvidenceGuard
 
+# W7.2 exact-head qualification: guard fixtures follow the live provenance version.
 
 def _record():
     buffer = io.BytesIO(); Image.new('RGB', (3, 3), 'black').save(buffer, format='PNG'); raw = buffer.getvalue()
