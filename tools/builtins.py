@@ -4,6 +4,7 @@ from tools import (
     browser,
     computer,
     continuity,
+    desktop_file,
     documents,
     files,
     integrations,
@@ -35,6 +36,7 @@ def register_builtin_tools(
     integration_adapters=None,
 ):
     files.register(registry, settings)
+    desktop_file.register(registry, settings)
     integrations.register(registry, integration_adapters)
     google_read.register(registry, integration_adapters)
     google_write.register(registry, integration_adapters)
@@ -42,8 +44,6 @@ def register_builtin_tools(
     system.register(registry)
     memory_tools.register(registry, memory, second_brain=second_brain)
     documents.register(registry, settings)
-    # A cloud container has no owner's physical display. Advertising screenshot
-    # there lets a planner select an impossible X11 tool and leaks raw failures.
     if not bool(getattr(settings, 'hosted_runtime', False)):
         screen.register(registry, settings.data_dir)
     reminders.register(registry, memory)
