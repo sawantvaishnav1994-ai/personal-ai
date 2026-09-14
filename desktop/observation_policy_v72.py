@@ -20,11 +20,28 @@ class ObservationSafetyError(RuntimeError):
         super().__init__(message or self.code)
 
 
+def _evidence_meta(record: dict, key: str, default=None):
+    if key in record: return record.get(key)
+    return (record.get('sensitivity') or {}).get(key, default)
+
+
 def build_observation_record(*, binding, transaction_id: str, application: dict, screen: dict, browser: dict | None, reason: str, initiator: str) -> dict:
     now = float(screen.get('captured_at') or time.time())
     expires_at = float(screen.get('expires_at') or now)
     browser_safe = safe_browser_evidence(browser) if browser else {}
     app = dict(application or {})
+    evidence_meta = {
+        'redaction_count': int(screen.get('redaction_count') or 0),
+        'sensitive_region_count': int(browser_safe.get('sensitive_region_count') or 0),
+        'evidence_id': str(screen.get('evidence_id') or screen.get('observation_id') or ''),
+        'sanitized_checksum': str(screen.get('sanitized_checksum') or ''),
+        'redaction_status': str(screen.get('redaction_status') or ''),
+        'redaction_method': str(screen.get('redaction_method') or ''),
+        'coordinate_space_version': int(screen.get('coordinate_space_version') or 0),
+        'capture_source': str(screen.get('capture_source') or '')[:80],
+        'visual_evidence_unavailable': bool(screen.get('visual_evidence_unavailable')),
+        'retention_expires_at': float(screen.get('retention_expires_at') or expires_at),
+    }
     record = {
         'observation_id': str(screen.get('observation_id') or ''),
         'owner_id': binding.owner_id,
@@ -45,20 +62,13 @@ def build_observation_record(*, binding, transaction_id: str, application: dict,
         'expires_at': expires_at,
         'screenshot_evidence_ref': str(screen.get('screenshot_evidence_ref') or ''),
         'screen_fingerprint': str(screen.get('screen_fingerprint') or screen.get('screenshot_sha256') or ''),
-        'evidence_id': str(screen.get('evidence_id') or screen.get('observation_id') or ''),
-        'sanitized_checksum': str(screen.get('sanitized_checksum') or ''),
-        'redaction_status': str(screen.get('redaction_status') or ''),
-        'redaction_method': str(screen.get('redaction_method') or ''),
-        'coordinate_space_version': int(screen.get('coordinate_space_version') or 0),
-        'capture_source': str(screen.get('capture_source') or '')[:80],
-        'visual_evidence_unavailable': bool(screen.get('visual_evidence_unavailable')),
-        'retention_expires_at': float(screen.get('retention_expires_at') or expires_at),
+        **evidence_meta,
         'sanitized_dom_digest': str(browser_safe.get('dom_sha256') or ''),
         'accessibility_tree_digest': str(browser_safe.get('accessibility_sha256') or ''),
         'actionable_element_digest': str(browser_safe.get('actionable_digest') or ''),
         'frame_origins_digest': str(browser_safe.get('frame_origins_digest') or ''),
         'active_target_id': str(browser_safe.get('active_target_id') or ''),
-        'sensitivity': {'redaction_count': int(screen.get('redaction_count') or 0), 'sensitive_region_count': int(browser_safe.get('sensitive_region_count') or 0)},
+        'sensitivity': evidence_meta,
         'capture_reason': str(reason or '')[:120],
         'capture_initiator': str(initiator or '')[:120],
     }
@@ -72,8 +82,10 @@ def build_observation_record(*, binding, transaction_id: str, application: dict,
 
 
 def observation_context(record: dict) -> dict:
-    keys = ('application_identity','process_identity','window_identity','browser_context_identity','browser_tab_identity','browser_origin','normalized_url','sanitized_dom_digest','accessibility_tree_digest','actionable_element_digest','frame_origins_digest','redaction_status','coordinate_space_version')
-    return {key: record.get(key) for key in keys}
+    out = {key: record.get(key) for key in ('application_identity','process_identity','window_identity','browser_context_identity','browser_tab_identity','browser_origin','normalized_url','sanitized_dom_digest','accessibility_tree_digest','actionable_element_digest','frame_origins_digest')}
+    out['redaction_status'] = _evidence_meta(record, 'redaction_status', '')
+    out['coordinate_space_version'] = int(_evidence_meta(record, 'coordinate_space_version', 0) or 0)
+    return out
 
 
 def _safe_evidence_path(data_root: Path, ref: str) -> Path:
@@ -100,7 +112,7 @@ def bind_step_target(step: dict, *, browser_snapshot: dict | None, observation: 
         x,y=int(params['x']),int(params['y']); target=target_for_coordinates(browser_snapshot,x,y) if browser_snapshot else None
         if target:
             return {'mode':'browser_element','target_id':target['target_id'],'geometry_digest':target['geometry_digest'],'x':x,'y':y,'origin':observation.get('browser_origin') or '','tab_id':observation.get('browser_tab_identity') or ''}
-        if observation.get('visual_evidence_unavailable') or observation.get('redaction_status') != 'sanitized':
+        if bool(_evidence_meta(observation, 'visual_evidence_unavailable', False)) or _evidence_meta(observation, 'redaction_status', '') != 'sanitized':
             raise ObservationSafetyError('identity_unavailable', 'unavailable visual evidence cannot prove a coordinate target')
         return {'mode':'visual_region','target_id':canonical_digest({'app':observation.get('application_identity'),'window':observation.get('window_identity'),'x':x,'y':y}),'geometry_digest':screen_region_digest(data_root,observation['screenshot_evidence_ref'],x,y),'x':x,'y':y}
     if kind=='type_text':
@@ -129,7 +141,7 @@ def verify_material_context(*, expected: dict, current: dict, target_binding: di
         if not target or not target.get('actionable') or target.get('sensitive'): raise ObservationSafetyError('target_changed', 'the approved actionable target no longer exists')
         if target.get('geometry_digest')!=target_binding.get('geometry_digest'): raise ObservationSafetyError('target_changed', 'the approved target moved or changed geometry')
     elif mode=='visual_region':
-        if current.get('visual_evidence_unavailable') or current.get('redaction_status') != 'sanitized': raise ObservationSafetyError('verification_failed', 'current visual evidence cannot verify a coordinate target')
+        if bool(_evidence_meta(current, 'visual_evidence_unavailable', False)) or _evidence_meta(current, 'redaction_status', '') != 'sanitized': raise ObservationSafetyError('verification_failed', 'current visual evidence cannot verify a coordinate target')
         digest=screen_region_digest(data_root,current['screenshot_evidence_ref'],int(target_binding['x']),int(target_binding['y']))
         if digest!=target_binding.get('geometry_digest'): raise ObservationSafetyError('target_changed', 'the coordinate target region changed before dispatch')
     elif mode=='window':
