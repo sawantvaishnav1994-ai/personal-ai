@@ -3,6 +3,7 @@ from fastapi import APIRouter,Cookie,HTTPException
 from pydantic import BaseModel,Field
 from security.request_context import current_trusted_request
 from integrations.gateway import ConnectorError
+from server.connector_knowledge_api import connector_knowledge_router
 
 class OAuthStartBody(BaseModel):
     scopes:list[str]=Field(default_factory=list,max_length=30)
@@ -55,4 +56,5 @@ def connector_router(runtime):
         provider=providers.get(info['provider'])
         try:return oauth.unlink(info['provider'],provider=provider,connector_id=connector_id,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,attempt_provider_revocation=True)
         except Exception as exc:raise HTTPException(502,'Local access was revoked but provider confirmation could not be completed') from exc
+    router.include_router(connector_knowledge_router(runtime,auth))
     return router

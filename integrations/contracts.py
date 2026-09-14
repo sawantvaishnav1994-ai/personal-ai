@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Iterable
 
 SCHEMA_VERSION = 1
 HEALTH_STATES = {
     'healthy','disconnected','authentication_required','authentication_expired','insufficient_scope',
     'permission_denied','rate_limited','degraded','timeout','provider_unavailable','invalid_response',
-    'verification_failed','revocation_pending','disabled','not_configured','revoked',
+    'verification_failed','revocation_pending','disabled','not_configured','revoked','quota_exceeded',
 }
 RISK_ORDER = {'read_only':0,'reversible':1,'external_side_effect':2,'destructive':3,'critical':4,'prohibited':5}
 EFFECTS = {'read','write','consequential','destructive','prohibited'}
@@ -20,7 +19,6 @@ class RetryPolicy:
     max_delay_seconds: float = 4.0
     jitter: bool = True
     retry_statuses: tuple[int,...] = (429,500,502,503,504)
-
     def validate(self):
         if not 1 <= int(self.max_attempts) <= 10: raise ValueError('retry max_attempts must be 1..10')
         if not 0 <= float(self.base_delay_seconds) <= 30: raise ValueError('retry base delay is invalid')
@@ -32,7 +30,6 @@ class PaginationPolicy:
     cursor_field: str = 'nextPageToken'
     max_pages: int = 10
     max_items: int = 1000
-
     def validate(self):
         if not 1 <= int(self.max_pages) <= 100: raise ValueError('pagination max_pages must be 1..100')
         if not 1 <= int(self.max_items) <= 10000: raise ValueError('pagination max_items must be 1..10000')
@@ -43,7 +40,6 @@ class RateLimitPolicy:
     respects_retry_after: bool = True
     max_retry_after_seconds: int = 60
     requests_per_minute: int | None = None
-
     def validate(self):
         if not 1 <= int(self.max_retry_after_seconds) <= 3600: raise ValueError('max_retry_after_seconds is invalid')
         if self.requests_per_minute is not None and not 1 <= int(self.requests_per_minute) <= 100000: raise ValueError('requests_per_minute is invalid')
@@ -66,7 +62,6 @@ class ConnectorOperation:
     verification_supported: bool = False
     rollback_available: bool = False
     prohibited: bool = False
-
     def validate(self):
         if not self.name or '.' not in self.name: raise ValueError('operation name must be namespaced')
         if self.effect not in EFFECTS: raise ValueError(f'invalid operation effect: {self.effect}')
@@ -93,7 +88,10 @@ class ConnectorManifest:
     token_revocation_supported: bool = False
     healthcheck_operation: str | None = None
     configuration_requirements: tuple[str,...] = ()
-
+    read_only: bool = False
+    scope_reasons: tuple[tuple[str,str],...] = ()
+    content_limits: tuple[tuple[str,int],...] = ()
+    supported_content_types: tuple[str,...] = ()
     def validate(self):
         if self.schema_version != SCHEMA_VERSION: raise ValueError(f'unsupported connector schema version: {self.schema_version}')
         if not self.connector_id or not self.connector_id.replace('_','').replace('-','').isalnum(): raise ValueError('invalid connector id')
@@ -105,20 +103,24 @@ class ConnectorManifest:
             op.validate()
             if op.name in names: raise ValueError(f'duplicate connector operation: {op.name}')
             if not op.name.startswith(self.connector_id+'.'): raise ValueError('operation namespace must match connector id')
+            if self.read_only and op.effect != 'read': raise ValueError('read-only connector cannot declare write effects')
             names.add(op.name)
         if self.healthcheck_operation and self.healthcheck_operation not in names: raise ValueError('healthcheck operation is not declared')
         if set(self.required_oauth_scopes) & set(self.optional_oauth_scopes): raise ValueError('OAuth scope cannot be both required and optional')
         if set(self.allowed_data_classifications) & set(self.prohibited_data_classifications): raise ValueError('manifest data classification conflict')
+        declared=set(self.required_oauth_scopes)|set(self.optional_oauth_scopes)
+        reasons={scope for scope,_ in self.scope_reasons}
+        if reasons and reasons != declared: raise ValueError('every declared OAuth scope must have exactly one reason')
+        if any(not str(reason).strip() for _,reason in self.scope_reasons): raise ValueError('OAuth scope reason is required')
+        if any(int(v)<=0 for _,v in self.content_limits): raise ValueError('content limits must be positive')
         return self
-
     def operation(self, name: str) -> ConnectorOperation:
         for op in self.operations:
             if op.name == name: return op
         raise KeyError(name)
-
-    def safe_dict(self):
-        data=asdict(self)
-        return data
+    def safe_dict(self): return asdict(self)
+    def limit(self,name:str,default=None):
+        return dict(self.content_limits).get(name,default)
 
 class ConnectorManifestRegistry:
     def __init__(self): self._items: dict[str,ConnectorManifest] = {}
@@ -130,14 +132,11 @@ class ConnectorManifestRegistry:
     def get(self, connector_id: str): return self._items[connector_id]
     def list(self): return list(self._items.values())
 
-
-def _op(name,effect,risk,*,approval='policy',reauth=False,scopes=(),allowed=('public','internal'),prohibited=('secret',),dest=(),page=False,idem=False,verify=False,rollback=False,disabled=False):
-    return ConnectorOperation(name,effect,risk,approval,reauth,tuple(scopes),tuple(allowed),tuple(prohibited),tuple(dest),PaginationPolicy(page),RateLimitPolicy(),RetryPolicy(),idem,verify,rollback,disabled)
+def _op(name,effect,risk,*,approval='policy',reauth=False,scopes=(),allowed=('public','internal'),prohibited=('secret',),dest=(),page=False,idem=False,verify=False,rollback=False,disabled=False,max_pages=10,max_items=1000):
+    return ConnectorOperation(name,effect,risk,approval,reauth,tuple(scopes),tuple(allowed),tuple(prohibited),tuple(dest),PaginationPolicy(page,max_pages=max_pages,max_items=max_items),RateLimitPolicy(),RetryPolicy(),idem,verify,rollback,disabled)
 
 def gmail_manifest():
-    ro=('https://www.googleapis.com/auth/gmail.readonly',)
-    send=('https://www.googleapis.com/auth/gmail.send',)
-    modify=('https://www.googleapis.com/auth/gmail.modify',)
+    ro=('https://www.googleapis.com/auth/gmail.readonly',); send=('https://www.googleapis.com/auth/gmail.send',); modify=('https://www.googleapis.com/auth/gmail.modify',)
     return ConnectorManifest('gmail','Gmail','google',1,'oauth2_pkce',ro,send+modify,(
         _op('gmail.read','read','read_only',approval='none',scopes=ro,page=True),
         _op('gmail.search','read','read_only',approval='none',scopes=ro,page=True),
@@ -148,8 +147,7 @@ def gmail_manifest():
     ), token_revocation_supported=True, healthcheck_operation='gmail.read', configuration_requirements=('google_client_id',))
 
 def calendar_manifest():
-    scope=('https://www.googleapis.com/auth/calendar',)
-    read=('https://www.googleapis.com/auth/calendar.readonly',)
+    scope=('https://www.googleapis.com/auth/calendar',); read=('https://www.googleapis.com/auth/calendar.readonly',)
     return ConnectorManifest('calendar','Google Calendar','google',1,'oauth2_pkce',read,scope,(
         _op('calendar.read','read','read_only',approval='none',scopes=read,page=True),
         _op('calendar.search','read','read_only',approval='none',scopes=read,page=True),
@@ -157,6 +155,36 @@ def calendar_manifest():
         _op('calendar.update','consequential','external_side_effect',approval='required',scopes=scope,dest=('calendar','attendee'),idem=True,verify=True),
         _op('calendar.delete','destructive','destructive',approval='required',reauth=True,scopes=scope,dest=('calendar',),idem=True,verify=True),
     ), token_revocation_supported=True, healthcheck_operation='calendar.read', configuration_requirements=('google_client_id',))
+
+def drive_manifest():
+    scope=('https://www.googleapis.com/auth/drive.readonly',)
+    ops=(
+        _op('drive.files.list','read','read_only',approval='none',scopes=scope,page=True,max_pages=10,max_items=1000),
+        _op('drive.files.search','read','read_only',approval='none',scopes=scope,page=True,max_pages=10,max_items=1000),
+        _op('drive.files.metadata','read','read_only',approval='none',scopes=scope),
+        _op('drive.files.read','read','read_only',approval='none',scopes=scope),
+        _op('drive.files.download','read','read_only',approval='none',scopes=scope),
+        _op('drive.files.export','read','read_only',approval='none',scopes=scope),
+    )
+    return ConnectorManifest('drive','Google Drive','google',1,'oauth2_pkce',scope,(),ops,
+        token_revocation_supported=True,healthcheck_operation='drive.files.list',configuration_requirements=('google_client_id',),read_only=True,
+        scope_reasons=((scope[0],'Read metadata and content only for owner-selected Drive files; no create, update, delete, share or permission access.'),),
+        content_limits=(('max_file_bytes',10*1024*1024),('max_pages',10),('max_results',1000)),
+        supported_content_types=('text/plain','text/csv','application/json','application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet'))
+
+def sheets_manifest():
+    scope=('https://www.googleapis.com/auth/spreadsheets.readonly',)
+    ops=(
+        _op('sheets.spreadsheets.metadata','read','read_only',approval='none',scopes=scope),
+        _op('sheets.worksheets.list','read','read_only',approval='none',scopes=scope),
+        _op('sheets.values.read','read','read_only',approval='none',scopes=scope),
+        _op('sheets.values.batch_read','read','read_only',approval='none',scopes=scope),
+    )
+    return ConnectorManifest('sheets','Google Sheets','google',1,'oauth2_pkce',scope,(),ops,
+        token_revocation_supported=True,configuration_requirements=('google_client_id',),read_only=True,
+        scope_reasons=((scope[0],'Read spreadsheet metadata and explicitly requested ranges only; no write, append, clear, formatting, sheet creation/deletion or sharing.'),),
+        content_limits=(('max_worksheets',100),('max_ranges',10),('max_rows',1000),('max_columns',100),('max_cells',50000),('max_response_bytes',2*1024*1024)),
+        supported_content_types=('application/vnd.google-apps.spreadsheet','text/csv'))
 
 def slack_manifest():
     return ConnectorManifest('slack','Slack','slack',1,'oauth2_pkce',('channels:history',),('chat:write',),(
@@ -171,4 +199,4 @@ def home_assistant_manifest():
     ), healthcheck_operation='home_assistant.read', configuration_requirements=('home_assistant_url','home_assistant_token'))
 
 def builtin_manifests() -> tuple[ConnectorManifest,...]:
-    return (gmail_manifest(),calendar_manifest(),slack_manifest(),home_assistant_manifest())
+    return (gmail_manifest(),calendar_manifest(),drive_manifest(),sheets_manifest(),slack_manifest(),home_assistant_manifest())

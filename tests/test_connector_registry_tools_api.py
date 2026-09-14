@@ -73,3 +73,16 @@ def test_api_owner_list_safe(tmp_path):
     st=ConnectorStateStore(tmp_path/'c.sqlite3',vault=Vault());reg=IntegrationRegistry(state_store=st);reg.register_manifest(gmail_manifest())
     app=FastAPI();app.add_middleware(CtxMiddleware);app.include_router(connector_router({'device_registry':Devices(),'integrations':reg,'oauth':None,'oauth_providers':{},'executor':SimpleNamespace(approvals=SimpleNamespace(current_security_epoch=lambda:0))}))
     c=TestClient(app);res=c.get('/iphone/api/connectors',cookies={'pa_device':'d','pa_token':'t'});assert res.status_code==200 and res.json()['connectors'][0]['id']=='gmail'
+
+def test_api_drive_knowledge_requires_explicit_approval(tmp_path):
+    class Devices:
+        def authenticate(self,d,t):return True
+        def authorize(self,d,s):return True
+    class CtxMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self,request,call_next):
+            tok=set_trusted_request(TrustedRequestContext('d','s'))
+            try:return await call_next(request)
+            finally:reset_trusted_request(tok)
+    st=ConnectorStateStore(tmp_path/'c.sqlite3',vault=Vault());reg=IntegrationRegistry(state_store=st);reg.register_manifest(gmail_manifest())
+    app=FastAPI();app.add_middleware(CtxMiddleware);app.include_router(connector_router({'device_registry':Devices(),'integrations':reg,'oauth':None,'oauth_providers':{},'integration_adapters':{},'knowledge':None,'executor':SimpleNamespace(approvals=SimpleNamespace(current_security_epoch=lambda:0))}))
+    c=TestClient(app);res=c.post('/iphone/api/connectors/drive/files/f/knowledge',json={'approved':False},cookies={'pa_device':'d','pa_token':'t'});assert res.status_code==409
