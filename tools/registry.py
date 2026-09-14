@@ -135,13 +135,15 @@ class ToolRegistry:
     def _policy_authorize(self,tool,parameters,data_classification,*,approved=False):
         if not tool.policy_operation:return None,None
         if self.policy_gateway is None:raise PermissionError('policy gateway is unavailable; default deny')
-        operation=self._tool_policy_operation(tool,parameters,data_classification)
+        classification=str(parameters.get('_policy_data_classification') or data_classification or 'internal')
+        if not approved:parameters['_policy_data_classification']=classification
+        operation=self._tool_policy_operation(tool,parameters,classification)
         decision=self.policy_gateway.evaluate(operation,approved=bool(approved),reauthenticated=bool(parameters.get('_trusted_reauthenticated')))
         return operation,decision
     def issue_tool_policy_permit(self,parameters,data_classification='internal'):
         tool_name=str(parameters.get('_policy_tool_name') or '')
         if not tool_name or tool_name not in self._tools:raise PermissionError('trusted policy tool binding is missing')
-        tool=self._tools[tool_name];operation,decision=self._policy_authorize(tool,parameters,data_classification,approved=True)
+        tool=self._tools[tool_name];operation,decision=self._policy_authorize(tool,parameters,str(parameters.get('_policy_data_classification') or data_classification),approved=True)
         if operation is None or decision is None or not decision.allowed:raise PermissionError(getattr(decision,'reason_code','policy_not_allowed'))
         permit=self.policy_gateway.issue_temporary_permit(operation,decision,ttl_seconds=60)
         return {'permit_id':permit['permit_id'],'operation':operation,'decision':decision}
