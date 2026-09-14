@@ -5,10 +5,12 @@ import json
 from app.main import build_runtime
 from core.config import settings
 from core.storage import validate_runtime_storage
+from security.pwa_sessions import PwaSessionStore
 from server.api import create_app
 from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
+from server.pwa_session_middleware import PwaSessionMiddleware
 
 # Hosted Personal AI must prove that its data root is backed by a real durable
 # mount before any SQLite database, knowledge object, approval state or audit
@@ -16,6 +18,7 @@ from server.capability_console import capability_console_router
 storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
 runtime['storage_status'] = storage_status
+runtime['pwa_sessions'] = PwaSessionStore(settings.data_dir / 'pwa-sessions.sqlite3')
 print(json.dumps({'event': 'storage.ready', **storage_status}), flush=True)
 
 @asynccontextmanager
@@ -50,6 +53,12 @@ app=create_app(
     second_brain=runtime['second_brain'],
     automations=runtime['automations'],
     runtime=runtime,
+)
+app.add_middleware(
+    PwaSessionMiddleware,
+    sessions=runtime['pwa_sessions'],
+    device_registry=runtime['device_registry'],
+    cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)),
 )
 app.include_router(iphone_pwa_router(runtime, settings))
 app.include_router(owner_product_router(runtime))
