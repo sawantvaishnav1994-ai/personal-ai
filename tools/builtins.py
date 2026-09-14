@@ -13,6 +13,7 @@ from tools import (
     memory_tools,
     notifications,
     proactive,
+    recovery,
     reminders,
     screen,
     system,
@@ -40,6 +41,7 @@ def register_builtin_tools(
     # W7.6 recovery extends the W7.1 transaction database. Initialize it only
     # after W7.5 registration has created/recovered the authoritative W7.1 store.
     registry.ensure_recovery_authority()
+    recovery.register(registry)
     integrations.register(registry, integration_adapters)
     google_read.register(registry, integration_adapters)
     google_write.register(registry, integration_adapters)
