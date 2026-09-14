@@ -2,60 +2,56 @@
 
 Baseline date: 2026-09-14
 
+Statuses distinguish automated software evidence from live-provider, physical-device, and production evidence.
+
 ## W6 validated history
 
-| Batch | Exact code SHA | Focused tests | Required workflows |
+| Batch | Exact code SHA | Focused/full evidence | Required workflows |
 | --- | --- | ---: | --- |
-| W6.1 connector foundation | `152ef13217b652121917a890de14e20edb139473` validated integration | 60 | 6/6 PASS |
-| W6.2 Drive/Sheets read-first | `ecb5e2615d06816e869dd4adb398565bb5c524fa` | 110 combined | 6/6 PASS |
-| W6.3 controlled writes | `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254` | **131 combined** | **6/6 PASS** |
+| W6.1 connector foundation | `152ef13217b652121917a890de14e20edb139473` validated integration | 60 focused | 6/6 PASS |
+| W6.2 Drive/Sheets read-first | `ecb5e2615d06816e869dd4adb398565bb5c524fa` | 110 combined focused | 6/6 PASS |
+| W6.3 controlled writes | `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254` | 131 combined focused | 6/6 PASS |
+| W6 hosted OAuth preparation | `f79958103c50c0e1b25442ffbf6e58e5b4e65203` | 137 recovered connector/preflight | 6/6 PASS |
+| W6 Gmail Draft OAuth scope repair | `ae1b3c12ff82785b1f8cefe1bcbc6201e88b08bc` | full repository **446 PASS** | **6/6 PASS** |
 
-## W6.3 pre-commit validation
+## Final W6 software-scope repair
 
-- exact baseline-parent candidate: PASS
-- focused W6.1 + W6.2 + W6.3 suite: **131 PASS**
-- Python compileall: PASS
-- Apps & Tools JavaScript syntax: PASS
-- additive migration/repeated-startup tests: PASS
-- idempotency/concurrency/uncertain-outcome/restart recovery tests: PASS
-- changed-file secret-pattern scan: PASS
-- whitespace/syntax validation: PASS
-- baseline-to-candidate diff: exactly 18 intended files
+The Gmail Draft operation already required `https://www.googleapis.com/auth/gmail.compose`, but that operation-level scope was not requestable through the live connector OAuth manifest/catalog. The repair keeps operation-level least privilege authoritative:
 
-## W6.3 exact-head workflows
+- Gmail read/search remains `gmail.readonly`.
+- Gmail Draft requires `gmail.compose`.
+- Gmail Send remains independently governed by `gmail.send`.
+- Gmail Modify remains independently governed by `gmail.modify`.
+- Prohibited Gmail full-access `https://mail.google.com/` is not admitted into requestable runtime scopes.
+- Calendar, Drive, and Sheets scopes remain in the shared Google provider catalog.
+- Google incremental-consent union/reduced-scope detection remains unchanged.
+- Gateway scope checks continue to fail closed before provider dispatch.
+
+Regression coverage added for Draft allowed with compose, rejected without compose, unchanged read/search/send contracts, Calendar/Drive/Sheets scope-union preservation, reduced-scope detection, and redacted qualification evidence.
+
+## Exact-head workflows — Gmail scope repair
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #585 | `34843634899` | PASS |
-| Reliability and Security | #158 | `34843634900` | PASS |
-| P3 iPhone PWA | #126 | `34843634890` | PASS |
-| Android Instrumentation | #157 | `34843634957` | PASS |
-| Package Validation | #157 | `34843634972` | PASS |
-| iOS Companion | #139 | `34843634905` | PASS |
+| CI | #597 | `34854396694` | PASS |
+| Reliability and Security | #164 | `34854396635` | PASS |
+| P3 iPhone PWA | #132 | `34854396766` | PASS |
+| Android Instrumentation | #163 | `34854396887` | PASS |
+| Package Validation | #163 | `34854396651` | PASS |
+| iOS Companion | #145 | `34854396843` | PASS |
 
-CI passed dependency install, `pip check`, repository compileall and full `pytest -q`. Reliability/Security passed dependency audit, compileall, full pytest, encrypted backup/restore qualification and soak. Package Validation passed macOS, Ubuntu and Windows jobs.
-
-## W6.3 regression coverage
-
-Authority/security: per-operation approval, recent reauthentication, Trusted Action bindings, Emergency Stop, data classification, destination/resource binding, changed-parameter invalidation and one-use/replay semantics through the existing core.
-
-Scopes/OAuth: Drive `drive.file`, Sheets write scope, pre-dispatch missing-scope rejection, Google incremental-consent request, cumulative confirmed-scope preservation, reduced-scope detection and live-adapter token/scope refresh.
-
-Drive writes: create/upload/rename/content update, filename/MIME/size limits, explicit parent verification, content checksum, expected provider version/ETag conflict, provider readback verification, duplicate submission/idempotency conflict, uncertain timeout recovery and no blind redispatch.
-
-Sheets writes: spreadsheet creation, bounded A1 update/append, row/column/cell/request limits, RAW value input, formula-like literal strings, expected-current-value hash concurrency protection, returned-range/readback verification, duplicate request and uncertain append recovery.
-
-Compatibility: W6.1 Gmail/Calendar, W6.2 Drive/Sheets reads, Knowledge provenance, workflows and Trusted Action approval paths remain in the combined focused/full repository validation.
+CI passed dependency install, `pip check`, repository compileall, and full `pytest -q`: **446 passed, 7 warnings**. Package Validation passed Windows, macOS, and Ubuntu jobs.
 
 ## Mandatory evidence still outside automation
 
-- real Google OAuth/account identity and exact-scope qualification;
-- incremental-consent scope-union proof against Google;
-- real token refresh/expiry/reconnect/revoke behavior;
-- harmless live Drive/Sheets read/write verification and negative delete/share/trash/clear checks;
-- main production restart/redeploy persistence and backup/restore on attached durable `/data`;
-- physical P3 and multi-browser evidence;
-- signed/physical distribution qualification;
-- W7 Safe Computer Operator hardening/physical qualification.
+- Real Google OAuth/account identity and exact-scope qualification.
+- Real incremental-consent scope-union proof against Google.
+- Real token refresh/expiry/reconnect/revoke behavior.
+- Harmless live Gmail/Calendar/Drive/Sheets operation verification.
+- Negative real-provider proof that prohibited destructive/share/clear operations remain unavailable.
+- Isolated hosted restart/redeploy persistence and encrypted backup/restore on an attached `/data` volume.
+- Main production durable-storage qualification.
+- Physical P3 and multi-browser evidence.
+- Signed/physical distribution qualification.
 
-Mocked provider tests remain software evidence only and never become live-provider evidence.
+Hosted connector qualification is currently **BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED** because Railway Free plan refused a third service and the owner chose not to upgrade now. Mocked/local provider tests remain software evidence only and are never classified as live-provider evidence.
