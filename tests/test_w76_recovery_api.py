@@ -12,12 +12,12 @@ def setup(tmp_path):
     store=OperatorRecoveryStore(tmp_path/'r.sqlite3',txs);store.ensure_transaction('tx',binding)
     def auth(token,device):
         if token!='Bearer good' or device!='device':raise PermissionError('bad')
-        return {'owner_id':'owner','session_id':'session'}
+        return {'owner_id':'owner'}
     app=FastAPI();app.include_router(create_recovery_router(store,auth,current_security_epoch=lambda:0))
     return TestClient(app),store,binding
 
 
-def headers():return {'Authorization':'Bearer good','X-Device-ID':'device','X-Security-Epoch':'0'}
+def headers():return {'Authorization':'Bearer good','X-Device-ID':'device','X-Session-ID':'session','X-Security-Epoch':'0'}
 
 
 def test_owner_recovery_report_is_visible_with_binding(tmp_path):
@@ -30,6 +30,11 @@ def test_recovery_report_rejects_unauthenticated(tmp_path):
     assert response.status_code==401 and response.json()['detail']=='authentication_required'
 
 
+def test_recovery_report_rejects_missing_session_binding(tmp_path):
+    client,_,_=setup(tmp_path);h=headers();h.pop('X-Session-ID');response=client.get('/activities/recovery/tx',headers=h)
+    assert response.status_code==401
+
+
 def test_recovery_report_rejects_security_epoch_change(tmp_path):
     client,_,_=setup(tmp_path);h=headers();h['X-Security-Epoch']='1';response=client.get('/activities/recovery/tx',headers=h)
     assert response.status_code==409 and response.json()['detail']=='security_epoch_changed'
@@ -40,7 +45,7 @@ def test_consequential_owner_decision_requires_reauth(tmp_path):
     assert response.status_code==409 and response.json()['detail']=='reauthentication_required'
 
 
-def test_owner_can_abandon_with_reauth(tmp_path):
+def test_owner_can_abandon(tmp_path):
     client,store,_=setup(tmp_path);response=client.post('/activities/recovery/tx/decision',headers=headers(),json={'decision':'abandon_transaction','decision_id':'d','security_epoch':0,'reauthenticated':False})
     assert response.status_code==200 and store.snapshot('tx')['state']=='abandoned_by_owner'
 
