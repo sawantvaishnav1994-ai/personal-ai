@@ -20,7 +20,7 @@ def setup_action(tmp_path):
 def add_verification(recovery,result='verified_success',operation='file_copy'):
     lease=recovery.acquire_lease('tx','w');d=recovery.begin_dispatch('tx','tx:0',operation_class=operation,idempotency_key='k',worker_id='w',fencing_token=lease['fencing_token']);recovery.mark_dispatched(d['dispatch_id'],worker_id='w',fencing_token=lease['fencing_token'])
     pre={'before':'x'};expected={'after':'y'};observed={'after':'y' if result=='verified_success' else 'x'};refs=['obs1'];material={'references':refs,'precondition':pre,'expected':expected,'observed':observed}
-    rec=VerificationRecord('tx','tx:0',d['dispatch_id'],'k',operation,'','','',pre,expected,observed,'test','1',tuple(refs),_digest(material),time.time(),time.time()+60,result,'safe',1.0 if result in {'verified_success','verified_no_effect','verified_failure'} else None)
+    rec=VerificationRecord('tx','tx:0',d['dispatch_id'],'k',operation,'','',pre,expected,observed,'test','1',tuple(refs),_digest(material),time.time(),time.time()+60,result,'safe',1.0 if result in {'verified_success','verified_no_effect','verified_failure'} else None)
     out=recovery.record_verification(rec);recovery.release_lease('tx','w',lease['fencing_token']);return out
 
 
