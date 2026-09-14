@@ -45,10 +45,10 @@ class SecureCloudRelay:
         if not text:return RelayResult(400,{'error':'empty_command'})
         if len(text)>12000:return RelayResult(413,{'error':'command_too_large'})
         try:
-            reply=self.executor.chat(text);self.memory.audit('cloud','command',{'device_id':session.device_id,'ok':True});return RelayResult(200,{'reply':reply,'state':self._state})
+            reply=self.executor.chat(text,device_id=session.device_id,session_id=session.id,owner_id='owner');self.memory.audit('cloud','command',{'device_id':session.device_id,'session_id':session.id,'ok':True});return RelayResult(200,{'reply':reply,'state':self._state})
         except ConfirmationRequired as exc:
             payload={'approval_required':True,'approval_id':exc.approval_id,'execution_id':exc.execution_id,'tool':exc.tool_name,'description':exc.description,'parameters':exc.parameters,'expires_at':exc.expires_at}
-            self.memory.audit('cloud','approval_required',{'device_id':session.device_id,'approval_id':exc.approval_id,'tool':exc.tool_name});return RelayResult(202,payload)
+            self.memory.audit('cloud','approval_required',{'device_id':session.device_id,'session_id':session.id,'approval_id':exc.approval_id,'tool':exc.tool_name});return RelayResult(202,payload)
     def memory_search(self,session,q:str,include_sensitive:bool=False):
         rows=self.memory.search((q or '').strip(),limit=20)
         allowed=[]
@@ -63,10 +63,10 @@ class SecureCloudRelay:
     def approval(self,session,approval_id:str,decision:str):
         if self.sessions.emergency_stopped():return RelayResult(423,{'error':'emergency_stop_active'})
         try:
-            if decision=='approve':reply=self.executor.approve(approval_id)
-            elif decision=='reject':reply=self.executor.reject(approval_id)
+            if decision=='approve':reply=self.executor.approve(approval_id,device_id=session.device_id,session_id=session.id,owner_id='owner')
+            elif decision=='reject':reply=self.executor.reject(approval_id,device_id=session.device_id,session_id=session.id)
             else:return RelayResult(400,{'error':'invalid_decision'})
-            self.memory.audit('cloud','approval_decision',{'device_id':session.device_id,'approval_id':approval_id,'decision':decision});return RelayResult(200,{'reply':reply,'decision':decision})
+            self.memory.audit('cloud','approval_decision',{'device_id':session.device_id,'session_id':session.id,'approval_id':approval_id,'decision':decision});return RelayResult(200,{'reply':reply,'decision':decision})
         except PermissionError:return RelayResult(410,{'error':'approval_unavailable'})
     def set_emergency_stop(self,owner_secret:str,enabled:bool):
         if not self.owner.verify(owner_secret):return RelayResult(401,{'error':'owner_auth_failed'})
