@@ -17,6 +17,7 @@ class Tool:
     verifier:Callable[[dict[str,Any],Any],Any]|None=None; rollback:Callable[[dict[str,Any],Any],Any]|None=None; rollback_description:str=''
     allowed_destinations:tuple[str,...]|None=None; verification_required:bool=False; requires_reauth:bool=False
     connector_id:str|None=None; capability:str|None=None; minimum_risk:Risk|None=None; prohibited_data_classifications:tuple[str,...]=(); prohibited:bool=False
+    prepare:Callable[[dict[str,Any]],dict[str,Any]]|None=None; on_reject:Callable[[dict[str,Any]],Any]|None=None; requires_trusted_context:bool=False
 class ToolRegistry:
     def __init__(self,settings):
         self.settings=settings; self.permissions=PermissionEngine(settings.autonomy_mode); self._tools={}; self.emergency_stop=False; self._control_path=None; self._approval_path=None
@@ -49,7 +50,6 @@ class ToolRegistry:
     @staticmethod
     def destination(parameters):
         params=parameters or {}
-        # external attendees make calendar writes externally consequential
         sid=params.get('spreadsheet_id'); rng=params.get('range')
         if sid not in (None,'') and rng not in (None,''):return f'{str(sid)[:500]}#{str(rng)[:500]}'
         fid=params.get('file_id'); parent=params.get('parent_id'); filename=params.get('filename')
