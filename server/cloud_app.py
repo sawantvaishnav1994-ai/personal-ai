@@ -11,6 +11,7 @@ from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
 from server.pwa_session_middleware import PwaSessionMiddleware
+from server.session_bound_executor import SessionBoundExecutor
 
 # Hosted Personal AI must prove that its data root is backed by a real durable
 # mount before any SQLite database, knowledge object, approval state or audit
@@ -60,7 +61,11 @@ app.add_middleware(
     device_registry=runtime['device_registry'],
     cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)),
 )
-app.include_router(iphone_pwa_router(runtime, settings))
+# Keep the approved iPhone router unchanged while binding every executor call
+# to the middleware-authenticated, revocable browser session.
+pwa_runtime = dict(runtime)
+pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'])
+app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(owner_product_router(runtime))
 app.include_router(capability_console_router(runtime))
 app.router.lifespan_context=lifespan
