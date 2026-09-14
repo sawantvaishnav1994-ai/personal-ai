@@ -48,10 +48,16 @@ class ComputerIntelligence:
         try:return browser.capture_sanitized_screenshot()
         except Exception as exc:return {'available':False,'reason':f'browser_native_capture_failed:{type(exc).__name__}','bytes':b''}
 
+    def _analyze_screen(self,question:str,*,monitor:int,**kwargs):
+        try:return self.screen.analyze(question,monitor=monitor,**kwargs)
+        except TypeError as exc:
+            if 'unexpected keyword argument' not in str(exc):raise
+            return self.screen.analyze(question,monitor=monitor)
+
     def observe(self,question: str='Describe the visible screen and the actionable UI elements relevant to the user.',monitor:int=1):
         self._emit('state',state='understanding')
         browser_source=self._browser_native_evidence()
-        result=self.screen.analyze(question,monitor=monitor,redactions=None,sanitized_source=browser_source)
+        result=self._analyze_screen(question,monitor=monitor,redactions=None,sanitized_source=browser_source)
         self._emit('computer.observed',screenshot=result.get('screenshot_evidence_ref')); return result
 
     def _memory_context(self,goal:str):
@@ -102,7 +108,7 @@ class ComputerIntelligence:
     def _capture_bound_observation(self,binding:OperatorBinding,txid:str,*,reason:str,question:str,monitor:int):
         app=self.application_observer.capture(); browser_snapshot=self._browser_snapshot(); browser_source=self._browser_native_evidence() if browser_snapshot is not None else None
         evidence_binding={'owner_id':binding.owner_id,'device_id':binding.device_id,'session_id':binding.session_id}
-        result=self.screen.analyze(question,monitor=monitor,redactions=None,sanitized_source=browser_source,evidence_binding=evidence_binding,application_context=app)
+        result=self._analyze_screen(question,monitor=monitor,redactions=None,sanitized_source=browser_source,evidence_binding=evidence_binding,application_context=app)
         record=build_observation_record(binding=binding,transaction_id=txid,application=app,screen=result,browser=browser_snapshot,reason=reason,initiator='authenticated_transaction')
         self.operator_transactions.save_observation(record); return record,browser_snapshot,result
 
