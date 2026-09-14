@@ -6,8 +6,7 @@ from security.policy_store import PolicyStore
 
 def test_w74_keeps_schema_73_and_reuses_w73_policy_authority(tmp_path):
     store = PolicyStore(tmp_path / 'policy.db')
-    with store.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 73
+    assert store.schema_version() == 73
 
 
 def test_w74_browser_operator_has_no_cookie_storage_or_background_monitoring_surface():
