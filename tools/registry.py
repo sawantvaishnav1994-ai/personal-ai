@@ -21,10 +21,10 @@ class Tool:
     prepare:Callable[[dict[str,Any]],dict[str,Any]]|None=None; on_reject:Callable[[dict[str,Any]],Any]|None=None; requires_trusted_context:bool=False
 class ToolRegistry:
     def __init__(self,settings):
-        self.settings=settings; self.permissions=PermissionEngine(settings.autonomy_mode); self._tools={}; self.emergency_stop=False; self._control_path=None; self._approval_path=None; self.policy_gateway=None
+        self.settings=settings; self.permissions=PermissionEngine(settings.autonomy_mode); self._tools={}; self.emergency_stop=False; self._control_path=None; self._approval_path=None; self.policy_gateway=None; self.recovery_authority=None; self._data_root=None
         data_dir=getattr(settings,'data_dir',None)
         if data_dir is not None:
-            data_root=Path(data_dir); self._control_path=data_root/'runtime-controls.sqlite3'; self._approval_path=data_root/'trusted-actions.sqlite3'; self._control_path.parent.mkdir(parents=True,exist_ok=True)
+            data_root=Path(data_dir); self._data_root=data_root; self._control_path=data_root/'runtime-controls.sqlite3'; self._approval_path=data_root/'trusted-actions.sqlite3'; self._control_path.parent.mkdir(parents=True,exist_ok=True)
             with self._control_con() as con:
                 con.execute('CREATE TABLE IF NOT EXISTS runtime_controls (key TEXT PRIMARY KEY,value TEXT NOT NULL)'); row=con.execute("SELECT value FROM runtime_controls WHERE key='emergency_stop'").fetchone(); self.emergency_stop=bool(row and row[0]=='1')
             from security.approvals import ApprovalManager
@@ -35,12 +35,20 @@ class ToolRegistry:
         if self._approval_path is None:return 0
         from security.approvals import ApprovalManager
         return ApprovalManager(path=self._approval_path).current_security_epoch()
+    def ensure_recovery_authority(self):
+        if self.recovery_authority is not None:return self.recovery_authority
+        if self._data_root is None:raise RuntimeError('recovery authority requires local data directory')
+        from recovery.operator_recovery import RecoveryAuthority
+        self.recovery_authority=RecoveryAuthority(self._data_root/'operator-transactions.sqlite3',emergency_stop=lambda:self.emergency_stop,policy_gateway=self.policy_gateway,security_epoch_provider=self.current_security_epoch)
+        return self.recovery_authority
     def set_emergency_stop(self,enabled:bool):
         previous=self.emergency_stop; self.emergency_stop=bool(enabled)
         if self._control_path is not None:
             with self._control_con() as con:con.execute("INSERT OR REPLACE INTO runtime_controls(key,value) VALUES('emergency_stop',?)",('1' if enabled else '0',))
         if self.emergency_stop and not previous and self._approval_path is not None and self._approval_path.exists():
             from security.approvals import ApprovalManager; ApprovalManager(path=self._approval_path).advance_security_epoch()
+        if self.emergency_stop and not previous and self.recovery_authority is not None:
+            self.recovery_authority.emergency_stop_snapshot()
         return self.emergency_stop
     def evaluate_policy(self,operation,**kwargs):
         if self.policy_gateway is None:raise PermissionError('policy gateway is unavailable; default deny')
@@ -48,6 +56,8 @@ class ToolRegistry:
     def policy_snapshot(self,owner_id='owner'):
         if self.policy_gateway is None:return {'policies':[],'recent_use':[],'safe_default':'deny','schema_version':None}
         return self.policy_gateway.owner_snapshot(owner_id)
+    def recovery_snapshot(self,transaction_id):
+        authority=self.ensure_recovery_authority();return authority.owner_view(transaction_id)
     def register(self,tool:Tool):
         if tool.name in self._tools:raise ValueError(f'Duplicate tool {tool.name}')
         if tool.minimum_risk is not None and int(tool.risk)<int(tool.minimum_risk):tool.risk=Risk(int(tool.minimum_risk))
