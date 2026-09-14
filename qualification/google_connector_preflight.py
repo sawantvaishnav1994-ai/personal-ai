@@ -41,7 +41,7 @@ def _callback(value: str) -> dict:
     return {'scheme': parsed.scheme, 'host': parsed.hostname, 'path': parsed.path}
 
 
-def validate_qualification_environment(*, environ=None, mount_points=None, require_secrets=True) -> dict:
+def validate_qualification_environment(*, environ=None, mount_points=None, require_secrets=True, storage_validator=None) -> dict:
     env = dict(os.environ if environ is None else environ)
     missing = [name for name in REQUIRED_VALUE_NAMES if not _present(env, name)]
     if require_secrets:
@@ -61,8 +61,9 @@ def validate_qualification_environment(*, environ=None, mount_points=None, requi
         raise QualificationPreflightError('Insecure iPhone/PWA mode must remain disabled for connector qualification')
 
     settings = SimpleNamespace(data_dir=data_dir, hosted_runtime=True, cloud_runtime_enabled=False)
+    validator = storage_validator or validate_runtime_storage
     try:
-        storage = validate_runtime_storage(settings, environ=env, mount_points=mount_points)
+        storage = validator(settings, environ=env, mount_points=mount_points)
     except StorageUnavailable as exc:
         raise QualificationPreflightError(str(exc)) from exc
     if storage.get('state') != 'ready' or not storage.get('durable'):
