@@ -13,7 +13,7 @@ from security.request_context import (
 )
 
 
-PUBLIC_PREFIXES = (
+PUBLIC_PATHS = {
     '/iphone',
     '/iphone/',
     '/iphone/manifest.webmanifest',
@@ -25,7 +25,7 @@ PUBLIC_PREFIXES = (
     '/iphone/api/access/passkey/login/options',
     '/iphone/api/access/passkey/login/complete',
     '/iphone/api/enroll',
-)
+}
 
 LOGIN_PATHS = {
     '/iphone/api/access/google/login',
@@ -37,9 +37,7 @@ LOGIN_PATHS = {
 
 
 def _is_public(path: str) -> bool:
-    if path in {'/iphone', '/iphone/', '/iphone/manifest.webmanifest', '/iphone/sw.js'}:
-        return True
-    return path in PUBLIC_PREFIXES
+    return path in PUBLIC_PATHS
 
 
 def _cookie_from_response(response, name: str) -> str | None:
@@ -66,8 +64,7 @@ class PwaSessionMiddleware(BaseHTTPMiddleware):
         self.device_registry = device_registry
         self.cookie_max_age = max(300, int(cookie_max_age))
 
-    @staticmethod
-    def _set_session_cookie(response, token: str):
+    def _set_session_cookie(self, response, token: str):
         response.set_cookie(
             'pa_session',
             token,
@@ -75,7 +72,7 @@ class PwaSessionMiddleware(BaseHTTPMiddleware):
             secure=True,
             samesite='strict',
             path='/iphone',
-            max_age=60 * 60 * 24 * 30,
+            max_age=self.cookie_max_age,
         )
 
     @staticmethod
