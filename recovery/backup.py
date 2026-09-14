@@ -58,12 +58,12 @@ class BackupService:
         self.root_key_store = root_key_store or RootKeyStore()
 
     @staticmethod
-    def _sha(path: Path):
-        h = hashlib.sha256()
+    def _sha(path: Path) -> str:
+        digest = hashlib.sha256()
         with path.open('rb') as handle:
             for chunk in iter(lambda: handle.read(COPY_CHUNK), b''):
-                h.update(chunk)
-        return h.hexdigest()
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _safe_rel(value: str) -> Path:
@@ -72,10 +72,26 @@ class BackupService:
             raise BackupError('unsafe backup path')
         return rel
 
+    def _safe_destination(self, rel: Path) -> Path:
+        """Return a restore destination proven to stay inside the owner data root."""
+        destination = self.data_dir / rel
+        root = self.data_dir.resolve()
+        resolved = destination.resolve(strict=False)
+        if resolved != root and root not in resolved.parents:
+            raise BackupError(f'unsafe restore destination: {rel.as_posix()}')
+        current = self.data_dir
+        for part in rel.parts[:-1]:
+            current = current / part
+            if current.exists() and current.is_symlink():
+                raise BackupError(f'unsafe restore destination: {rel.as_posix()}')
+        if destination.exists() and destination.is_symlink():
+            raise BackupError(f'unsafe restore destination: {rel.as_posix()}')
+        return destination
+
     def _eligible(self):
         files = []
         for path in self.data_dir.rglob('*'):
-            if not path.is_file():
+            if not path.is_file() or path.is_symlink():
                 continue
             if self.backup_dir in path.parents:
                 continue
@@ -83,8 +99,6 @@ class BackupService:
             if path.name in EXCLUDED_NAMES:
                 continue
             if path.name.endswith(SQLITE_SIDECARS):
-                # SQLite online backup captures committed WAL contents. Copying
-                # sidecars independently can create an incoherent restore set.
                 continue
             if any(part.lower() in EXCLUDED_DIRS for part in rel.parts[:-1]):
                 continue
@@ -162,7 +176,10 @@ class BackupService:
         temp_target = target.with_name(f'.{target.name}.{secrets.token_hex(6)}.tmp')
         try:
             with payload.open('rb') as src, temp_target.open('wb') as dst:
-                os.chmod(temp_target, 0o600)
+                try:
+                    os.chmod(temp_target, 0o600)
+                except OSError:
+                    pass
                 dst.write(aad)
                 for chunk in iter(lambda: src.read(COPY_CHUNK), b''):
                     dst.write(encryptor.update(chunk))
@@ -176,20 +193,20 @@ class BackupService:
             except OSError:
                 pass
         finally:
-            try:
-                temp_target.unlink(missing_ok=True)
-            except OSError:
-                pass
+            temp_target.unlink(missing_ok=True)
 
     def _decrypt_payload(self, archive: Path) -> Path:
         archive = Path(archive)
-        temp_handle = tempfile.NamedTemporaryFile(
+        handle = tempfile.NamedTemporaryFile(
             prefix='personal-ai-backup-decrypted-', suffix='.zip', delete=False
         )
-        temp_path = Path(temp_handle.name)
-        temp_handle.close()
+        temp_path = Path(handle.name)
+        handle.close()
         try:
-            os.chmod(temp_path, 0o600)
+            try:
+                os.chmod(temp_path, 0o600)
+            except OSError:
+                pass
             with archive.open('rb') as src:
                 if src.read(len(BACKUP_MAGIC)) != BACKUP_MAGIC:
                     raise BackupError('unsupported encrypted backup format')
@@ -248,10 +265,7 @@ class BackupService:
                     os.fsync(dst.fileno())
             return temp_path
         except Exception:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            temp_path.unlink(missing_ok=True)
             raise
 
     def _build_payload(self, payload: Path) -> dict:
@@ -270,18 +284,15 @@ class BackupService:
                 rel = source.relative_to(self.data_dir)
                 snapshot = stage / rel
                 self._snapshot_file(source, snapshot)
-                manifest['files'].append(
-                    {
-                        'path': rel.as_posix(),
-                        'sha256': self._sha(snapshot),
-                        'size': snapshot.stat().st_size,
-                    }
-                )
+                manifest['files'].append({
+                    'path': rel.as_posix(),
+                    'sha256': self._sha(snapshot),
+                    'size': snapshot.stat().st_size,
+                })
 
             with zipfile.ZipFile(payload, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for item in manifest['files']:
-                    rel = item['path']
-                    archive.write(stage / rel, rel)
+                    archive.write(stage / item['path'], item['path'])
                 archive.writestr(
                     'manifest.json',
                     json.dumps(manifest, sort_keys=True, indent=2),
@@ -302,15 +313,15 @@ class BackupService:
         payload = Path(handle.name)
         handle.close()
         try:
-            os.chmod(payload, 0o600)
+            try:
+                os.chmod(payload, 0o600)
+            except OSError:
+                pass
             self._build_payload(payload)
             self._encrypt_payload(payload, target)
             return target
         finally:
-            try:
-                payload.unlink(missing_ok=True)
-            except OSError:
-                pass
+            payload.unlink(missing_ok=True)
 
     @staticmethod
     def _zip_member_is_symlink(info: zipfile.ZipInfo) -> bool:
@@ -337,6 +348,7 @@ class BackupService:
                     raise BackupError('unsupported backup manifest')
                 if version >= BACKUP_VERSION and not encrypted:
                     raise BackupError('encrypted backup manifest is not inside an encrypted envelope')
+
                 listed: dict[str, dict] = {}
                 for item in manifest['files']:
                     if not isinstance(item, dict) or 'path' not in item:
@@ -348,6 +360,7 @@ class BackupService:
                 expected = set(listed) | {'manifest.json'}
                 if names != expected:
                     raise BackupError('backup contains unlisted or missing payloads')
+
                 for rel, item in listed.items():
                     path = Path(rel)
                     if path.name in EXCLUDED_NAMES:
@@ -366,6 +379,7 @@ class BackupService:
                         raise BackupError(f'backup size mismatch: {rel}')
                     if hashlib.sha256(data).hexdigest() != expected_sha:
                         raise BackupError(f'backup integrity failure: {rel}')
+
                 result = dict(manifest)
                 result['encrypted'] = bool(encrypted)
                 return result
@@ -382,7 +396,6 @@ class BackupService:
         if prefix == BACKUP_MAGIC:
             return self._decrypt_payload(archive), True, True
         if zipfile.is_zipfile(archive):
-            # Read-only compatibility with existing v1 recovery artifacts.
             return archive, False, False
         raise BackupError('unsupported backup format')
 
@@ -392,50 +405,92 @@ class BackupService:
             return self._inspect_zip(payload, encrypted=encrypted)
         finally:
             if cleanup:
-                try:
-                    payload.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                payload.unlink(missing_ok=True)
+
+    @staticmethod
+    def _copy_fsynced(source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with source.open('rb') as src, destination.open('wb') as dst:
+            shutil.copyfileobj(src, dst, COPY_CHUNK)
+            dst.flush()
+            os.fsync(dst.fileno())
+        try:
+            shutil.copystat(source, destination)
+        except OSError:
+            pass
 
     def restore(self, archive: Path) -> dict:
         payload, encrypted, cleanup_payload = self._payload_for_read(Path(archive))
         stage = Path(tempfile.mkdtemp(prefix='personal-ai-restore-'))
+        rollback = Path(tempfile.mkdtemp(prefix='personal-ai-restore-rollback-'))
+        touched: list[tuple[Path, Path | None]] = []
         try:
             manifest = self._inspect_zip(payload, encrypted=encrypted)
             with zipfile.ZipFile(payload) as zipped:
                 for item in manifest['files']:
                     rel = self._safe_rel(item['path'])
-                    destination = (stage / rel).resolve()
-                    if stage.resolve() not in destination.parents:
+                    staged = (stage / rel).resolve()
+                    if stage.resolve() not in staged.parents:
                         raise BackupError('unsafe restore path')
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination.write_bytes(zipped.read(item['path']))
+                    staged.parent.mkdir(parents=True, exist_ok=True)
+                    staged.write_bytes(zipped.read(item['path']))
 
-            # Validate the entire restore set before replacing any owner data.
+            destinations: list[tuple[Path, Path, Path]] = []
             for item in manifest['files']:
                 rel = self._safe_rel(item['path'])
                 staged = stage / rel
                 if staged.suffix.lower() in SQLITE_SUFFIXES:
                     self._sqlite_integrity(staged)
+                destination = self._safe_destination(rel)
+                destinations.append((rel, staged, destination))
+
+            # Snapshot all existing targets before mutating anything. If any
+            # snapshot fails, the restore aborts with owner state untouched.
+            for rel, _, destination in destinations:
+                rollback_copy = None
+                if destination.exists():
+                    if not destination.is_file() or destination.is_symlink():
+                        raise BackupError(f'unsafe restore destination: {rel.as_posix()}')
+                    rollback_copy = rollback / rel
+                    self._copy_fsynced(destination, rollback_copy)
+                touched.append((destination, rollback_copy))
 
             restored = 0
-            for item in manifest['files']:
-                rel = self._safe_rel(item['path'])
-                source = stage / rel
-                destination = self.data_dir / rel
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                temp_destination = destination.with_name(
-                    f'.{destination.name}.{secrets.token_hex(6)}.restore'
-                )
-                try:
-                    shutil.copy2(source, temp_destination)
-                    os.replace(temp_destination, destination)
-                    restored += 1
-                finally:
+            try:
+                for _, source, destination in destinations:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    temp_destination = destination.with_name(
+                        f'.{destination.name}.{secrets.token_hex(6)}.restore'
+                    )
                     try:
+                        self._copy_fsynced(source, temp_destination)
+                        os.replace(temp_destination, destination)
+                        restored += 1
+                    finally:
                         temp_destination.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+            except Exception as exc:
+                rollback_errors = []
+                for destination, rollback_copy in reversed(touched[:restored]):
+                    try:
+                        if rollback_copy is None:
+                            destination.unlink(missing_ok=True)
+                        else:
+                            rollback_temp = destination.with_name(
+                                f'.{destination.name}.{secrets.token_hex(6)}.rollback'
+                            )
+                            try:
+                                self._copy_fsynced(rollback_copy, rollback_temp)
+                                os.replace(rollback_temp, destination)
+                            finally:
+                                rollback_temp.unlink(missing_ok=True)
+                    except Exception as rollback_exc:  # pragma: no cover - catastrophic filesystem failure
+                        rollback_errors.append(f'{destination}: {rollback_exc}')
+                if rollback_errors:
+                    raise BackupError(
+                        'restore failed and rollback was incomplete: ' + '; '.join(rollback_errors)
+                    ) from exc
+                raise BackupError('restore failed; original owner state was rolled back') from exc
+
             return {
                 'ok': True,
                 'restored': restored,
@@ -444,8 +499,6 @@ class BackupService:
             }
         finally:
             shutil.rmtree(stage, ignore_errors=True)
+            shutil.rmtree(rollback, ignore_errors=True)
             if cleanup_payload:
-                try:
-                    payload.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                payload.unlink(missing_ok=True)
