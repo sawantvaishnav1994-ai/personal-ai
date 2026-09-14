@@ -20,7 +20,7 @@ class SettingsPanel(QDialog):
         prow=QHBoxLayout();self.policy_type=QComboBox();self.policy_type.addItems(['domain','application','path','destination','clipboard']);self.policy_target=QLineEdit();self.policy_target.setPlaceholderText('HTTPS origin, executable path, allowed root, or exact destination');prow.addWidget(self.policy_type);prow.addWidget(self.policy_target,1);lay.addLayout(prow)
         orow=QHBoxLayout();self.policy_ops=QLineEdit();self.policy_ops.setPlaceholderText('Allowed operations, comma-separated');self.policy_expiry=QLineEdit();self.policy_expiry.setPlaceholderText('Expiry minutes (optional)');orow.addWidget(self.policy_ops,1);orow.addWidget(self.policy_expiry);lay.addLayout(orow)
         self.policy_password=QLineEdit();self.policy_password.setEchoMode(QLineEdit.EchoMode.Password);self.policy_password.setPlaceholderText('Owner password — checked now, never stored in policy/logs');lay.addWidget(self.policy_password)
-        brow=QHBoxLayout();add=QPushButton('Add permission');add.clicked.connect(self.add_policy);self.policy_revoke_id=QLineEdit();self.policy_revoke_id.setPlaceholderText('Policy ID to revoke');revoke=QPushButton('Revoke');revoke.clicked.connect(self.revoke_policy);reset=QPushButton('Reset safe defaults');reset.clicked.connect(self.reset_policies);brow.addWidget(add);brow.addWidget(self.policy_revoke_id,1);brow.addWidget(revoke);brow.addWidget(reset);lay.addLayout(brow)
+        brow=QHBoxLayout();add=QPushButton('Add permission');add.clicked.connect(self.add_policy);self.policy_revoke_id=QLineEdit();self.policy_revoke_id.setPlaceholderText('Policy ID');toggle=QPushButton('Enable / Disable');toggle.clicked.connect(self.toggle_policy);revoke=QPushButton('Revoke');revoke.clicked.connect(self.revoke_policy);reset=QPushButton('Reset safe defaults');reset.clicked.connect(self.reset_policies);brow.addWidget(add);brow.addWidget(self.policy_revoke_id,1);brow.addWidget(toggle);brow.addWidget(revoke);brow.addWidget(reset);lay.addLayout(brow)
         self.policy_view=QPlainTextEdit();self.policy_view.setReadOnly(True);self.policy_view.setMaximumHeight(190);lay.addWidget(self.policy_view);prefresh=QPushButton('Refresh permissions');prefresh.clicked.connect(self.refresh_policy_view);lay.addWidget(prefresh)
         lay.addWidget(QLabel('Local diagnostics'));self.diagnostics=QPlainTextEdit();self.diagnostics.setReadOnly(True);self.refresh();lay.addWidget(self.diagnostics,1);refresh=QPushButton('Refresh diagnostics');refresh.clicked.connect(self.refresh);lay.addWidget(refresh);self.refresh_policy_view()
     def save(self):
@@ -42,7 +42,7 @@ class SettingsPanel(QDialog):
         if kind=='domain':
             origin=normalize_origin(raw);return {'scheme':origin.scheme,'host':origin.host,'port':origin.port,'include_subdomains':False,'allow_ip_literal':False,'allow_private_network':False}
         if kind=='application':return application_identity(raw)
-        if kind=='path':return {'root':str(Path(raw).expanduser().resolve(strict=False)),'allow_network':False}
+        if kind=='path':return {'root':str(Path(raw).expanduser().resolve(strict=False)),'allow_network':False,'allow_mounted':False}
         if kind=='clipboard':return {'destination':raw}
         return {'identity':raw}
     def add_policy(self):
@@ -56,6 +56,14 @@ class SettingsPanel(QDialog):
             if expiry:expires_at=__import__('time').time()+max(1,int(expiry))*60
             row=gateway.add_policy(owner_id='owner',target_type=self.policy_type.currentText(),target_identity=target,allowed_operations=ops,security_epoch=tools.current_security_epoch(),actor='owner_settings',reauthenticated=True,expires_at=expires_at);self.policy_revoke_id.setText(row['policy_id']);self.refresh_policy_view();QMessageBox.information(self,'Permission added','Permission saved locally. Everything else remains denied by default.')
         except Exception as exc:QMessageBox.warning(self,'Permission not changed',str(exc))
+    def toggle_policy(self):
+        tools=self.runtime.get('tools');gateway=getattr(tools,'policy_gateway',None);pid=self.policy_revoke_id.text().strip()
+        if gateway is None or not pid:return
+        current=gateway.store.get(pid)
+        if not current:QMessageBox.warning(self,'Not found','No matching owner policy was found.');return
+        if not self._reauthenticated():return
+        enabled=not bool(current.get('active'))
+        if gateway.set_policy_active(pid,owner_id='owner',enabled=enabled,actor='owner_settings',reauthenticated=True):self.refresh_policy_view();QMessageBox.information(self,'Permission updated','Permission enabled.' if enabled else 'Permission disabled. Future actions are denied until re-enabled.')
     def revoke_policy(self):
         tools=self.runtime.get('tools');gateway=getattr(tools,'policy_gateway',None);pid=self.policy_revoke_id.text().strip()
         if gateway is None or not pid:return
