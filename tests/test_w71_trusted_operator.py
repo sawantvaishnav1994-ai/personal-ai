@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -11,20 +12,34 @@ from vision.computer_intelligence import ComputerIntelligence
 
 class Models:
     def json(self, prompt, system=''):
-        return {
-            'summary': 'click the safe test button',
-            'steps': [
-                {'kind': 'click', 'params': {'x': 10, 'y': 20}, 'reason': 'test action', 'verify': 'the test state changed'}
-            ],
-        }
+        return {'summary':'click the safe test button','steps':[{'kind':'click','params':{'x':10,'y':20},'reason':'test action','verify':'the test state changed'}]}
 
 
 class Screen:
-    def __init__(self, verified=True): self.verified=verified
-    def analyze(self, prompt, monitor=1):
-        if str(prompt).startswith('Verify this UI postcondition:'):
-            return {'analysis': 'VERIFIED test state changed' if self.verified else 'NOT_VERIFIED test state unchanged', 'screenshot': 'screen-after'}
-        return {'analysis': 'safe test screen with one button', 'screenshot': 'screen-before'}
+    def __init__(self, verified=True): self.verified=verified; self.n=0
+    def analyze(self, prompt, monitor=1, redactions=None):
+        self.n += 1; now=time.time(); verifying=str(prompt).startswith('Verify this UI postcondition:')
+        return {
+            'analysis':('VERIFIED test state changed' if self.verified else 'NOT_VERIFIED test state unchanged') if verifying else 'safe test screen with one button',
+            'observation_id':f'test-observation-{self.n}','captured_at':now,'expires_at':now+120,
+            'screenshot_evidence_ref':f'screenshots/test-{self.n}.png','screen_fingerprint':f'screen-{self.n}','redaction_count':0,
+        }
+
+
+class Browser:
+    def __init__(self): self.context=object(); self.page=object()
+    def observe(self):
+        return {
+            'captured_at':time.time(),'browser':'chromium','browser_context_id':'browser-test','tab_id':'tab-test','tab_index':0,'tab_count':1,
+            'origin':'https://test.invalid','normalized_url':'https://test.invalid/test','domain':'test.invalid','visible_text_sha256':'visible','dom_sha256':'dom',
+            'accessibility_sha256':'a11y','accessibility_available':True,'actionable_digest':'actions','frame_origins_digest':'frames','active_target_id':'target-test',
+            'sensitive_regions':[],'elements':[{'target_id':'target-test','geometry_digest':'geometry-test','actionable':True,'sensitive':False,'box':{'x':0,'y':0,'width':100,'height':100}}],
+        }
+
+
+class ApplicationObserver:
+    def capture(self):
+        return {'available':True,'identity_digest':'app-test','application':'test-app','executable':'test.exe','process_id':10,'process_start_token':'start','window_id':'hwnd:test','window_title_sha256':'title'}
 
 
 class Controller:
@@ -45,7 +60,7 @@ def trusted():
 
 
 def computer(tmp_path, *, verified=True, stopped=None):
-    ctl=Controller(); c=ComputerIntelligence(Models(),tmp_path,controller=ctl,emergency_stop=(stopped or (lambda:False)))
+    ctl=Controller(); c=ComputerIntelligence(Models(),tmp_path,controller=ctl,emergency_stop=(stopped or (lambda:False)),browser_session=Browser(),application_observer=ApplicationObserver())
     c.screen=Screen(verified=verified)
     return c,ctl
 
@@ -62,6 +77,8 @@ def test_prepare_binds_goal_plan_authority_and_conversation(tmp_path):
     assert tx['security_epoch']==9
     assert tx['conversation_id']=='conversation-1' and tx['workflow_id']=='workflow-1'
     assert tx['plan']==params['_operator_plan']
+    assert params['_operator_plan_digest']==params['_operator_plan']['canonical_plan_digest']
+    assert params['_operator_observation_digest']==params['_operator_plan']['observation_digest']
     before=parameter_hash(params)
     params['_operator_plan']['steps'][0]['params']['x']=11
     assert parameter_hash(params)!=before
@@ -73,7 +90,8 @@ def test_prepared_execution_completes_only_after_verification(tmp_path):
     assert ctl.clicks==1
     tx=c.operator_transactions.transaction(params['_operator_transaction_id'])
     assert tx['state']=='completed' and tx['checkpoint_index']==1
-    assert c.operator_transactions.actions(tx['transaction_id'])[0]['verified'] is True
+    action=c.operator_transactions.actions(tx['transaction_id'])[0]
+    assert action['verified'] is True and action['before_observation_id'] and action['after_observation_id']
     dedup=c.execute_prepared(params)
     assert dedup['deduplicated'] is True and ctl.clicks==1
 
@@ -110,7 +128,7 @@ def test_unprepared_or_wrong_binding_execution_fails_closed(tmp_path):
 
 def test_tool_registry_prepares_exact_plan_under_trusted_request_context(tmp_path):
     settings=SimpleNamespace(data_dir=tmp_path,autonomy_mode='ask')
-    registry=ToolRegistry(settings); comp=register_computer(registry,Models(),settings); comp.screen=Screen(); comp.controller=Controller(); comp.transactions.controller=comp.controller
+    registry=ToolRegistry(settings); registry._persistent_browser=Browser(); comp=register_computer(registry,Models(),settings); comp.screen=Screen(); comp.controller=Controller(); comp.transactions.controller=comp.controller; comp.application_observer=ApplicationObserver()
     tool=registry.get('computer_execute')
     assert tool.requires_trusted_context is True and tool.requires_reauth is True and tool.verification_required is True
     params={'goal':'click the safe test button','max_steps':4,'monitor':1}
@@ -121,7 +139,8 @@ def test_tool_registry_prepares_exact_plan_under_trusted_request_context(tmp_pat
     assert decision.allowed is False and decision.requires_confirmation is True
     assert params['_trusted_context']['device_id']=='device-1'
     assert params['_operator_plan']['steps'][0]['kind']=='click'
-    assert params['_operator_transaction_id']
+    assert params['_operator_plan']['steps'][0]['target']['target_id']=='target-test'
+    assert params['_operator_transaction_id'] and params['_operator_observation_id'] and params['_operator_plan_digest']
     assert params['_personal_ai_prepared'] is True
 
 
