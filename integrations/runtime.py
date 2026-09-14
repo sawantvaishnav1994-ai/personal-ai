@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from dataclasses import replace
 from integrations.registry import IntegrationRegistry,Integration
 from integrations.adapters import GmailAdapter,GoogleCalendarAdapter,SlackAdapter,HomeAssistantAdapter
 from integrations.google_write import GoogleDriveWriteAdapter,GoogleSheetsWriteAdapter
@@ -12,17 +13,29 @@ from security.approvals import ApprovalManager
 GOOGLE_AUTH='https://accounts.google.com/o/oauth2/v2/auth'; GOOGLE_TOKEN='https://oauth2.googleapis.com/token'; GOOGLE_REVOKE='https://oauth2.googleapis.com/revoke'
 SLACK_AUTH='https://slack.com/oauth/v2/authorize'; SLACK_TOKEN='https://slack.com/api/oauth.v2.access'; SLACK_REVOKE='https://slack.com/api/auth.revoke'
 
+def _runtime_manifest(manifest):
+    declared=list(manifest.required_oauth_scopes)+list(manifest.optional_oauth_scopes)
+    required=set(manifest.required_oauth_scopes)
+    for operation in manifest.operations:
+        if operation.prohibited:
+            continue
+        for scope in operation.required_scopes:
+            if scope not in required and scope not in declared:
+                declared.append(scope)
+    optional=tuple(scope for scope in declared if scope not in required)
+    return replace(manifest,optional_oauth_scopes=optional)
+
 def provider_catalog(settings):
     out={}
     if getattr(settings,'google_client_id',''):
-        out['google']=OAuthProvider('google',GOOGLE_AUTH,GOOGLE_TOKEN,settings.google_client_id,['openid','email','https://www.googleapis.com/auth/gmail.readonly','https://www.googleapis.com/auth/gmail.send','https://www.googleapis.com/auth/calendar','https://www.googleapis.com/auth/drive.readonly','https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/spreadsheets.readonly','https://www.googleapis.com/auth/spreadsheets'],getattr(settings,'google_client_secret',''),GOOGLE_REVOKE)
+        out['google']=OAuthProvider('google',GOOGLE_AUTH,GOOGLE_TOKEN,settings.google_client_id,['openid','email','https://www.googleapis.com/auth/gmail.readonly','https://www.googleapis.com/auth/gmail.compose','https://www.googleapis.com/auth/gmail.send','https://www.googleapis.com/auth/gmail.modify','https://www.googleapis.com/auth/calendar.readonly','https://www.googleapis.com/auth/calendar','https://www.googleapis.com/auth/drive.readonly','https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/spreadsheets.readonly','https://www.googleapis.com/auth/spreadsheets'],getattr(settings,'google_client_secret',''),GOOGLE_REVOKE)
     if getattr(settings,'slack_client_id',''):
         out['slack']=OAuthProvider('slack',SLACK_AUTH,SLACK_TOKEN,settings.slack_client_id,['channels:history','chat:write'],getattr(settings,'slack_client_secret',''),SLACK_REVOKE)
     return out
 
 def build_integrations(settings,vault=None):
     state=ConnectorStateStore(Path(settings.data_dir)/'connectors.sqlite3',vault=vault); gateway=ConnectorGateway(state); reg=IntegrationRegistry(state_store=state)
-    for manifest in builtin_manifests():reg.register_manifest(manifest)
+    for manifest in builtin_manifests():reg.register_manifest(_runtime_manifest(manifest))
     approval=ApprovalManager(path=Path(settings.data_dir)/'trusted-actions.sqlite3')
     providers=provider_catalog(settings)
     redirect_uri=(os.getenv('OAUTH_REDIRECT_URI','').strip() or getattr(settings,'oauth_redirect_uri','') or 'http://127.0.0.1:8766/oauth/callback')
@@ -52,7 +65,6 @@ def build_integrations(settings,vault=None):
         a=HomeAssistantAdapter(settings.home_assistant_url,settings.home_assistant_token,gateway=gateway); adapters['home_assistant']=a; reg.register(Integration('home_assistant','Home Assistant',set(o.name for o in home_assistant_manifest().operations),lambda:bool(a.states() is not None),home_assistant_manifest(),True))
     if google_scopes is not None:
         reg.sync_provider_scopes('google',google_scopes)
-    # initialize truthful health rows without performing external network calls
     for manifest in reg.manifests.list():
         configured=manifest.connector_id in adapters
         current=state.health(manifest.connector_id)
