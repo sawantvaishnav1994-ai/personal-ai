@@ -40,19 +40,19 @@ class SessionBoundExecutor:
         except ReauthenticationRequired as exc:
             raise OwnerReauthenticationRequired(exc.reason) from exc
 
-    def _operator_context(self, context, kwargs):
+    def _operator_context(self, context, metadata):
         return OperatorRequestContext(
-            owner_id=str(kwargs.get('owner_id') or 'owner'),
+            owner_id=str(metadata.get('owner_id') or 'owner'),
             device_id=context.device_id,
             session_id=context.session_id,
             security_epoch=self._executor.approvals.current_security_epoch(),
-            conversation_id=str(kwargs.get('conversation_id') or ''),
-            workflow_id=str(kwargs.get('workflow_id') or ''),
+            conversation_id=str(metadata.get('conversation_id') or ''),
+            workflow_id=str(metadata.get('workflow_id') or ''),
             reauthenticated_at=context.reauthenticated_at,
         )
 
-    def _bound(self, context, kwargs, callback):
-        token = set_operator_request(self._operator_context(context, kwargs))
+    def _bound(self, context, metadata, callback):
+        token = set_operator_request(self._operator_context(context, metadata))
         try:
             return callback()
         finally:
@@ -61,36 +61,53 @@ class SessionBoundExecutor:
     def chat(self, text, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        kwargs['device_id'] = context.device_id
-        kwargs['session_id'] = context.session_id
-        kwargs['reauthenticated_at'] = context.reauthenticated_at
+        metadata = dict(kwargs)
+        call_kwargs = dict(kwargs)
+        call_kwargs.pop('workflow_id', None)
+        call_kwargs['device_id'] = context.device_id
+        call_kwargs['session_id'] = context.session_id
+        call_kwargs['reauthenticated_at'] = context.reauthenticated_at
+        metadata.update(call_kwargs)
         return self._bound(
             context,
-            kwargs,
-            lambda: self._translate_reauth(lambda: self._executor.chat(text, **kwargs)),
+            metadata,
+            lambda: self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs)),
         )
 
     def approve(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
         approval_context = self._executor.approval_context(approval_id) or {}
-        if approval_context.get('conversation_id') and not kwargs.get('conversation_id'):
-            kwargs['conversation_id'] = approval_context['conversation_id']
-        kwargs['device_id'] = context.device_id
-        kwargs['session_id'] = context.session_id
-        kwargs['reauthenticated_at'] = context.reauthenticated_at
+        metadata = dict(kwargs)
+        metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
+        metadata.setdefault('owner_id', 'owner')
+        call_kwargs = {key: value for key, value in kwargs.items() if key in {'device_id', 'session_id', 'owner_id', 'reauthenticated_at'}}
+        call_kwargs['device_id'] = context.device_id
+        call_kwargs['session_id'] = context.session_id
+        call_kwargs['reauthenticated_at'] = context.reauthenticated_at
         return self._bound(
             context,
-            kwargs,
-            lambda: self._translate_reauth(lambda: self._executor.approve(approval_id, **kwargs)),
+            metadata,
+            lambda: self._translate_reauth(lambda: self._executor.approve(approval_id, **call_kwargs)),
         )
 
     def reject(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
         approval_context = self._executor.approval_context(approval_id) or {}
-        if approval_context.get('conversation_id') and not kwargs.get('conversation_id'):
-            kwargs['conversation_id'] = approval_context['conversation_id']
-        kwargs['device_id'] = context.device_id
-        kwargs['session_id'] = context.session_id
-        return self._bound(context, kwargs, lambda: self._executor.reject(approval_id, **kwargs))
+        metadata = dict(kwargs)
+        metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
+        metadata.setdefault('owner_id', 'owner')
+        paused = self._executor._load_paused(approval_id) if hasattr(self._executor, '_load_paused') else None
+        tool = None; params = None
+        if paused:
+            step = paused['plan']['steps'][paused['index']]
+            tool = self._executor.tools.get(step['tool'])
+            params = step.get('parameters', {})
+        call_kwargs = {key: value for key, value in kwargs.items() if key in {'device_id', 'session_id'}}
+        call_kwargs['device_id'] = context.device_id
+        call_kwargs['session_id'] = context.session_id
+        result = self._bound(context, metadata, lambda: self._executor.reject(approval_id, **call_kwargs))
+        if tool is not None and tool.on_reject is not None:
+            tool.on_reject(params or {})
+        return result
