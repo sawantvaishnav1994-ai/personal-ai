@@ -13,7 +13,7 @@ def now():
 
 
 class ContinuityService:
-    """Shared context ledger for one Personal AI across many trusted devices."""
+    """Shared conversation/context ledger for Personal AI across trusted devices."""
 
     def __init__(self, path: Path, *, events=None, second_brain=None):
         self.path = Path(path)
@@ -53,8 +53,9 @@ class ContinuityService:
             )
 
     def _con(self):
-        con = sqlite3.connect(self.path)
+        con = sqlite3.connect(self.path, timeout=30)
         con.row_factory = sqlite3.Row
+        con.execute('PRAGMA foreign_keys=ON')
         return con
 
     def create_thread(self, title: str = 'Current context', *, device_id: str | None = None, context: dict | None = None):
@@ -117,14 +118,27 @@ class ContinuityService:
         return self.thread(thread_id)
 
     def set_active(self, device_id: str, thread_id: str):
-        if not self.thread(thread_id):
-            raise KeyError('continuity thread not found')
+        thread = self.thread(thread_id)
+        if not thread or thread.get('closed_at'):
+            raise KeyError('active continuity thread not found')
+        stamp = now()
         with self.lock, self._con() as con:
+            current = con.execute(
+                'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+                (device_id,),
+            ).fetchone()
+            # The event sequence is global while a device cursor is thread-local in
+            # meaning. Reset when switching threads so an older conversation can
+            # never be hidden behind a newer thread's higher sequence cursor.
+            last_event_id = int(current['last_event_id']) if current and current['active_thread_id'] == thread_id else 0
             con.execute(
                 '''INSERT INTO continuity_device_state(device_id,active_thread_id,last_event_id,updated_at)
-                   VALUES(?,?,0,?)
-                   ON CONFLICT(device_id) DO UPDATE SET active_thread_id=excluded.active_thread_id,updated_at=excluded.updated_at''',
-                (device_id, thread_id, now()),
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(device_id) DO UPDATE SET
+                     active_thread_id=excluded.active_thread_id,
+                     last_event_id=excluded.last_event_id,
+                     updated_at=excluded.updated_at''',
+                (device_id, thread_id, last_event_id, stamp),
             )
         self._emit('continuity.active.changed', device_id=device_id, thread_id=thread_id)
         return {'device_id': device_id, 'thread_id': thread_id}
@@ -191,6 +205,8 @@ class ContinuityService:
 
     def resume(self, device_id: str, *, thread_id: str | None = None, event_limit: int = 30):
         thread = self.thread(thread_id) if thread_id else self.active_for_device(device_id)
+        if thread is not None and thread.get('closed_at'):
+            raise KeyError('continuity thread is archived')
         if thread is None:
             created = self.create_thread('Current context', device_id=device_id)
             thread = self.thread(created)
@@ -225,8 +241,11 @@ class ContinuityService:
         if not thread:
             return self.resume(device_id, event_limit=limit)
         with self.lock, self._con() as con:
-            state = con.execute('SELECT last_event_id FROM continuity_device_state WHERE device_id=?', (device_id,)).fetchone()
-        after = int(state['last_event_id']) if state else 0
+            state = con.execute(
+                'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+                (device_id,),
+            ).fetchone()
+        after = int(state['last_event_id']) if state and state['active_thread_id'] == thread['id'] else 0
         events = self.events_for_thread(thread['id'], after_sequence=after, limit=limit)
         if events:
             last = int(events[-1]['sequence'])
@@ -248,10 +267,48 @@ class ContinuityService:
         self._emit('continuity.handoff', thread_id=thread_id, from_device=from_device, to_device=to_device)
         return bundle
 
-    def close_thread(self, thread_id: str):
+    def archive_thread(self, thread_id: str) -> bool:
+        stamp = now()
         with self.lock, self._con() as con:
-            cur = con.execute('UPDATE continuity_threads SET closed_at=?,updated_at=? WHERE id=? AND closed_at IS NULL', (now(), now(), thread_id))
+            cur = con.execute(
+                'UPDATE continuity_threads SET closed_at=?,updated_at=? WHERE id=? AND closed_at IS NULL',
+                (stamp, stamp, thread_id),
+            )
+            if cur.rowcount:
+                con.execute(
+                    'UPDATE continuity_device_state SET active_thread_id=NULL,last_event_id=0,updated_at=? WHERE active_thread_id=?',
+                    (stamp, thread_id),
+                )
+        if cur.rowcount:
+            self._emit('continuity.thread.archived', thread_id=thread_id)
         return cur.rowcount == 1
+
+    def close_thread(self, thread_id: str):
+        return self.archive_thread(thread_id)
+
+    def delete_thread(self, thread_id: str) -> bool:
+        with self.lock, self._con() as con:
+            if not con.execute('SELECT 1 FROM continuity_threads WHERE id=?', (thread_id,)).fetchone():
+                return False
+            con.execute(
+                'UPDATE continuity_device_state SET active_thread_id=NULL,last_event_id=0,updated_at=? WHERE active_thread_id=?',
+                (now(), thread_id),
+            )
+            con.execute('DELETE FROM continuity_events WHERE thread_id=?', (thread_id,))
+            con.execute('DELETE FROM continuity_threads WHERE id=?', (thread_id,))
+        self._emit('continuity.thread.deleted', thread_id=thread_id)
+        return True
+
+    def export_thread(self, thread_id: str) -> dict:
+        thread = self.thread(thread_id)
+        if not thread:
+            raise KeyError('continuity thread not found')
+        return {
+            'version': 1,
+            'exported_at': now(),
+            'conversation': thread,
+            'events': self.events_for_thread(thread_id, limit=1000),
+        }
 
     def _emit(self, event: str, **payload):
         if self.events:
