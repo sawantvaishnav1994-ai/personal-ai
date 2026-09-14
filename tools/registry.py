@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any, Callable
 from urllib.parse import urlparse
 from core.permissions import PermissionDecision, PermissionEngine
+from desktop.operator_context import current_operator_request
 
 class Risk(IntEnum): READ_ONLY=0; REVERSIBLE=1; EXTERNAL_SIDE_EFFECT=2; DESTRUCTIVE=3; CRITICAL=4
 @dataclass(frozen=True)
@@ -83,10 +84,23 @@ class ToolRegistry:
         if destination and classification=='secret':risk=max(risk,Risk.CRITICAL)
         elif destination and classification in {'sensitive','restricted'}:risk=max(risk,Risk.DESTRUCTIVE)
         return Risk(int(risk))
+    def _prepare_trusted(self,tool,parameters):
+        if not tool.requires_trusted_context:return parameters
+        if not isinstance(parameters,dict):raise PermissionError('trusted operator parameters are required')
+        context=current_operator_request()
+        if context is None:raise PermissionError('trusted browser/session context is required for computer control')
+        parameters.pop('_trusted_context',None)
+        parameters['_trusted_context']=context.safe_dict()
+        if tool.prepare is not None and not parameters.get('_personal_ai_prepared'):
+            prepared=tool.prepare(parameters)
+            if not isinstance(prepared,dict):raise RuntimeError('trusted tool preparation must return parameters')
+            parameters.clear();parameters.update(prepared);parameters['_personal_ai_prepared']=True
+        return parameters
     def automatic(self,tool):return self.authorize(tool,confirmed=False).allowed
     def authorize(self,tool,confirmed=False,*,parameters=None,data_classification='internal'):
         if self.emergency_stop:return PermissionDecision(False,False,'owner emergency stop is active')
         if tool.prohibited:return PermissionDecision(False,False,'this connector operation is prohibited by policy')
+        parameters=self._prepare_trusted(tool,parameters)
         classification=str(data_classification or 'internal').strip().lower()
         if classification in set(tool.prohibited_data_classifications):return PermissionDecision(False,False,'this data classification is prohibited for the connector operation')
         self.validate_destination(tool,parameters); risk=self.effective_risk(tool,parameters=parameters,data_classification=classification); return self.permissions.decide(int(risk),confirmed=confirmed)
