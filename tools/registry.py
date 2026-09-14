@@ -21,13 +21,20 @@ class Tool:
     prepare:Callable[[dict[str,Any]],dict[str,Any]]|None=None; on_reject:Callable[[dict[str,Any]],Any]|None=None; requires_trusted_context:bool=False
 class ToolRegistry:
     def __init__(self,settings):
-        self.settings=settings; self.permissions=PermissionEngine(settings.autonomy_mode); self._tools={}; self.emergency_stop=False; self._control_path=None; self._approval_path=None
+        self.settings=settings; self.permissions=PermissionEngine(settings.autonomy_mode); self._tools={}; self.emergency_stop=False; self._control_path=None; self._approval_path=None; self.policy_gateway=None
         data_dir=getattr(settings,'data_dir',None)
         if data_dir is not None:
             data_root=Path(data_dir); self._control_path=data_root/'runtime-controls.sqlite3'; self._approval_path=data_root/'trusted-actions.sqlite3'; self._control_path.parent.mkdir(parents=True,exist_ok=True)
             with self._control_con() as con:
                 con.execute('CREATE TABLE IF NOT EXISTS runtime_controls (key TEXT PRIMARY KEY,value TEXT NOT NULL)'); row=con.execute("SELECT value FROM runtime_controls WHERE key='emergency_stop'").fetchone(); self.emergency_stop=bool(row and row[0]=='1')
+            from security.approvals import ApprovalManager
+            from security.policy_gateway import PolicyGateway
+            self.policy_gateway=PolicyGateway(data_root/'operator-policies.sqlite3',emergency_stop=lambda:self.emergency_stop,security_epoch_provider=lambda:ApprovalManager(path=self._approval_path).current_security_epoch())
     def _control_con(self):return sqlite3.connect(self._control_path)
+    def current_security_epoch(self):
+        if self._approval_path is None:return 0
+        from security.approvals import ApprovalManager
+        return ApprovalManager(path=self._approval_path).current_security_epoch()
     def set_emergency_stop(self,enabled:bool):
         previous=self.emergency_stop; self.emergency_stop=bool(enabled)
         if self._control_path is not None:
@@ -35,6 +42,12 @@ class ToolRegistry:
         if self.emergency_stop and not previous and self._approval_path is not None and self._approval_path.exists():
             from security.approvals import ApprovalManager; ApprovalManager(path=self._approval_path).advance_security_epoch()
         return self.emergency_stop
+    def evaluate_policy(self,operation,**kwargs):
+        if self.policy_gateway is None:raise PermissionError('policy gateway is unavailable; default deny')
+        return self.policy_gateway.evaluate(operation,**kwargs)
+    def policy_snapshot(self,owner_id='owner'):
+        if self.policy_gateway is None:return {'policies':[],'recent_use':[],'safe_default':'deny','schema_version':None}
+        return self.policy_gateway.owner_snapshot(owner_id)
     def register(self,tool:Tool):
         if tool.name in self._tools:raise ValueError(f'Duplicate tool {tool.name}')
         if tool.minimum_risk is not None and int(tool.risk)<int(tool.minimum_risk):tool.risk=Risk(int(tool.minimum_risk))
