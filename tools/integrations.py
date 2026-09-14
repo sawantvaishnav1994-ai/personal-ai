@@ -8,6 +8,12 @@ def _identity():
     ctx=current_trusted_request()
     return {'owner_id':'owner','device_id':getattr(ctx,'device_id',None),'session_id':getattr(ctx,'session_id',None)}
 
+def _connector_call(adapter, method_name, *args, destination='', **kwargs):
+    method=getattr(adapter, method_name)
+    if getattr(adapter, 'gateway', None) is not None:
+        return method(*args, destination=destination, **_identity(), **kwargs)
+    return method(*args, **kwargs)
+
 
 def register(registry,adapters):
     adapters=dict(adapters or {})
@@ -20,7 +26,7 @@ def register(registry,adapters):
             recipient=str(params['to']).strip(); subject=str(params.get('subject','')).strip()[:500]; body=str(params.get('body',''))[:100000]
             if '@' not in recipient or any(c in recipient for c in '\r\n'):raise ValueError('A valid recipient email is required')
             msg=EmailMessage(); msg['To']=recipient; msg['Subject']=subject; msg.set_content(body); return base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip('=')
-        def send_email(params):return gmail.send_raw(raw_message(params),destination=str(params['to']).strip(),**_identity())
+        def send_email(params):return _connector_call(gmail,'send_raw',raw_message(params),destination=str(params['to']).strip())
         def verify_sent(params,result):
             mid=str((result or {}).get('id') or '') if isinstance(result,dict) else ''
             opid=str((result or {}).get('_personal_ai_operation_id') or '') if isinstance(result,dict) else ''
@@ -29,7 +35,7 @@ def register(registry,adapters):
                 gmail.gateway.state.audit('operation.verified' if mid else 'operation.verification_failed',connector_id='gmail',correlation_id=opid,payload={'operation':'gmail.send'})
             return VerificationResult(bool(mid),'provider message id returned' if mid else 'provider message id missing',{'provider_resource_id':mid} if mid else {})
         registry.register(Tool('gmail_send_message','Send an email; params: to,subject,body. Always requires owner approval.',send_email,Risk.EXTERNAL_SIDE_EFFECT,verifier=verify_sent,verification_required=True,connector_id='gmail',capability='gmail.send',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,prohibited_data_classifications=('secret','restricted')))
-        def draft_email(params):return gmail.create_draft(raw_message(params),destination=str(params['to']).strip(),**_identity())
+        def draft_email(params):return _connector_call(gmail,'create_draft',raw_message(params),destination=str(params['to']).strip())
         registry.register(Tool('gmail_create_draft','Create an email draft; params: to,subject,body.',draft_email,Risk.REVERSIBLE,verifier=verify_sent,verification_required=True,connector_id='gmail',capability='gmail.draft',minimum_risk=Risk.REVERSIBLE,prohibited_data_classifications=('secret',)))
         registry.register(Tool('gmail_modify_message','Modify Gmail labels; params: message_id,add_labels,remove_labels.',lambda p:gmail.modify_message(str(p['message_id']),list(p.get('add_labels') or []),list(p.get('remove_labels') or [])),Risk.REVERSIBLE,verifier=lambda p,r:VerificationResult(bool(r),'provider modification response received',{}),verification_required=True,connector_id='gmail',capability='gmail.modify',minimum_risk=Risk.REVERSIBLE))
         registry.register(Tool('gmail_delete_message','Permanently delete a Gmail message. Prohibited by default.',lambda p:gmail.delete_message(str(p['message_id'])),Risk.CRITICAL,connector_id='gmail',capability='gmail.delete',minimum_risk=Risk.CRITICAL,requires_reauth=True,prohibited=True))
@@ -37,7 +43,7 @@ def register(registry,adapters):
     if calendar is not None:
         registry.register(Tool('calendar_list_events','List calendar events; params: calendar_id,timeMin,timeMax,maxResults',lambda p:calendar.list_events(str(p.get('calendar_id','primary')),timeMin=p.get('timeMin'),timeMax=p.get('timeMax'),maxResults=max(1,min(int(p.get('maxResults',20)),100)),singleEvents=True,orderBy='startTime'),Risk.READ_ONLY,connector_id='calendar',capability='calendar.read'))
         registry.register(Tool('calendar_search_events','Search calendar events; params: query,calendar_id',lambda p:calendar.list_events(str(p.get('calendar_id','primary')),q=str(p.get('query',''))[:500],maxResults=max(1,min(int(p.get('maxResults',20)),100)),singleEvents=True,orderBy='startTime'),Risk.READ_ONLY,connector_id='calendar',capability='calendar.search'))
-        def create_event(p):return calendar.create_event(dict(p['event']),str(p.get('calendar_id','primary')),**_identity())
+        def create_event(p):return _connector_call(calendar,'create_event',dict(p['event']),str(p.get('calendar_id','primary')),destination=str(p.get('calendar_id','primary')))
         def verify_event(p,r):
             eid=str((r or {}).get('id') or '') if isinstance(r,dict) else ''
             opid=str((r or {}).get('_personal_ai_operation_id') or '') if isinstance(r,dict) else ''
@@ -56,12 +62,12 @@ def register(registry,adapters):
                 if opid and getattr(calendar,'gateway',None):calendar.gateway.state.transition_operation(opid,'rollback_failed');calendar.gateway.state.audit('rollback.failed',connector_id='calendar',correlation_id=opid,payload={'operation':'calendar.create'})
                 raise
         registry.register(Tool('calendar_create_event','Create a calendar event; params: event,calendar_id. Requires owner approval.',create_event,Risk.EXTERNAL_SIDE_EFFECT,verifier=verify_event,rollback=rollback_create,rollback_description='Delete the newly created event when its provider id is known.',verification_required=True,connector_id='calendar',capability='calendar.create',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,prohibited_data_classifications=('secret',)))
-        registry.register(Tool('calendar_update_event','Update a calendar event; params: event_id,event,calendar_id. Requires owner approval.',lambda p:calendar.update_event(str(p['event_id']),dict(p['event']),str(p.get('calendar_id','primary')),**_identity()),Risk.EXTERNAL_SIDE_EFFECT,verifier=verify_event,verification_required=True,connector_id='calendar',capability='calendar.update',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,prohibited_data_classifications=('secret',)))
+        registry.register(Tool('calendar_update_event','Update a calendar event; params: event_id,event,calendar_id. Requires owner approval.',lambda p:_connector_call(calendar,'update_event',str(p['event_id']),dict(p['event']),str(p.get('calendar_id','primary')),destination=str(p.get('calendar_id','primary'))),Risk.EXTERNAL_SIDE_EFFECT,verifier=verify_event,verification_required=True,connector_id='calendar',capability='calendar.update',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,prohibited_data_classifications=('secret',)))
         def verify_delete(p,r):
             try:exists=calendar.verify_event(str(p['event_id']),str(p.get('calendar_id','primary')))
             except Exception:exists=False
             return VerificationResult(not exists,'event no longer present' if not exists else 'event is still present',{})
-        registry.register(Tool('calendar_delete_event','Delete a calendar event; params: event_id,calendar_id. Requires explicit owner approval.',lambda p:calendar.delete_event(str(p['event_id']),str(p.get('calendar_id','primary')),**_identity()),Risk.DESTRUCTIVE,verifier=verify_delete,verification_required=True,requires_reauth=True,connector_id='calendar',capability='calendar.delete',minimum_risk=Risk.DESTRUCTIVE))
+        registry.register(Tool('calendar_delete_event','Delete a calendar event; params: event_id,calendar_id. Requires explicit owner approval.',lambda p:_connector_call(calendar,'delete_event',str(p['event_id']),str(p.get('calendar_id','primary')),destination=str(p.get('calendar_id','primary'))),Risk.DESTRUCTIVE,verifier=verify_delete,verification_required=True,requires_reauth=True,connector_id='calendar',capability='calendar.delete',minimum_risk=Risk.DESTRUCTIVE))
     slack=adapters.get('slack')
     if slack is not None:
         registry.register(Tool('slack_read_messages','Read recent Slack channel messages; params: channel,limit',lambda p:slack.history(str(p['channel']),max(1,min(int(p.get('limit',50)),100))),Risk.READ_ONLY,connector_id='slack',capability='slack.read'))
