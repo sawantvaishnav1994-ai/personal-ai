@@ -2,50 +2,35 @@
 
 Baseline date: 2026-09-14
 
-This matrix intentionally excludes capabilities that have sufficient implementation + integration + operational evidence. Items remain here until their status can be raised with evidence.
-
 | Priority | Workstream | Item | Current status | Why not complete | Next bounded action |
 | --- | --- | --- | --- | --- | --- |
-| P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | production runtime has no attached volume; data root defaults to container home | add hosted-storage guard + diagnostics, then attach durable storage and run restart/redeploy proof |
-| P0 | W1 | Backup/restore qualification | PARTIAL | automated isolated qualification exists, but production-like durable restore is not complete | attach durable production storage and perform restart/redeploy/restore proof |
-| P0 | W2 | Durable pending approvals | PARTIAL | implementation and restart tests pass; production durability is blocked by missing Railway volume | attach durable production storage and execute restart/redeploy proof |
-| P0 | W2 | Full permit binding | PARTIAL | owner/device/session/epoch/destination/classification binding is implemented and automated-tested | qualify concrete connectors and production sessions |
-| P0 | W2 | Atomic replay prevention | PARTIAL | durable one-use transaction/race tests pass | complete production persistence and distributed deployment proof |
-| P0 | W2 | Verification contracts | PARTIAL | generic verification/rollback infrastructure exists and W6 adds provider hooks for Gmail/Calendar | extend provider-specific verification/rollback contracts to remaining connectors and live-qualify them |
-| P0 | W2 | Security epoch / global revocation | PARTIAL | durable approval epoch exists and W6 pending OAuth is bound to security epoch/device/session | production persistence and broader real-session qualification remain |
-| P0 | W3 | Production conversation durability | PARTIAL | SQLite implementation exists but main Railway service is ephemeral | complete W1 and physical restart/redeploy tests |
-| P0 | W3 | Multi-browser physical qualification | QUALIFICATION | software supports multiple devices but required real-world evidence is missing | run two trusted browsers simultaneously on exact candidate |
-| P0 | W3 | Physical voice P3 | QUALIFICATION | automated P3 is green but required physical evidence missing | execute P3 protocol without fabricating evidence |
-| P1 | W3 | Conversation lifecycle completeness | PARTIAL | persistence/continuity exists; title/search/archive/export lifecycle needs evidence | inspect APIs/UI, add missing operations and tests |
-| P1 | W3 | Re-authentication for critical actions | PARTIAL | critical trusted actions and W6 high-risk connector actions can require recent re-auth | extend/qualify every critical surface and physical session |
-| P1 | W4 | NEVER_STORE policy | PARTIAL | extraction/write/retrieval enforcement and exact-head automation exist | production persistence evidence remains |
-| P1 | W4 | Explainable retrieval path | PARTIAL | W4 retrieval explanation implemented and automated validated | production/physical owner UX qualification remains |
-| P1 | W4 | Knowledge OCR/images | PARTIAL | bounded image/OCR contract exists, but real OCR provider/doc qualification remains | qualify approved OCR provider and real documents with provenance |
-| P1 | W4 | Knowledge versioning | PARTIAL | version lineage/current/superseded/per-version behavior implemented | production durability and owner UX qualification remain |
-| P1 | W5 | Approval wait/session binding | PARTIAL | durable initiating authority and approval binding are automated validated | qualify deployed durable restart and cross-session rejection |
-| P1 | W5 | Workflow budgets/concurrency | PARTIAL | persisted budgets, atomic concurrency, provider/tool dispatch accounting and recovery are automated validated | durable Railway operational qualification remains |
-| P1 | W6 | Stable connector declaration contract | RESOLVED FOR W6.1 AUTOMATED SCOPE | versioned manifest/runtime contract, health, retry/rate-limit/pagination/idempotency/verification/rollback metadata and lifecycle audit are implemented and exact-head validated | freeze W6.1 unless regression; proceed to W6.2 |
-| P1 | W6 | Durable OAuth transaction/replay state | RESOLVED FOR W6.1 AUTOMATED SCOPE | durable owner/device/session/security-epoch-bound PKCE transaction state passes restart/replay/expiry/concurrency tests | live provider OAuth qualification remains |
-| P1 | W6 | Gmail / Calendar governed migration | RESOLVED FOR W6.1 AUTOMATED SCOPE | existing adapters are migrated under shared governance with compatibility repair, provider IDs/verification and safe action policy | live Google account/provider qualification remains |
-| P1 | W6 | Google Drive / Sheets | PLANNED W6.2 | not included in W6.1 candidate | implement read/search/download for Drive and read/search for Sheets, then controlled writes |
-| P1 | W6 | Live Google/Gmail/Calendar/Drive/Sheets OAuth | BLOCKED | owner consent/credentials required and were intentionally not requested during software-side W6.1 | request owner only when live qualification gate is reached |
-| P1 | W6 | Provider-specific live quotas/revocation/webhooks | PARTIAL | common contracts exist but real provider behavior is not operationally qualified | qualify provider-specific rate limits, revocation, health and events with real accounts |
-| P1 | W7 | Safe computer operator end-to-end | PARTIAL | browser/computer tools exist but complete sandbox/verification/rollback policy not evidenced | inventory operators and route every consequential action through Trusted Action Core |
-| P1 | W8 | Self-hosted model live endpoint | BLOCKED | deployment package exists; no purchased GPU host | keep Gemini temporary/restrict sensitive routing; deploy only after owner purchase |
-| P1 | W8 | Provider health/fallback operational proof | PARTIAL | router has health/error/fallback logic; live matrix evidence incomplete | add deterministic provider failure tests and production status evidence |
-| P1 | W9 | Proactivity controls | PARTIAL | proactive engine exists; full quiet-hour/topic/frequency/destination/why controls not all verified | inspect UI/API, add missing controls/tests |
-| P1 | W10 | Permanent domain | BLOCKED | no owner-purchased permanent domain in current baseline | after purchase configure Railway DNS/SSL/OAuth/PWA/cookies migration |
-| P1 | W10 | Signed Windows distribution | BLOCKED/QUALIFICATION | packaging pipeline exists; signing prerequisites + physical install verification missing | prepare unsigned/dev artifacts; owner supplies signing prerequisite when ready |
-| P1 | W10 | Signed Android distribution | QUALIFICATION | workflows green; signed release + physical install evidence missing | produce signed build when signing material is available; test install/reconnect |
-| P1 | W10 | Native iOS/TestFlight | BLOCKED | Apple Developer/signing prerequisite not available | preserve project; do not claim distribution complete |
-| P1 | W11 | Health/observability taxonomy | PARTIAL | logs/telemetry/model errors exist; subsystem health/correlation/alerting not complete | add structured health status + correlation IDs + redaction tests |
-| P1 | W11 | Performance qualification | PARTIAL | some telemetry and soak evidence exists but release thresholds are not authoritative | record cold start/TTFR/voice/memory/knowledge/model/tool/reconnect metrics on exact candidate |
-| P0 | W12 | Physical P3 release gate | BLOCKED | owner/physical-device action required | execute and record exact SHA/device/OS/browser/results/logs/artifacts |
-| P0 | W12 | Release readiness | PARTIAL | W6.1 exact-head automated workflows are green; storage/security/physical/package-signing gates remain | do not merge/promote until all P0 gates are evidence-complete |
+| P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | main runtime still lacks persistent `/data` | attach only at approved production gate; restart/redeploy/backup/restore proof |
+| P0 | W2 | Production durable approvals/actions | PARTIAL | software is durable but production filesystem is not | complete W1 production gate |
+| P0 | W3 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute exact P3 protocol on validated candidate |
+| P1 | W4 | Real OCR/provider qualification | PARTIAL | bounded OCR contract exists; real provider/docs not qualified | qualify approved OCR path |
+| P1 | W5 | Workflow production durability | PARTIAL | W5 automated validated; Railway main volume absent | durable production operational proof |
+| P1 | W6.1 | Shared connector contract/OAuth lifecycle | RESOLVED FOR AUTOMATED SCOPE | implemented/integrated/automated validated | freeze unless regression |
+| P1 | W6.2 | Google Drive read-first | RESOLVED FOR AUTOMATED SCOPE | list/search/metadata/read/download/export + provenance exact-head validated | live Google account/provider qualification |
+| P1 | W6.2 | Google Sheets read-first | RESOLVED FOR AUTOMATED SCOPE | metadata/worksheet/range/batch reads + limits/provenance exact-head validated | live Google account/provider qualification |
+| P1 | W6 | Live Google OAuth | BLOCKED FOR LIVE EVIDENCE | real owner consent/account not yet connected by design | run exact read-only qualification package after software gate |
+| P1 | W6 | Google multi-connector scope preservation | QUALIFICATION | provider-level Google token is shared; incremental/multi-scope behavior must be proven live | verify granted-scope preservation before accepting live qualification |
+| P1 | W6.3 | Controlled Drive writes | PLANNED | intentionally excluded from W6.2 | granular create/upload/update/move/share/delete policies with approval/reauth/idempotency/verification |
+| P1 | W6.3 | Controlled Sheets writes | PLANNED | intentionally excluded from W6.2 | update/append/clear/batch/worksheet operations with bounded governance |
+| P1 | W6 | Provider-specific live quotas/revocation | PARTIAL | software contracts tested; real provider behavior not qualified | exercise real 401/403/429/quota/refresh/revoke behavior |
+| P1 | W7 | Safe Computer Operator | PARTIAL | bounded operator exists but policy surface is incomplete | Trusted Action binding, app/domain/path allowlists, accessibility-first control, clipboard/file safety, verification/recovery |
+| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | implement exact health/failover/correlation/cost telemetry |
+| P1 | W8 | Self-hosted private endpoint | BLOCKED | no GPU host | later owner infrastructure prerequisite |
+| P1 | W9 | Governed proactivity controls | PARTIAL | engine exists | quiet hours/frequency/why/suggestion-vs-action controls |
+| P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | perform when signing prerequisites are available |
+| P1 | W11 | Complete observability taxonomy | PARTIAL | telemetry foundations exist | health endpoints, correlation, redaction, alert thresholds |
+| P0 | W12 | Release readiness | PARTIAL | automated W6.2 is green; production/physical/signing gates remain | do not merge/promote until P0 evidence is complete |
 
-## W6.1 evidence update
+## W6.2 evidence
 
-Direct implementation SHA: `baaa7da38956e97231970c548626a71cde257176`  
-Validated branch integration SHA: `152ef13217b652121917a890de14e20edb139473`
+Implementation SHA: `ecb5e2615d06816e869dd4adb398565bb5c524fa`
 
-Six required exact-head workflows passed: CI #569, Reliability and Security #150, P3 iPhone PWA #118, Android Instrumentation #149, Package Validation #149 and iOS Companion #131. This resolves the software-side W6.1 contract foundation items only; it does not resolve live OAuth, W6.2 Drive/Sheets, production persistence, or real-provider operational qualification.
+Focused suite: **110 PASS**.
+
+Six exact-head workflows passed: CI #579, Reliability and Security #155, P3 iPhone PWA #123, Android Instrumentation #154, Package Validation #154 and iOS Companion #136.
+
+W6.2 resolves the software-side read-only Drive/Sheets items only. It does not resolve live OAuth, controlled writes, production persistence or real-provider operational qualification.
