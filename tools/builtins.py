@@ -37,6 +37,9 @@ def register_builtin_tools(
 ):
     files.register(registry, settings)
     desktop_file.register(registry, settings)
+    # W7.6 recovery extends the W7.1 transaction database. Initialize it only
+    # after W7.5 registration has created/recovered the authoritative W7.1 store.
+    registry.ensure_recovery_authority()
     integrations.register(registry, integration_adapters)
     google_read.register(registry, integration_adapters)
     google_write.register(registry, integration_adapters)
