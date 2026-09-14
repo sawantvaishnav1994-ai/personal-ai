@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from integrations.registry import IntegrationRegistry,Integration
 from integrations.adapters import GmailAdapter,GoogleCalendarAdapter,SlackAdapter,HomeAssistantAdapter
 from integrations.google_write import GoogleDriveWriteAdapter,GoogleSheetsWriteAdapter
@@ -24,8 +25,9 @@ def build_integrations(settings,vault=None):
     for manifest in builtin_manifests():reg.register_manifest(manifest)
     approval=ApprovalManager(path=Path(settings.data_dir)/'trusted-actions.sqlite3')
     providers=provider_catalog(settings)
-    allowed={getattr(settings,'oauth_redirect_uri','http://127.0.0.1:8766/oauth/callback'),'http://127.0.0.1:8766/oauth/callback'}
-    oauth=OAuthAccountManager(vault,redirect_uri=getattr(settings,'oauth_redirect_uri','http://127.0.0.1:8766/oauth/callback'),state_store=state,allowed_redirects=allowed,security_epoch_provider=approval.current_security_epoch) if vault else None
+    redirect_uri=(os.getenv('OAUTH_REDIRECT_URI','').strip() or getattr(settings,'oauth_redirect_uri','') or 'http://127.0.0.1:8766/oauth/callback')
+    allowed={redirect_uri,'http://127.0.0.1:8766/oauth/callback'}
+    oauth=OAuthAccountManager(vault,redirect_uri=redirect_uri,state_store=state,allowed_redirects=allowed,security_epoch_provider=approval.current_security_epoch) if vault else None
     reg.gateway=gateway; reg.oauth=oauth; reg.providers=providers
     adapters={}; google_token=None; google_scopes=None
     if oauth and 'google' in providers:

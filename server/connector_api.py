@@ -3,6 +3,7 @@ from fastapi import APIRouter,Cookie,HTTPException
 from pydantic import BaseModel,Field
 from security.request_context import current_trusted_request
 from integrations.gateway import ConnectorError
+from integrations.oauth_callback import resolve_oauth_context
 from server.connector_knowledge_api import connector_knowledge_router
 
 class OAuthStartBody(BaseModel):
@@ -41,9 +42,8 @@ def connector_router(runtime):
         if not set(requested).issubset(allowed):raise HTTPException(422,'One or more requested OAuth scopes are not allowed by the connector manifest')
         try:return oauth.begin(provider,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,connector_id=connector_id,scopes=requested,security_epoch=runtime['executor'].approvals.current_security_epoch(),relink_intent=body.intent)
         except (ValueError,PermissionError) as exc:raise HTTPException(422,str(exc)) from exc
-    @router.post('/{connector_id}/oauth/complete')
-    def oauth_complete(connector_id:str,body:OAuthCompleteBody,pa_device:str|None=Cookie(default=None),pa_token:str|None=Cookie(default=None)):
-        ctx=auth(pa_device,pa_token,'device:admin'); info=item(connector_id); provider=providers.get(info['provider'])
+    def complete_oauth(connector_id,body,ctx,pa_device):
+        info=item(connector_id); provider=providers.get(info['provider'])
         if not oauth or not provider:raise HTTPException(409,'OAuth client configuration is not available for this connector')
         try:
             result=oauth.complete(body.state,body.code,provider,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,connector_id=connector_id,security_epoch=runtime['executor'].approvals.current_security_epoch())
@@ -52,16 +52,30 @@ def connector_router(runtime):
             try:
                 token=oauth.token(provider)
                 for adapter_id,adapter in (runtime.get('integration_adapters') or {}).items():
-                    try:
-                        manifest=integrations.manifests.get(adapter_id)
-                    except Exception:
-                        continue
+                    try: manifest=integrations.manifests.get(adapter_id)
+                    except Exception: continue
                     if manifest.provider==info['provider'] and hasattr(adapter,'set_token'):adapter.set_token(token,granted_scopes=scopes)
             except Exception:pass
             return result
         except PermissionError as exc:raise HTTPException(403,str(exc)) from exc
         except ValueError as exc:raise HTTPException(422,str(exc)) from exc
         except Exception as exc:raise HTTPException(502,'The provider could not complete account connection') from exc
+
+    @router.post('/{connector_id}/oauth/complete')
+    def oauth_complete(connector_id:str,body:OAuthCompleteBody,pa_device:str|None=Cookie(default=None),pa_token:str|None=Cookie(default=None)):
+        ctx=auth(pa_device,pa_token,'device:admin'); return complete_oauth(connector_id,body,ctx,pa_device)
+
+    @router.post('/oauth/finalize')
+    def oauth_finalize(body:OAuthCompleteBody,pa_device:str|None=Cookie(default=None),pa_token:str|None=Cookie(default=None)):
+        ctx=auth(pa_device,pa_token,'device:admin')
+        if not oauth or not getattr(oauth,'state_store',None):raise HTTPException(409,'Durable OAuth state is unavailable')
+        try:
+            route=resolve_oauth_context(oauth.state_store,state=body.state,owner_id='owner',device_id=pa_device,session_id=ctx.session_id,security_epoch=runtime['executor'].approvals.current_security_epoch())
+        except PermissionError as exc:raise HTTPException(403,str(exc)) from exc
+        connector_id=route['connector_id']; info=item(connector_id)
+        if info['provider']!=route['provider_id']:raise HTTPException(403,'OAuth provider binding mismatch')
+        return complete_oauth(connector_id,body,ctx,pa_device)
+
     @router.post('/{connector_id}/revoke')
     def revoke(connector_id:str,pa_device:str|None=Cookie(default=None),pa_token:str|None=Cookie(default=None)):
         ctx=auth(pa_device,pa_token,'device:admin'); info=item(connector_id)

@@ -19,6 +19,7 @@ from server.workflow_budget_api import workflow_budget_router
 from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
 from server.connector_api import connector_router
 from server.connector_ui import ConnectorUiMiddleware, connector_ui_router
+from server.connector_oauth_callback import connector_oauth_callback_router
 
 storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
@@ -57,6 +58,7 @@ app.include_router(owner_product_router(runtime))
 app.include_router(workflow_budget_router(runtime))
 app.include_router(workflow_budget_ui_router())
 app.include_router(connector_router(runtime))
+app.include_router(connector_oauth_callback_router())
 app.include_router(connector_ui_router())
 app.include_router(capability_console_router(runtime))
 app.router.lifespan_context=lifespan
