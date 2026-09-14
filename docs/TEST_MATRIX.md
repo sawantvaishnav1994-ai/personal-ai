@@ -17,51 +17,60 @@ Statuses distinguish automated software evidence from live-provider, physical-de
 
 ## W7 validated history
 
-| Batch | Exact implementation SHA | Full evidence | Required workflows |
+| Batch | Exact implementation SHA | Focused/full evidence | Required workflows |
 | --- | --- | ---: | --- |
 | W7.1 Durable Operator Transaction Core | `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` | **471 PASS, 7 warnings** | **6/6 PASS** |
+| W7.2 Observation Safety / Application Context | `3d9f5a4f21cf59307758f261d6291a4b7a36003b` | **58 focused PASS; 530 full PASS, 7 warnings** | **6/6 PASS** |
 
 ## W7.1 implementation coverage
 
-Authority and binding:
-- trusted owner/device/session/security epoch;
-- initiating conversation/workflow binding;
-- requested goal and exact prepared-plan hashes;
-- ToolRegistry removes user-supplied trusted context and injects authenticated context;
-- `computer_execute` requires Trusted Action authority/recent reauthentication;
-- wrong owner/device/session/security epoch fails closed.
+Authority and binding, durable SQLite transaction/action/audit state, idempotency, restart recovery, cancellation/deadline/Emergency Stop, result verification and audit redaction are automated validated at the W7.1 exact head.
 
-Durability/idempotency:
-- SQLite-backed operator transaction/action/audit state;
-- transaction and action IDs;
-- explicit state machine and invalid-transition rejection;
-- `BEGIN IMMEDIATE` concurrency controls;
-- transaction-ID rebinding rejection;
-- action parameter-hash binding;
-- verified-action replay deduplication;
-- unresolved actions never blindly redispatch;
-- restart of executing/verifying work -> `recovery_review_required`;
-- action outcome marked unknown when process restarts after dispatch.
+## W7.2 implementation coverage
 
-Safety:
-- cancellation and deadline checks;
-- Emergency Stop before/between dispatches;
-- screen-change verification;
-- semantic postcondition verification from a fresh observation;
-- handler return is not sufficient proof;
-- semantic verification failure enters recovery review;
-- redacted operator audit excludes token/password/secret/content/text/clipboard payload fields.
+Observation authority and freshness:
+- durable observation ID/digest and owner/device/session/security-epoch/transaction binding;
+- observation expiry and plan expiry;
+- canonical plan digest tied to exact observation digest through the existing Trusted Action approval scope;
+- immediate fresh observation before dispatch;
+- action-by-action observation renewal and bounded before/after evidence;
+- changed app/process/window/browser session/tab/origin/URL/frame rejection;
+- actionable-target removal/replacement/movement rejection;
+- new sensitive-region detection;
+- Emergency Stop/cancellation checks immediately before dispatch;
+- uncertain outcomes -> recovery review.
 
-Focused W7.1 regressions cover durable state/binding, concurrent proposal idempotency, action checkpoint idempotency, crash/restart recovery, cancellation/deadline, audit redaction, prepared-plan authority, completed replay, semantic verification failure, Emergency Stop, wrong-session/unprepared rejection and trusted-context preparation.
+Browser privacy/evidence:
+- bounded visible-text, DOM and accessibility extraction;
+- stable browser-context/tab/element identities;
+- URL identity strips user-info/query/fragment;
+- password/secret/payment/OTP detection;
+- browser-native in-memory element masking across frames;
+- cookies, local/session storage and authorization headers are not captured;
+- durable evidence stores hashes/metadata rather than unrestricted raw DOM values.
 
-## W7.1 repair history
+Screenshot geometry and evidence boundary:
+- typed coordinate spaces for browser viewport/document/window, physical monitor, virtual desktop and screenshot image;
+- DPR 1/2/3, page zoom, scroll, browser chrome/content offsets, positive/negative monitor origins and clipping covered;
+- malformed/out-of-bounds/unsupported/missing geometry fails closed;
+- desktop screenshots are memory-captured and sanitized before persistence;
+- incomplete mapping -> full-frame fail-safe redaction / visual evidence unavailable;
+- full-redacted evidence cannot prove target position or visual success;
+- guarded vision/model boundary accepts only sanitized, checksum-valid, non-expired, provenance-known, owner/device/session-bound evidence;
+- no model call for unavailable visual evidence;
+- concurrent evidence IDs, retention/deletion and symlink/path confinement covered.
 
-1. Initial candidate `57407ed2ed2174fb28b6fd3b5e2e540f58b0b9c5` failed an existing compatibility test because a minimal test executor did not expose `.approvals`.
-2. Repair `4fbbfafc9d6e287253b5de1e483de021dcdc4076` made security-epoch lookup use the durable ApprovalManager when available and compatibility epoch 0 only for minimal non-production/mock executors.
-3. That candidate exposed a second compatibility assumption: the minimal mock did not expose `.approval_context()`.
-4. Final implementation `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` made approval metadata lookup optional for minimal mocks while retaining the real metadata path.
+Migration/restart:
+- fresh W7.2 database creation;
+- additive upgrade from W7.1-style schema;
+- repeated initialization/restart safety;
+- `PRAGMA user_version = 72`;
+- durable observation journal and action observation/target/plan bindings;
+- evidence checksum/redaction/provenance/retention metadata survives restart in the durable sensitivity metadata envelope.
 
-No W7 policy/security tests were weakened.
+## W7.2 focused regression count
+
+Final W7.2-focused suite: **58 cases**, all PASS as part of the exact implementation-head repository run. This count supersedes the earlier intermediate 33/33 prototype result.
 
 ## Exact-head workflows — W7.1
 
@@ -74,11 +83,34 @@ No W7 policy/security tests were weakened.
 | Package Validation | #187 | `34861953264` | PASS |
 | iOS Companion | #169 | `34861953258` | PASS |
 
-CI passed dependency install, `pip check`, repository compileall and full `pytest -q`: **471 passed, 7 warnings**. Reliability/Security passed dependency audit, compileall, full pytest, isolated encrypted backup/restore and soak. Package Validation passed Windows, macOS and Ubuntu jobs.
+## Exact-head workflows — W7.2 implementation
+
+| Workflow | Run | Run ID | Result |
+| --- | ---: | ---: | --- |
+| CI | #700 | `34869967548` | PASS |
+| Reliability and Security | #197 | `34869967279` | PASS |
+| P3 iPhone PWA | #165 | `34869967422` | PASS |
+| Android Instrumentation | #196 | `34869967534` | PASS |
+| Package Validation | #196 | `34869967417` | PASS |
+| iOS Companion | #178 | `34869967290` | PASS |
+
+CI passed dependency install, `pip check`, compileall and full `pytest -q`: **530 passed, 7 warnings**. Reliability/Security passed dependency audit, compileall, full pytest, isolated encrypted backup/restore and soak. Package Validation passed its OS packaging matrix. P3, Android and iOS companion workflows passed on the exact implementation SHA.
+
+No standalone JavaScript file changed in W7.2; embedded browser scripts are exercised through Python browser observation and masking regressions.
+
+## W7.2 repair history
+
+1. Recovered WIP lacked complete fresh-dispatch binding, plan/observation digest binding, durable tab/window identity and safe URL identity.
+2. Browser viewport sensitive rectangles were found unsafe to reuse directly as monitor screenshot coordinates; repaired with browser-native masking plus typed coordinate provenance and full-frame fail-safe behavior.
+3. Evidence consumer boundary added so unsanitized/full-redacted/expired/mismatched/checksum-invalid evidence never reaches model/vision.
+4. Evidence integrity metadata was made restart-persistent through the existing durable sensitivity metadata envelope.
+5. CI compatibility failures in legacy fake screens were repaired at the adapter/test-fixture boundary without relaxing the production evidence contract.
+6. Final safe-state ordering defect was repaired so unavailable foreground application returns `application_unavailable` instead of a generic verification failure.
+
+The superseded candidate `5d100d16501d98f32856a16789198707e01e7ddd` and workflow `34867451105` are not final evidence. No W7 security test was weakened.
 
 ## Mandatory evidence still outside automation
 
-- W7.2 active app/window/browser/tab/domain/accessibility/DOM observation and stale-observation controls;
 - W7.3 allowlists/data-safety policy;
 - W7.4 bounded browser operator;
 - W7.5 desktop/file operator hardening;
@@ -89,4 +121,4 @@ CI passed dependency install, `pip check`, repository compileall and full `pytes
 - main production durable-storage qualification;
 - physical P3 and signed distribution qualification.
 
-Hosted connector qualification remains **BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED**. Mocked/local provider tests remain software evidence only.
+Hosted connector qualification remains **BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED**. Automated W7.2 evidence does not constitute physical-device or production verification.
