@@ -2,123 +2,106 @@
 
 Baseline date: 2026-09-14
 
-Statuses distinguish automated software evidence from live-provider, physical-device, and production evidence.
-
-## W6 validated history
-
-| Batch | Exact code SHA | Focused/full evidence | Required workflows |
-| --- | --- | ---: | --- |
-| W6.1 connector foundation | `152ef13217b652121917a890de14e20edb139473` validated integration | 60 focused | 6/6 PASS |
-| W6.2 Drive/Sheets read-first | `ecb5e2615d06816e869dd4adb398565bb5c524fa` | 110 combined focused | 6/6 PASS |
-| W6.3 controlled writes | `95d33a66dca6c9621e50dbbb8f7f3a5c35eb2254` | 131 combined focused | 6/6 PASS |
-| W6 hosted OAuth preparation | `f79958103c50c0e1b25442ffbf6e58e5b4e65203` | 137 recovered connector/preflight | 6/6 PASS |
-| W6 Gmail Draft OAuth scope repair | `ae1b3c12ff82785b1f8cefe1bcbc6201e88b08bc` | full repository 446 PASS | 6/6 PASS |
-| W6 qualification preflight artifacts | `0092051edff451476a032da3934f72d459a75ae1` | full repository/regression CI | 6/6 PASS |
+Statuses distinguish automated software evidence from live-provider, physical-device and production evidence.
 
 ## W7 validated history
 
 | Batch | Exact implementation SHA | Focused/full evidence | Required workflows |
 | --- | --- | ---: | --- |
-| W7.1 Durable Operator Transaction Core | `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` | **471 PASS, 7 warnings** | **6/6 PASS** |
-| W7.2 Observation Safety / Application Context | `3d9f5a4f21cf59307758f261d6291a4b7a36003b` | **58 focused PASS; 530 full PASS, 7 warnings** | **6/6 PASS** |
-
-## W7.1 implementation coverage
-
-Authority and binding, durable SQLite transaction/action/audit state, idempotency, restart recovery, cancellation/deadline/Emergency Stop, result verification and audit redaction are automated validated at the W7.1 exact head.
+| W7.1 Durable Operator Transaction Core | `fe52b6ff960ebb57f89ca29120f2a57ebe3be3cc` | 471 full PASS | 6/6 PASS |
+| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f9e1587fe5a68d3923f15d0425ef81715` | **85 focused PASS; 557 full PASS, 8 warnings** | **6/6 PASS** |
 
 ## W7.2 implementation coverage
 
-Observation authority and freshness:
+Observation authority/freshness:
 - durable observation ID/digest and owner/device/session/security-epoch/transaction binding;
-- observation expiry and plan expiry;
-- canonical plan digest tied to exact observation digest through the existing Trusted Action approval scope;
+- observation and plan expiry;
+- canonical plan digest tied to exact observation digest through existing Trusted Action approval scope;
 - immediate fresh observation before dispatch;
 - action-by-action observation renewal and bounded before/after evidence;
 - changed app/process/window/browser session/tab/origin/URL/frame rejection;
 - actionable-target removal/replacement/movement rejection;
 - new sensitive-region detection;
-- Emergency Stop/cancellation checks immediately before dispatch;
-- uncertain outcomes -> recovery review.
+- Emergency Stop/cancellation check immediately before input;
+- uncertain outcome -> recovery review.
 
 Browser privacy/evidence:
-- bounded visible-text, DOM and accessibility extraction;
-- stable browser-context/tab/element identities;
-- URL identity strips user-info/query/fragment;
-- password/secret/payment/OTP detection;
-- browser-native in-memory element masking across frames;
-- cookies, local/session storage and authorization headers are not captured;
-- durable evidence stores hashes/metadata rather than unrestricted raw DOM values.
+- bounded visible text, sanitized DOM and accessibility extraction;
+- stable browser-context/tab/action-target identities;
+- normalized URL strips user-info/query/fragment;
+- password/hidden/OTP/payment/token/secret/PIN/CVV/CVC detection;
+- browser-native in-memory masking across frames;
+- no cookie/local-storage/session-storage/authorization-header capture;
+- no unrestricted DOM persistence.
 
-Screenshot geometry and evidence boundary:
-- typed coordinate spaces for browser viewport/document/window, physical monitor, virtual desktop and screenshot image;
-- DPR 1/2/3, page zoom, scroll, browser chrome/content offsets, positive/negative monitor origins and clipping covered;
-- malformed/out-of-bounds/unsupported/missing geometry fails closed;
-- desktop screenshots are memory-captured and sanitized before persistence;
-- incomplete mapping -> full-frame fail-safe redaction / visual evidence unavailable;
-- full-redacted evidence cannot prove target position or visual success;
-- guarded vision/model boundary accepts only sanitized, checksum-valid, non-expired, provenance-known, owner/device/session-bound evidence;
-- no model call for unavailable visual evidence;
-- concurrent evidence IDs, retention/deletion and symlink/path confinement covered.
+Coordinate-space version 2:
+- browser viewport;
+- browser document;
+- browser window;
+- physical monitor;
+- virtual desktop;
+- screenshot image.
+
+Transformation and clipping regressions cover DPR 1/2/3, page zoom, document scrolling, browser chrome/content offset, resized browser windows, positive/negative monitor origins, multi-monitor layouts, partially off-screen and cross-monitor rectangles, malformed/out-of-bounds rectangles and missing/unsupported geometry.
+
+Evidence boundary:
+- desktop screenshot captured into memory;
+- sanitize before persistence;
+- incomplete/uncertain geometry -> full-frame fail-safe redaction / visual evidence unavailable;
+- full-redacted image cannot prove target position or visual success;
+- `SanitizedEvidenceGuard` rejects unsanitized/full-redacted, unknown-provenance, expired, binding-mismatched and checksum-invalid evidence;
+- no model/vision call for unavailable or unsanitized visual evidence;
+- unique concurrent evidence IDs;
+- retention/deletion;
+- path confinement and symlink resistance.
 
 Migration/restart:
 - fresh W7.2 database creation;
-- additive upgrade from W7.1-style schema;
-- repeated initialization/restart safety;
+- additive W7.1-style upgrade;
+- repeated/restart initialization;
 - `PRAGMA user_version = 72`;
-- durable observation journal and action observation/target/plan bindings;
-- evidence checksum/redaction/provenance/retention metadata survives restart in the durable sensitivity metadata envelope.
+- durable `operator_observations` journal;
+- operator action observation/target/plan bindings.
 
-## W7.2 focused regression count
+## Focused regression count
 
-Final W7.2-focused suite: **58 cases**, all PASS as part of the exact implementation-head repository run. This count supersedes the earlier intermediate 33/33 prototype result.
+Final W7.2-focused coverage: **85 cases PASS**. This supersedes the earlier intermediate 33/33 prototype and the earlier 58-case implementation checkpoint.
 
-## Exact-head workflows — W7.1
+## Full repository result
+
+Exact implementation SHA `78ba7e7f9e1587fe5a68d3923f15d0425ef81715`:
+
+- `pip check`: PASS;
+- compileall: PASS;
+- `pytest -q`: **557 passed, 8 warnings**.
+
+No standalone JavaScript file changed in the final W7.2 delta; embedded browser scripts are exercised by the browser observation/masking regressions.
+
+## Exact-head workflows — final W7.2 implementation
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #645 | `34861953280` | PASS |
-| Reliability and Security | #188 | `34861953222` | PASS |
-| P3 iPhone PWA | #156 | `34861953080` | PASS |
-| Android Instrumentation | #187 | `34861953260` | PASS |
-| Package Validation | #187 | `34861953264` | PASS |
-| iOS Companion | #169 | `34861953258` | PASS |
+| CI | #717 | `34873006958` | PASS |
+| Reliability and Security | #202 | `34873006929` | PASS |
+| P3 iPhone PWA | #170 | `34873006957` | PASS |
+| Android Instrumentation | #201 | `34873006928` | PASS |
+| Package Validation | #201 | `34873006956` | PASS |
+| iOS Companion | #183 | `34873007037` | PASS |
 
-## Exact-head workflows — W7.2 implementation
+Implementation gate: **6/6 PASS**.
 
-| Workflow | Run | Run ID | Result |
-| --- | ---: | ---: | --- |
-| CI | #700 | `34869967548` | PASS |
-| Reliability and Security | #197 | `34869967279` | PASS |
-| P3 iPhone PWA | #165 | `34869967422` | PASS |
-| Android Instrumentation | #196 | `34869967534` | PASS |
-| Package Validation | #196 | `34869967417` | PASS |
-| iOS Companion | #178 | `34869967290` | PASS |
+## Repair history
 
-CI passed dependency install, `pip check`, compileall and full `pytest -q`: **530 passed, 7 warnings**. Reliability/Security passed dependency audit, compileall, full pytest, isolated encrypted backup/restore and soak. Package Validation passed its OS packaging matrix. P3, Android and iOS companion workflows passed on the exact implementation SHA.
+1. Recovered WIP lacked complete immediate-dispatch binding and explicit plan/observation digest binding.
+2. Browser tab/window and normalized URL identity were hardened.
+3. Browser viewport sensitive rectangles were found unsafe to reuse as monitor coordinates.
+4. Browser-native masking and explicit typed geometry were added.
+5. Coordinate-space version 2 added all six requested coordinate systems and explicit DPR/zoom/scroll/window/chrome/monitor/crop inputs.
+6. Screenshot consumer guard added; full-redacted or invalid evidence cannot reach vision/model as proof.
+7. Legacy fixture compatibility was updated to the live provenance version without weakening production tests.
 
-No standalone JavaScript file changed in W7.2; embedded browser scripts are exercised through Python browser observation and masking regressions.
+The superseded candidate `5d100d16501d98f32856a16789198707e01e7ddd` and workflow `34867451105` are not final evidence.
 
-## W7.2 repair history
+## Evidence outside automation
 
-1. Recovered WIP lacked complete fresh-dispatch binding, plan/observation digest binding, durable tab/window identity and safe URL identity.
-2. Browser viewport sensitive rectangles were found unsafe to reuse directly as monitor screenshot coordinates; repaired with browser-native masking plus typed coordinate provenance and full-frame fail-safe behavior.
-3. Evidence consumer boundary added so unsanitized/full-redacted/expired/mismatched/checksum-invalid evidence never reaches model/vision.
-4. Evidence integrity metadata was made restart-persistent through the existing durable sensitivity metadata envelope.
-5. CI compatibility failures in legacy fake screens were repaired at the adapter/test-fixture boundary without relaxing the production evidence contract.
-6. Final safe-state ordering defect was repaired so unavailable foreground application returns `application_unavailable` instead of a generic verification failure.
-
-The superseded candidate `5d100d16501d98f32856a16789198707e01e7ddd` and workflow `34867451105` are not final evidence. No W7 security test was weakened.
-
-## Mandatory evidence still outside automation
-
-- W7.3 allowlists/data-safety policy;
-- W7.4 bounded browser operator;
-- W7.5 desktop/file operator hardening;
-- W7.6 complete verification/recovery qualification;
-- physical Windows/browser/operator qualification;
-- real Google OAuth/account identity and exact-scope qualification;
-- isolated hosted connector persistence/backup/restore on a paid durable service;
-- main production durable-storage qualification;
-- physical P3 and signed distribution qualification.
-
-Hosted connector qualification remains **BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED**. Automated W7.2 evidence does not constitute physical-device or production verification.
+W7.2 is not physical-device or production verified. Remaining future qualification includes physical Windows/browser operation, W7.3-W7.6, live Google OAuth/account qualification when infrastructure is approved, production durable storage, physical P3 and signed distribution.
