@@ -4,6 +4,30 @@ from pathlib import Path
 from browser.observation import observe_page, safe_browser_evidence
 
 
+_SENSITIVE_SELECTOR = ','.join([
+    'input[type="password"]',
+    'input[type="hidden"]',
+    'input[autocomplete="current-password"]',
+    'input[autocomplete="new-password"]',
+    'input[autocomplete="one-time-code"]',
+    'input[autocomplete="cc-number"]',
+    'input[autocomplete="cc-csc"]',
+    'input[autocomplete="cc-exp"]',
+    'input[name*="token" i]',
+    'input[name*="secret" i]',
+    'input[name*="pass" i]',
+    'input[name*="pin" i]',
+    'input[name*="cvv" i]',
+    'input[name*="cvc" i]',
+    'input[id*="token" i]',
+    'input[id*="secret" i]',
+    'input[id*="pass" i]',
+    'input[id*="pin" i]',
+    'input[id*="cvv" i]',
+    'input[id*="cvc" i]',
+])
+
+
 class PersistentBrowser:
     def __init__(self, profile_dir: Path, headless: bool = False):
         self.profile_dir = Path(profile_dir); self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +58,53 @@ class PersistentBrowser:
 
     def safe_observation(self):
         return safe_browser_evidence(self.observe())
+
+    def capture_sanitized_screenshot(self) -> dict:
+        """Return browser-native masked PNG bytes only; never writes an unredacted file."""
+        self.start()
+        masks = []
+        sensitive_count = 0
+        for frame in list(self.page.frames):
+            try:
+                locator = frame.locator(_SENSITIVE_SELECTOR)
+                count = int(locator.count())
+                sensitive_count += count
+                if count:
+                    masks.append(locator)
+            except Exception:
+                # If frame geometry cannot be inspected, fail closed at the caller.
+                return {'available': False, 'reason': 'unsupported_geometry', 'sensitive_count': sensitive_count, 'bytes': b''}
+        try:
+            geometry = self.page.evaluate('''() => ({
+                devicePixelRatio: window.devicePixelRatio || null,
+                pageZoom: (window.visualViewport && window.visualViewport.scale) || 1,
+                viewportWidth: window.innerWidth || null,
+                viewportHeight: window.innerHeight || null,
+                scrollX: window.scrollX || 0,
+                scrollY: window.scrollY || 0,
+                windowX: window.screenX,
+                windowY: window.screenY,
+                outerWidth: window.outerWidth || null,
+                outerHeight: window.outerHeight || null,
+                contentOffsetX: Math.max(0, ((window.outerWidth || window.innerWidth) - window.innerWidth) / 2),
+                contentOffsetY: Math.max(0, (window.outerHeight || window.innerHeight) - window.innerHeight)
+            })''') or {}
+        except Exception:
+            geometry = {}
+        try:
+            png = self.page.screenshot(type='png', mask=masks, animations='disabled', caret='hide')
+        except Exception:
+            return {'available': False, 'reason': 'browser_native_capture_failed', 'sensitive_count': sensitive_count, 'bytes': b'', 'geometry': geometry}
+        return {
+            'available': True,
+            'reason': '',
+            'bytes': bytes(png),
+            'redaction_status': 'sanitized',
+            'redaction_method': 'browser_native_element_mask' if sensitive_count else 'browser_native_no_sensitive_elements',
+            'sensitive_count': sensitive_count,
+            'geometry': geometry,
+            'capture_source': 'browser_native',
+        }
 
     def click(self, selector): self.start(); self.page.locator(selector).click(); return self.snapshot()
     def fill(self, selector, value): self.start(); self.page.locator(selector).fill(value); return self.snapshot()
