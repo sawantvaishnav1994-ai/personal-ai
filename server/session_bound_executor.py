@@ -40,12 +40,17 @@ class SessionBoundExecutor:
         except ReauthenticationRequired as exc:
             raise OwnerReauthenticationRequired(exc.reason) from exc
 
+    def _security_epoch(self) -> int:
+        approvals = getattr(self._executor, 'approvals', None)
+        current = getattr(approvals, 'current_security_epoch', None)
+        return int(current()) if callable(current) else 0
+
     def _operator_context(self, context, metadata):
         return OperatorRequestContext(
             owner_id=str(metadata.get('owner_id') or 'owner'),
             device_id=context.device_id,
             session_id=context.session_id,
-            security_epoch=self._executor.approvals.current_security_epoch(),
+            security_epoch=self._security_epoch(),
             conversation_id=str(metadata.get('conversation_id') or ''),
             workflow_id=str(metadata.get('workflow_id') or ''),
             reauthenticated_at=context.reauthenticated_at,
