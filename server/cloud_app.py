@@ -4,12 +4,19 @@ import asyncio
 import json
 from app.main import build_runtime
 from core.config import settings
+from core.storage import validate_runtime_storage
 from server.api import create_app
 from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
 
+# Hosted Personal AI must prove that its data root is backed by a real durable
+# mount before any SQLite database, knowledge object, approval state or audit
+# store is opened. Local/desktop development remains unaffected.
+storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
+runtime['storage_status'] = storage_status
+print(json.dumps({'event': 'storage.ready', **storage_status}), flush=True)
 
 @asynccontextmanager
 async def lifespan(app):
