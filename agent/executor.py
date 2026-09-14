@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import threading
 import time
 import uuid
@@ -34,7 +35,9 @@ class AgentExecutor:
         self.second_brain = second_brain
         self.knowledge = knowledge
         self.planner = Planner(models, tools)
-        self.approvals = ApprovalManager(approval_ttl_seconds)
+        memory_path = getattr(memory, 'path', None)
+        approval_path = Path(memory_path).parent / 'trusted-actions.sqlite3' if memory_path is not None else None
+        self.approvals = ApprovalManager(approval_ttl_seconds, path=approval_path)
         self._paused = {}
         self._lock = threading.RLock()
         self.telemetry = telemetry
@@ -48,7 +51,41 @@ class AgentExecutor:
         if cancel_event is not None and cancel_event.is_set():
             raise ExecutionCancelled('execution cancelled by the user')
 
-    def chat(self, text, *, confirmed_tools: set[str] | None = None, cancel_event=None, device_id: str | None = None, conversation_id: str | None = None, conversation_history: list[dict] | None = None):
+    @staticmethod
+    def _action_destination(parameters) -> str:
+        """Extract a conservative destination label for permit binding.
+
+        The exact parameter hash remains authoritative; this explicit destination
+        binding prevents a future policy layer from accidentally treating a
+        changed recipient/domain/path as equivalent merely because a tool name is
+        unchanged.
+        """
+        params = parameters or {}
+        for key in (
+            'destination', 'recipient', 'recipients', 'to', 'email', 'emails',
+            'url', 'domain', 'path', 'file_path', 'filename', 'channel', 'room',
+            'calendar_id', 'spreadsheet_id', 'document_id', 'repository',
+        ):
+            value = params.get(key)
+            if value in (None, '', [], {}):
+                continue
+            if isinstance(value, (dict, list, tuple, set)):
+                return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)[:1000]
+            return str(value)[:1000]
+        return ''
+
+    def chat(
+        self,
+        text,
+        *,
+        confirmed_tools: set[str] | None = None,
+        cancel_event=None,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        owner_id: str = 'owner',
+        conversation_id: str | None = None,
+        conversation_history: list[dict] | None = None,
+    ):
         turn_start = time.perf_counter()
         try:
             return self._chat(
@@ -56,6 +93,8 @@ class AgentExecutor:
                 confirmed_tools=confirmed_tools,
                 cancel_event=cancel_event,
                 device_id=device_id,
+                session_id=session_id,
+                owner_id=owner_id,
                 conversation_id=conversation_id,
                 conversation_history=conversation_history,
             )
@@ -67,7 +106,18 @@ class AgentExecutor:
         finally:
             self._observe('agent.turn_ms', turn_start)
 
-    def _chat(self, text, *, confirmed_tools=None, cancel_event=None, device_id=None, conversation_id=None, conversation_history=None):
+    def _chat(
+        self,
+        text,
+        *,
+        confirmed_tools=None,
+        cancel_event=None,
+        device_id=None,
+        session_id=None,
+        owner_id='owner',
+        conversation_id=None,
+        conversation_history=None,
+    ):
         if confirmed_tools:
             raise PermissionError('tool-name approvals are disabled; use the execution-scoped approval flow')
         self._check_cancel(cancel_event)
@@ -147,6 +197,8 @@ class AgentExecutor:
             history,
             cancel_event=cancel_event,
             device_id=device_id,
+            session_id=session_id,
+            owner_id=owner_id,
             conversation_id=conversation_id,
             grounding=context,
             sensitivity=sensitivity,
@@ -171,7 +223,23 @@ class AgentExecutor:
             f'RETRIEVED CONTEXT:\n{context}'
         )
 
-    def _continue(self, execution_id, text, plan, index, results, history, *, cancel_event=None, device_id=None, conversation_id=None, grounding='', sensitivity='internal'):
+    def _continue(
+        self,
+        execution_id,
+        text,
+        plan,
+        index,
+        results,
+        history,
+        *,
+        cancel_event=None,
+        device_id=None,
+        session_id=None,
+        owner_id='owner',
+        conversation_id=None,
+        grounding='',
+        sensitivity='internal',
+    ):
         steps = plan.get('steps', [])
         while index < len(steps):
             self._check_cancel(cancel_event)
@@ -180,21 +248,36 @@ class AgentExecutor:
             params = step.get('parameters', {})
             decision = self.tools.authorize(tool, confirmed=False)
             if not decision.allowed:
-                ticket = self.approvals.create(execution_id, tool.name, params)
+                destination = self._action_destination(params)
+                ticket = self.approvals.create(
+                    execution_id,
+                    tool.name,
+                    params,
+                    owner_id=owner_id,
+                    device_id=device_id,
+                    session_id=session_id,
+                    destination=destination,
+                    data_classification=sensitivity,
+                )
+                paused = {
+                    'execution_id': execution_id,
+                    'text': text,
+                    'plan': plan,
+                    'index': index,
+                    'results': dict(results),
+                    'history': history,
+                    'cancel_event': cancel_event,
+                    'device_id': device_id,
+                    'session_id': session_id,
+                    'owner_id': owner_id,
+                    'conversation_id': conversation_id,
+                    'grounding': grounding,
+                    'sensitivity': sensitivity,
+                }
                 with self._lock:
-                    self._paused[ticket.id] = {
-                        'execution_id': execution_id,
-                        'text': text,
-                        'plan': plan,
-                        'index': index,
-                        'results': dict(results),
-                        'history': history,
-                        'cancel_event': cancel_event,
-                        'device_id': device_id,
-                        'conversation_id': conversation_id,
-                        'grounding': grounding,
-                        'sensitivity': sensitivity,
-                    }
+                    self._paused[ticket.id] = paused
+                durable_paused = {key: value for key, value in paused.items() if key != 'cancel_event'}
+                self.approvals.save_context(ticket.id, durable_paused)
                 audit = {
                     'approval_id': ticket.id,
                     'execution_id': execution_id,
@@ -202,6 +285,9 @@ class AgentExecutor:
                     'parameter_hash': ticket.parameter_hash,
                     'expires_at': ticket.expires_at,
                     'device_id': device_id,
+                    'session_id': session_id,
+                    'security_epoch': ticket.security_epoch,
+                    'data_classification': ticket.data_classification,
                 }
                 self.memory.audit('approval', 'required', audit)
                 self.events.emit('approval.required', **audit)
@@ -274,9 +360,48 @@ class AgentExecutor:
             )
             raise
 
-    def approve(self, approval_id: str):
+    def _load_paused(self, approval_id: str):
         with self._lock:
             paused = self._paused.get(approval_id)
+        if paused:
+            return paused
+        durable = self.approvals.context(approval_id)
+        if durable is None:
+            return None
+        durable['cancel_event'] = None
+        return durable
+
+    def approval_context(self, approval_id: str):
+        paused = self._load_paused(approval_id)
+        ticket = self.approvals.ticket(approval_id)
+        if not paused or ticket is None:
+            return None
+        return {
+            'approval_id': approval_id,
+            'execution_id': paused.get('execution_id'),
+            'device_id': paused.get('device_id'),
+            'session_id': paused.get('session_id'),
+            'conversation_id': paused.get('conversation_id'),
+            'tool': ticket.tool_name,
+            'expires_at': ticket.expires_at,
+            'security_epoch': ticket.security_epoch,
+            'data_classification': ticket.data_classification,
+        }
+
+    def invalidate_pending_approvals(self) -> int:
+        with self._lock:
+            self._paused.clear()
+        return self.approvals.advance_security_epoch()
+
+    def approve(
+        self,
+        approval_id: str,
+        *,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        owner_id: str = 'owner',
+    ):
+        paused = self._load_paused(approval_id)
         if not paused:
             raise PermissionError('approval is missing, expired, rejected, or already used')
         cancel_event = paused.get('cancel_event')
@@ -285,7 +410,21 @@ class AgentExecutor:
         step = paused['plan']['steps'][index]
         tool = self.tools.get(step['tool'])
         params = step.get('parameters', {})
-        self.approvals.consume(approval_id, paused['execution_id'], tool.name, params)
+        bound_device = device_id if device_id is not None else paused.get('device_id')
+        bound_session = session_id if session_id is not None else paused.get('session_id')
+        bound_owner = owner_id or paused.get('owner_id') or 'owner'
+        destination = self._action_destination(params)
+        self.approvals.consume(
+            approval_id,
+            paused['execution_id'],
+            tool.name,
+            params,
+            owner_id=bound_owner,
+            device_id=bound_device,
+            session_id=bound_session,
+            destination=destination,
+            data_classification=paused.get('sensitivity', 'internal'),
+        )
         with self._lock:
             self._paused.pop(approval_id, None)
         self.memory.audit(
@@ -296,7 +435,9 @@ class AgentExecutor:
                 'execution_id': paused['execution_id'],
                 'tool': tool.name,
                 'parameter_hash': parameter_hash(params),
-                'device_id': paused.get('device_id'),
+                'device_id': bound_device,
+                'session_id': bound_session,
+                'security_epoch': self.approvals.current_security_epoch(),
             },
         )
         self.events.emit(
@@ -304,7 +445,8 @@ class AgentExecutor:
             approval_id=approval_id,
             execution_id=paused['execution_id'],
             tool=tool.name,
-            device_id=paused.get('device_id'),
+            device_id=bound_device,
+            session_id=bound_session,
         )
         results = paused['results']
         self._execute_step(paused['execution_id'], index, tool, params, results, cancel_event=cancel_event)
@@ -317,15 +459,26 @@ class AgentExecutor:
             paused['history'],
             cancel_event=cancel_event,
             device_id=paused.get('device_id'),
+            session_id=paused.get('session_id'),
+            owner_id=paused.get('owner_id', 'owner'),
             conversation_id=paused.get('conversation_id'),
             grounding=paused.get('grounding', ''),
             sensitivity=paused.get('sensitivity', 'internal'),
         )
 
-    def reject(self, approval_id: str):
+    def reject(
+        self,
+        approval_id: str,
+        *,
+        device_id: str | None = None,
+        session_id: str | None = None,
+    ):
+        paused = self._load_paused(approval_id)
+        bound_device = device_id if device_id is not None else (paused or {}).get('device_id')
+        bound_session = session_id if session_id is not None else (paused or {}).get('session_id')
+        self.approvals.reject(approval_id, device_id=bound_device, session_id=bound_session)
         with self._lock:
-            paused = self._paused.pop(approval_id, None)
-        self.approvals.reject(approval_id)
+            self._paused.pop(approval_id, None)
         if paused:
             step = paused['plan']['steps'][paused['index']]
             self.memory.audit(
@@ -336,7 +489,8 @@ class AgentExecutor:
                     'execution_id': paused['execution_id'],
                     'tool': step['tool'],
                     'parameter_hash': parameter_hash(step.get('parameters', {})),
-                    'device_id': paused.get('device_id'),
+                    'device_id': bound_device,
+                    'session_id': bound_session,
                 },
             )
             self.events.emit(
@@ -344,7 +498,8 @@ class AgentExecutor:
                 approval_id=approval_id,
                 execution_id=paused['execution_id'],
                 tool=step['tool'],
-                device_id=paused.get('device_id'),
+                device_id=bound_device,
+                session_id=bound_session,
             )
         self.events.emit('state', state='idle')
         return 'Action cancelled.'
