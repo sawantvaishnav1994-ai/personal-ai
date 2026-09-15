@@ -3,6 +3,7 @@ from pathlib import Path
 from future_intelligence.gates import TrustGate
 from future_intelligence.everyday import EverydayIntelligence
 from future_intelligence.deep_brain import LifeGraph
+from future_intelligence.second_brain_graph import SecondBrainLifeGraph
 from future_intelligence.operations import PersonalOperations
 from future_intelligence.multimodal import WorldUnderstanding
 from future_intelligence.everywhere import PersonalAIEverywhere
@@ -15,10 +16,13 @@ class FutureIntelligenceProgram:
         root=Path(data_dir);self.gate=TrustGate();self.runtime=runtime
         self.everyday=EverydayIntelligence(root/'everyday.sqlite3',memory=runtime.get('memory'),second_brain=runtime.get('second_brain'),proactive=runtime.get('proactive'),continuity=runtime.get('continuity'),integrations=runtime.get('integrations'),events=runtime.get('events'))
         self.life_graph=LifeGraph(root/'life-graph.sqlite3')
+        self.second_brain_life_graph=SecondBrainLifeGraph(self.life_graph,runtime.get('second_brain'))
+        runtime['second_brain_life_graph']=self.second_brain_life_graph
         self.operations=PersonalOperations(gate=self.gate,executor=runtime.get('executor'),automations=runtime.get('automations'),events=runtime.get('events'),second_brain=runtime.get('second_brain'),path=root/'operations.sqlite3')
         self.world=WorldUnderstanding(gate=self.gate,events=runtime.get('events'),path=root/'world.sqlite3')
         self.everywhere=PersonalAIEverywhere(gate=self.gate,device_registry=runtime.get('device_registry'),continuity=runtime.get('continuity'))
         self.hybrid=HybridIntelligenceRouter(gate=self.gate)
         self.autonomy=AdvancedAutonomy(gate=self.gate,operations=self.operations,events=runtime.get('events'),path=root/'autonomy.sqlite3')
     def status(self):
-        return {'p4':{'implemented':True,'activation':'safe-now'},'p5':{'implemented':True,'activation':'safe-now'},'p6':{'implemented':True,'activation':self.gate.decision('p6').reason},'p7':{'implemented':True,'activation':self.gate.decision('p7').reason},'p8':{'implemented':True,'activation':self.gate.decision('p8').reason},'p9':{'implemented':True,'activation':self.gate.decision('p9').reason},'p10':{'implemented':True,'activation':self.gate.decision('p10').reason}}
+        p5_link=self.second_brain_life_graph.status()
+        return {'p4':{'implemented':True,'activation':'safe-now'},'p5':{'implemented':True,'activation':'safe-now','second_brain_linked':p5_link['linked'],'linked_memory_nodes':p5_link['memory_nodes']},'p6':{'implemented':True,'activation':self.gate.decision('p6').reason},'p7':{'implemented':True,'activation':self.gate.decision('p7').reason},'p8':{'implemented':True,'activation':self.gate.decision('p8').reason},'p9':{'implemented':True,'activation':self.gate.decision('p9').reason},'p10':{'implemented':True,'activation':self.gate.decision('p10').reason}}

@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from future_intelligence.deep_brain import LifeGraph
+from future_intelligence.second_brain_graph import SecondBrainLifeGraph
 from knowledge.store import KnowledgeStore
 from memory.second_brain import MemoryCandidate, SecondBrain
 from memory.store import MemoryStore
@@ -21,11 +23,13 @@ def client(tmp_path):
     memory = MemoryStore(tmp_path / 'memory.sqlite3')
     second_brain = SecondBrain(memory)
     knowledge = KnowledgeStore(tmp_path / 'knowledge.sqlite3', tmp_path / 'objects')
+    life_graph = LifeGraph(tmp_path / 'life-graph.sqlite3')
     runtime = {
         'device_registry': FakeRegistry(),
         'memory': memory,
         'second_brain': second_brain,
         'knowledge': knowledge,
+        'second_brain_life_graph': SecondBrainLifeGraph(life_graph, second_brain),
     }
     app = FastAPI()
     app.include_router(memory_knowledge_inspection_router(runtime))
@@ -55,6 +59,34 @@ def test_memory_explanation_api_filters_sensitive_before_selection(tmp_path):
         params={'q': 'Atlas'},
     )
     assert hidden.status_code == 404
+
+
+def test_life_graph_api_links_live_second_brain_and_filters_sensitive_memory(tmp_path):
+    browser, second_brain, _ = client(tmp_path)
+    normal_id = second_brain.remember(
+        MemoryCandidate(type='project', subject='Personal AI', content='Qualification work is active.', confidence=.9)
+    )
+    secret_id = second_brain.remember(
+        MemoryCandidate(
+            type='fact',
+            subject='Private',
+            content='Private owner-only memory.',
+            confidence=.9,
+            sensitivity='secret',
+        )
+    )
+
+    response = browser.get('/iphone/api/life-graph')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['linked_second_brain'] is True
+    ids = {node['id'] for node in payload['nodes']}
+    assert f'memory:{normal_id}' in ids
+    assert f'memory:{secret_id}' not in ids
+
+    timeline = browser.get('/iphone/api/life-graph/timeline')
+    assert timeline.status_code == 200
+    assert f'memory:{normal_id}' in {item['id'] for item in timeline.json()['items']}
 
 
 def test_knowledge_version_history_api_is_owner_inspectable(tmp_path):
