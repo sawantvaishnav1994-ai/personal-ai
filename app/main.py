@@ -22,7 +22,7 @@ from knowledge.store import KnowledgeStore
 from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from memory.vector_store import VectorStore
-from models.router import ModelRouter
+from models.governed_router import GovernedModelRouter
 from notifications.apns import APNsProvider
 from proactive.engine import AttentionRelevanceEngine
 from qualification.program import P3QualificationProgram
@@ -43,7 +43,7 @@ def build_runtime():
     preferences = Preferences(settings.data_dir / 'preferences.json')
     backups = BackupService(settings.data_dir)
     memory = MemoryStore(settings.data_dir / 'assistant.sqlite3')
-    models = ModelRouter(settings, events=events, audit=memory.audit)
+    models = GovernedModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     second_brain = SecondBrain(memory, models, vector)
     knowledge = KnowledgeStore(

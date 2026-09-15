@@ -15,38 +15,36 @@ Baseline date: 2026-09-15
 | P1 | W7.4 | Physical/real-site browser qualification | QUALIFICATION PENDING | automated evidence is not real-site/physical proof | later physical qualification |
 | P1 | W7.5 | Safe Desktop and File Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
 | P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows contracts and packaging are automated evidence only | later real-device Windows qualification |
-| P1 | W7.6 | Verification and recovery | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `38eeae2f...`; 778 full PASS, 8 warnings; shared implementation workflows 6/6 | complete docs-only 6/6, then W7 completion audit |
-| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists; automated W7 dependency is closing | next dependency-order implementation after W7 audit |
+| P1 | W7.6 | Verification and recovery | RESOLVED FOR AUTOMATED SCOPE | frozen W7 baseline includes completed recovery implementation/evidence | preserve frozen W7 |
+| P1 | W8 | Model health/failover/observability | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `42616b2e...`; exact implementation workflows 6/6 | complete documentation exact-head 6/6; then inspect roadmap for next dependency-order milestone |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | future signing gate |
 | P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, production/physical/signing gates remain | no production promotion yet |
 
-## W7.6 exact implementation evidence
+## W8 resolved automated-scope capabilities
 
-- Baseline: `acbbefea2ad6d46406ee05f9d2a44676503b3b59`.
-- Implementation: `38eeae2fc7f609ebc7d3e8681833885b8d35310d`.
-- Net implementation diff: exactly 11 approved W7.6 files across `recovery/`, four W7.6 test files, `tools/builtins.py`, `tools/recovery.py`, `tools/registry.py`, and `ui/settings_panel.py`.
-- Schema: additive recovery extension to **73**, using the existing W7.1 operator transaction database; no parallel transaction authority.
-- Full repository: **778 passed, 8 warnings**; `pip check` PASS; compileall PASS.
-- Implementation workflows: CI #828 / `34932656123`, Reliability/Security #226 / `34932656078`, P3 #186 / `34932656117`, Android #225 / `34932656134`, Package #225 / `34932656157`, iOS #207 / `34932656154` — **6/6 PASS**.
+- first-class provider/model health with explicit `UNKNOWN`, `HEALTHY`, `DEGRADED`, `UNHEALTHY`, `UNAVAILABLE`, `DISABLED` states;
+- separate configuration, transport and capability health dimensions;
+- bounded privacy-safe explicit health probes using the existing provider request path;
+- `GovernedModelRouter` extends the existing `ModelRouter`; no parallel provider stack or action authority;
+- eligibility is determined before health-based selection, preserving local-only/sensitive fail-closed behavior;
+- separate bounded retry and failover budgets, explicit retry taxonomy and unique attempted-target routing;
+- circuit breaker `CLOSED/OPEN/HALF_OPEN` with locked half-open admission and recovery/reopen behavior;
+- bounded safe generation metadata, provider health counters, latency percentiles, retry/failover/circuit/policy metrics;
+- owner diagnostics under Settings without Home/AI Core redesign;
+- schema remains **73**; no production/Railway/OAuth/iPhone infrastructure change.
 
-## W7.6 resolved automated-scope capabilities
+## W8 exact implementation evidence
 
-- durable pre-side-effect dispatch journaling with idempotency, leases and fencing;
-- shared verification outcomes with transaction/action/dispatch/idempotency binding;
-- verifier identity/version, precondition, expected and observed postcondition, evidence checksum and freshness;
-- fail-closed unknown/stale/mismatched verification and no implicit success;
-- no blind automatic retry for consequential operations or application input;
-- separate compensation actions governed by current W7.3 policy, one-use permits, approval/reauthentication and independent verification;
-- manual/irreversible compensation cannot be automated;
-- owner decisions bind transaction/owner/device/session/security epoch/nonce and reject replay;
-- Emergency Stop blocks new dispatch/compensation authorization;
-- redacted recovery reports and digested file/download evidence references;
-- bounded cross-operator composition and Settings → Activities recovery review.
+Baseline: `dad974fc1058678a07daae1702849178d2cf2dd2`.
+Failed candidate: `1a9d379f8cdb372e583eb01dfd6373d307c18db8` — authoritative gate 4/6; reproduced pytest **978 passed, 7 failed, 8 warnings in 93.73s**. All seven failures were brittle source/string-inspection tests.
+Final implementation: `42616b2e8faca9b16a5695ac319ea78200e7af74`.
 
-## Remaining boundaries
+Implementation workflows: CI #1047 / `34967707625`; Reliability/Security #239 / `34967707659`; P3 #199 / `34967707692`; Android #238 / `34967707628`; Package #238 / `34967707632`; iOS #220 / `34967707682` — **6/6 PASS**.
 
-Automated W7.6 evidence is not real-world Windows verification, physical-device verification, production verification or live OAuth verification. Simulator and package-build success remain automated evidence only.
+Reliability/Security passed dependency installation, pip-audit, compileall, full pytest, isolated encrypted backup/restore and 45-second soak. Package Validation passed Ubuntu/macOS/Windows. iOS evidence is simulator evidence only.
 
-Production, Railway and the existing iPhone qualification service are unchanged. W6 live OAuth remains blocked/deferred by the owner-approved paid-infrastructure decision.
+## Remaining W8 boundaries
 
-After the W7.6 documentation exact-head 6/6 gate, perform the authoritative W7 completion audit before marking W7 complete or starting the next roadmap milestone.
+Automated evidence is not live-provider verification, real-world local-model verification, physical-device verification or production verification. No paid-provider credential was introduced or exercised for qualification. Production/Railway remains unchanged.
+
+Do not begin another milestone until the W8 documentation exact-head six-workflow gate is complete. After that gate, determine the next milestone from this matrix, the capability matrix and `docs/P4_P10_INTEGRATED_ROADMAP.md`; do not infer scope from a milestone number alone.

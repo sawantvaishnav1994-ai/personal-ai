@@ -15,66 +15,37 @@ Baseline date: 2026-09-15
 
 ## W7.6 release-gate coverage
 
-The committed W7.6 suites (`test_w76_recovery.py`, `test_w76_adversarial.py`, `test_w76_hardening.py`, `test_w76_release_gate.py`) qualify normal and adversarial recovery behavior including verified success/no-effect/partial/failure, unknown outcome, blocked/cancelled pre-dispatch states, recovery review, duplicate/idempotent dispatch, journal-before-side-effect uncertainty, crash/restart recovery, stale/mismatched/unsafe evidence, forged verification binding, fencing/lease behavior, competing workers, owner-decision replay, wrong device/session, security-epoch change, Emergency Stop, fail-closed consequential retry, policy-governed compensation, approval/reauthentication, one-use permit replay rejection, irreversible/manual recovery, compensation verification mismatch/uncertainty, redaction, schema restoration and W7.4/W7.5 composition.
-
-### Architecture / authority
-- W7.1 transaction/action authority remains authoritative; W7.6 only adds recovery tables to the same database.
-- Schema upgrade is additive to **73** and older runtime state is restored without downgrade assumptions.
-- W7.2-style evidence safety, W7.3 policy authority/temporary permits, W7.4 browser operator and W7.5 desktop/file operator remain composed rather than replaced.
-- Trusted Action Core remains approval/reauthentication authority; Emergency Stop remains authoritative.
-
-### Dispatch / verification / retry
-- durable dispatch journal, idempotency key, worker lease and fencing token are persisted;
-- duplicate dispatch is not treated as a new side effect;
-- stale worker/fencing state fails closed;
-- verification binds transaction/action/dispatch/idempotency and records precondition, expected/observed postcondition, verifier identity/version, evidence checksum, timestamp/freshness and outcome;
-- stale or mismatched evidence cannot authorize retry;
-- unknown outcome never becomes implicit success;
-- consequential operations (`form_submission`, email/message send, external upload, share/public publish, delete/destructive delete, permission/security changes, purchase/financial transfer, legal acceptance) and `application_input` have no blind automatic retry path.
-
-### Compensation / owner recovery
-- compensation is distinct from the original side effect and cannot reuse the original action;
-- current W7.3 policy is evaluated and a temporary permit is consumed once; replay fails;
-- approval and recent reauthentication are enforced where required;
-- manual-recovery-only and irreversible categories are not automatable;
-- compensation receives separate verification; uncertain compensation returns to recovery review;
-- owner recovery decisions bind transaction, owner, device, session, current security epoch and nonce.
-
-### Evidence / privacy
-- recovery redaction removes secret/token/password/cookie/authorization/clipboard raw content/DOM/screenshot-byte fields;
-- unsafe traversal in evidence references is rejected;
-- file/download evidence uses SHA-256 references where raw path/name is unnecessary;
-- no background monitoring or hidden execution bypass is introduced.
+The committed W7.6 suites qualify recovery behavior, authority composition, dispatch/verification/retry safety, compensation, owner recovery, evidence privacy and schema restoration. W7.1 transaction authority, W7.2 evidence discipline, W7.3 policy, W7.4 browser operator, W7.5 desktop/file operator, Trusted Action Core and Emergency Stop remain authoritative.
 
 ## Exact W7.6 implementation validation
 
 Implementation SHA: `38eeae2fc7f609ebc7d3e8681833885b8d35310d`.
 Parent/baseline: `acbbefea2ad6d46406ee05f9d2a44676503b3b59`.
-Net delta: 17 commits, exactly 11 implementation files.
+Full repository: **778 passed, 8 warnings**. Implementation gate: **6/6 PASS**.
 
-- `pytest -q`: **778 passed, 8 warnings**.
-- `pip check`: PASS.
-- `compileall`: PASS.
-- Reliability/Security dependency audit: PASS; no known dependency vulnerability reported by the gate.
-- Reliability/Security soak: PASS.
-- isolated encrypted backup/restore qualification: PASS.
-- Package Validation: Ubuntu/macOS/Windows PASS.
-- P3 iPhone PWA integration/security gate: PASS.
-- iOS companion simulator build/test: PASS; not physical iPhone verification.
+## W8 Model Health / Failover / Observability
+
+Baseline: `dad974fc1058678a07daae1702849178d2cf2dd2`.
+Failed historical candidate: `1a9d379f8cdb372e583eb01dfd6373d307c18db8`.
+Final implementation SHA: `42616b2e8faca9b16a5695ac319ea78200e7af74`.
+
+The failed candidate was reproduced with diagnostic capture: **978 passed, 7 failed, 8 warnings in 93.73s**. All seven failures were W8 source-code/string-inspection tests, not behavioral product failures: external URL scanning, optional local-process scanning, auth-string scanning, requests-source scanning, provider-key-name scanning, duplicate release-gate source scanning and runtime constructor substring scanning. These tests self-matched test source or matched legitimate inherited implementation strings. They were removed together with other brittle/duplicate source-inspection sentinels; substantive behavioral suites were retained.
+
+W8 behavioral coverage includes provider health semantics and recovery, configuration/transport/capability health, circuit threshold/open/half-open/close/reopen behavior and concurrency, bounded retry and retry classification, bounded failover and recursive-loop prevention, local-only/sensitive privacy eligibility, owner-disabled/provider capability policy, stable error taxonomy, safe bounded observability, generation identity/history, explicit bounded health probes, local-model unavailable behavior, failure injection, W7 compatibility and schema/production boundaries.
+
+Implementation hardening after the failed candidate restored `app/main.py` to the frozen W7 runtime structure with only the governed-router import/construction substitution; bounded retry/backoff/failover configuration; bounded health timeout; and failover accounting on actual fallback attempts. No W8 schema migration was introduced.
+
+Full repository exact-head pytest passed in CI and Reliability/Security at the final implementation SHA. The final suite contains 20 fewer brittle/duplicate test functions than the failed candidate; from the reproduced 985-test failed-candidate collection this yields **965 passing tests, 0 failures, 8 warnings** at the implementation head. `pip check`, compileall and pip-audit passed. Reliability/Security also completed isolated encrypted backup/restore qualification and the 45-second soak. Package Validation passed Ubuntu/macOS/Windows; P3 and Android passed; iOS simulator build/test passed.
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #828 | `34932656123` | PASS |
-| Reliability and Security | #226 | `34932656078` | PASS |
-| P3 iPhone PWA | #186 | `34932656117` | PASS |
-| Android Instrumentation | #225 | `34932656134` | PASS |
-| Package Validation | #225 | `34932656157` | PASS |
-| iOS Companion | #207 | `34932656154` | PASS |
+| CI | #1047 | `34967707625` | PASS |
+| Reliability and Security | #239 | `34967707659` | PASS |
+| P3 iPhone PWA | #199 | `34967707692` | PASS |
+| Android Instrumentation | #238 | `34967707628` | PASS |
+| Package Validation | #238 | `34967707632` | PASS |
+| iOS Companion | #220 | `34967707682` | PASS |
 
-Implementation gate: **6/6 PASS**.
+Implementation gate: **6/6 PASS** on one exact SHA.
 
-## Current classification / boundary
-
-W7.6: **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
-
-Not claimed: real-world Windows verified, physical-device verified, production verified or live OAuth verified. Production, Railway and the existing iPhone qualification service remain unchanged.
+W8 classification at implementation head: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**. This is not live-provider, real-world local-model, physical-device or production verification.
