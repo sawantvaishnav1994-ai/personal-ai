@@ -204,6 +204,9 @@ def build_runtime():
     def append_continuity(kind, text, device_id=None, conversation_id=None):
         if not text:
             return
+        # Thread-aware surfaces persist directly so they can atomically pair the
+        # UI event with the selected conversation. Legacy/device commands still
+        # flow through this event bridge using the device's active thread.
         if conversation_id:
             return
         source_device = str(device_id or 'desktop')
@@ -224,15 +227,22 @@ def build_runtime():
     events.subscribe(
         'conversation.user',
         lambda event: append_continuity(
-            'user_message', event.get('text'), event.get('device_id'), event.get('conversation_id')
+            'user_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
         ),
     )
     events.subscribe(
         'conversation.assistant',
         lambda event: append_continuity(
-            'assistant_message', event.get('text'), event.get('device_id'), event.get('conversation_id')
+            'assistant_message',
+            event.get('text'),
+            event.get('device_id'),
+            event.get('conversation_id'),
         ),
     )
+
     events.subscribe(
         'proactive.ingest',
         lambda event: proactive.consider(
@@ -245,8 +255,13 @@ def build_runtime():
         'automation.failed',
         lambda event: proactive.consider(
             'automation',
-            {'kind': 'failure', 'id': event.get('automation_id'), 'failed': True, 'importance': 0.7,
-             'message': f"An automation failed: {event.get('error', 'unknown error')}"},
+            {
+                'kind': 'failure',
+                'id': event.get('automation_id'),
+                'failed': True,
+                'importance': 0.7,
+                'message': f"An automation failed: {event.get('error', 'unknown error')}",
+            },
             context=context_provider(),
         ),
     )
@@ -254,8 +269,13 @@ def build_runtime():
         'workflow.failed',
         lambda event: proactive.consider(
             'workflow',
-            {'kind': 'failure', 'id': event.get('run_id'), 'failed': True, 'importance': 0.75,
-             'message': f"A workflow needs attention: {event.get('error', 'workflow failed')}"},
+            {
+                'kind': 'failure',
+                'id': event.get('run_id'),
+                'failed': True,
+                'importance': 0.75,
+                'message': f"A workflow needs attention: {event.get('error', 'workflow failed')}",
+            },
             context=context_provider(),
         ),
     )
@@ -263,9 +283,14 @@ def build_runtime():
         'workflow.approval_required',
         lambda event: proactive.consider(
             'workflow',
-            {'kind': 'approval', 'id': event.get('run_id'), 'needs_approval': True, 'urgency': 0.7,
-             'importance': 0.8,
-             'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}."},
+            {
+                'kind': 'approval',
+                'id': event.get('run_id'),
+                'needs_approval': True,
+                'urgency': 0.7,
+                'importance': 0.8,
+                'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}."},
+            },
             context=context_provider(),
         ),
     )
@@ -277,24 +302,40 @@ def start_server(runtime):
         return
     from server.api import create_app
     import uvicorn
+
     app = create_app(
-        runtime['executor'], settings,
-        device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'],
-        second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime,
+        runtime['executor'],
+        settings,
+        device_registry=runtime['device_registry'],
+        device_gateway=runtime['device_gateway'],
+        second_brain=runtime['second_brain'],
+        automations=runtime['automations'],
+        runtime=runtime,
     )
-    uvicorn.run(app, host=settings.control_server_host, port=settings.control_server_port, log_level='warning')
+    uvicorn.run(
+        app,
+        host=settings.control_server_host,
+        port=settings.control_server_port,
+        log_level='warning',
+    )
 
 
 def main():
     from PyQt6.QtWidgets import QApplication
     from ui.main_window import MainWindow
+
     app = QApplication(sys.argv)
     app.setApplicationName('Personal AI')
     runtime = build_runtime()
     runtime['automations'].start()
     if settings.control_server_enabled:
         threading.Thread(target=start_server, args=(runtime,), daemon=True).start()
-    window = MainWindow(events=runtime['events'], executor=runtime['executor'], memory=runtime['memory'], runtime=runtime)
+    window = MainWindow(
+        events=runtime['events'],
+        executor=runtime['executor'],
+        memory=runtime['memory'],
+        runtime=runtime,
+    )
     window.show()
     if runtime['preferences'].get('launch_voice_on_start'):
         window.toggle_voice()
