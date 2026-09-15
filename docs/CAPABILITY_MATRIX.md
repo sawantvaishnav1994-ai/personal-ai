@@ -17,8 +17,8 @@ Statuses distinguish automated software evidence from live service, real-world W
 | W8 Model Health / Failover / Observability | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED / REPOSITORY-AUTOMATED SCOPE COMPLETE | implementation and documentation exact-head workflows 6/6 PASS | live-provider/local-model/physical/production qualification separate | implementation `42616b2e8faca9b16a5695ac319ea78200e7af74`; docs `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce` |
 | P4 Everyday Personal Intelligence | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | durable reminder/follow-up lifecycle, deterministic due/snooze/reschedule/terminal states, restart-safe surfacing, briefing integration and fixed precision/recall dataset; full repo 997 PASS | live delivery adapters, real push delivery, daily-use acceptance and physical-device proof | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
 | P5 Second Brain / Life Graph | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | 100/1,000/5,000 corpus retrieval, current/historical/superseded semantics, temporal queries, permission-safe relationship ranking, deletion/retention/context budget; Life Graph remains read-through | media extraction quality, larger/real long-term corpora and physical P3.5 | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
-| P6 Autonomous Operations | IMPLEMENTED FOUNDATION / PARTIAL INTEGRATION | durable plans, P3 gate, consequential approval, restart persistence | direct governed delegation through existing AgentExecutor/AutomationEngine/W7 authority | next recommended repository tranche after this evidence gate |
-| P7 Multimodal Understanding | IMPLEMENTED FOUNDATION | normalized persistent source-attributed observation ledger | real sensors/device evidence; broader qualification | deterministic tests + physical later |
+| P6 Autonomous Operations | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED | governed delegation composes through existing AgentExecutor/AutomationEngine/W7; 44 focused PASS; 1041 full PASS; implementation workflows 6/6 PASS | documentation exact-head gate, then autonomous/live/physical/production qualification remain separate | implementation `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`; PR #27 |
+| P7 Multimodal Understanding | IMPLEMENTED FOUNDATION | normalized persistent source-attributed observation ledger | real sensors/device evidence; broader qualification | deterministic hardening/qualification after P6 evidence closure |
 | P8 Personal AI Everywhere | IMPLEMENTED FOUNDATION / PARTIAL SURFACES | shared surface registry + continuity foundation | physical cross-device proof; watch/earbuds/car/home/AR are not complete surfaces | P3.6 physical later |
 | P9 Hybrid Intelligence | AUTOMATED FOUNDATION; W8 RESILIENCE AUTOMATED VALIDATED | privacy/offline routing foundation plus W8 health/failover/observability | live provider and real local runtime unverified | owner/live qualification later |
 | P10 Advanced Autonomous Intelligence | IMPLEMENTED FOUNDATION / FAIL-CLOSED ACTIVATION | persistent agents, allowlists, budgets, Emergency Stop, outcomes/self-evaluation | activation and deeper governed execution depend on P3 prerequisites | validate without bypassing P3 |
@@ -40,7 +40,7 @@ Second Brain remains the sole authoritative memory persistence layer. Existing l
 
 P4 `everyday_items` is the authoritative reminder/follow-up lifecycle. The lifecycle is additive and deterministic: `created`, `scheduled`, `due`, `surfaced`, `snoozed`, `completed`, `dismissed`, `cancelled`, `superseded`. Existing `open` behavior remains a compatibility view over active states. Due evaluation uses injected/frozen time and per-item timezone handling, including date-only values. Surfacing uses a persisted surface key/count to prevent repeated surfacing after restart. The existing reminder tool delegates to this lifecycle in the full runtime; the old `tasks` table remains only a compatibility fallback for minimal runtimes that do not construct P4. No third reminder authority was introduced.
 
-Focused deterministic qualification: **25 collected, 25 passed, 0 failed, 0 warnings in 0.96s**. Large-corpus correctness was qualified at 100, 1,000 and 5,000 memories. Qualification-environment measurements were approximately **3.943 ms**, **18.603 ms**, and **90.067 ms** respectively; 5,000 future-reminder evaluation was approximately **24.772 ms**. The committed CI performance guards are intentionally loose (<5 seconds) regression guards, not product SLAs.
+Focused deterministic qualification: **25 collected, 25 passed, 0 failed, 0 warnings in 0.96s**. Large-corpus correctness was qualified at 100, 1,000 and 5,000 memories. Qualification-environment measurements were approximately **3.943 ms**, **18.603 ms**, and **90.067 ms** respectively; 5,000 future-reminder evaluation was approximately **24.772 ms**. The committed tests use <5 second bounds only as broad regression guards. These values are not production SLAs and no premature optimization was introduced. Existing vector search remains the current SQLite/full-scan foundation.
 
 Fixed proactive/forgotten-item benchmark result: **precision 1.0, recall 1.0, 0 false positives, 0 false negatives** for the specified deterministic dataset of due/overdue/unscheduled explicit commitments versus future/completed/cancelled/superseded/irrelevant/duplicate items. This is deterministic state qualification, not an LLM-authority claim or real-world acceptance metric.
 
@@ -59,8 +59,34 @@ Implementation gate: **6/6 PASS**.
 
 Implementation diff from `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`: **1 commit, 10 files, +1,557 / -119**. No dependency file, production infrastructure, Railway, OAuth, provider credential, signing, W7, W8 or P6 change. Global W7/W8 schema remains **73**. P4 `everyday.sqlite3` is additively extended with lifecycle/audit fields and a local audit table; no global schema-version bump was introduced.
 
+## P6 governed delegation implementation evidence
+
+Starting evidence: `2a631346b0013adca810da32ed0e7519eca15240`.
+Branch: `p6/governed-delegation-integration-20260915`.
+Draft PR: #27.
+Final implementation: `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`.
+
+P6 remains an orchestration layer and composes `PersonalOperations -> AgentExecutor / AutomationEngine -> ToolRegistry / W7 -> verification -> W7.6 recovery -> outcome`. It introduces no competing executor, permission authority, ApprovalManager, transaction authority, retry authority, recovery authority or memory authority. P6 sets orchestration retries to zero and keeps owner override disabled.
+
+Committed-tree security qualification verifies persisted security epoch and stale-epoch fail-closed behavior, owner/device/session binding, destination/resource-based consequential serialization, read-only parallelism, recursive nested secret-bearing parameter rejection, existing tool/destination/data policy enforcement, safe owner inspection, Emergency Stop composition, truthful cancellation/uncertainty semantics, idempotency/restart recovery, P4 reminder context handoff, P5 memory context filtering, Activities integration and Second Brain outcome recording through the existing authority.
+
+Focused P6 result: **44 collected, 44 passed, 0 failed**. Full repository CI result: **1041 passed, 0 failed, 8 warnings in 41.03s**. Reliability independently ran **1041 passed, 8 warnings in 35.63s**, `pip-audit` with no known vulnerabilities, encrypted backup/restore plus 11 isolated recovery tests, and a 45-second soak with SQLite integrity `ok`.
+
+Implementation exact-head workflows:
+
+- CI #1071 / `34996184188` — PASS
+- Reliability and Security #249 / `34996184334` — PASS
+- P3 iPhone PWA #206 / `34996184148` — PASS
+- Android Instrumentation #248 / `34996184426` — PASS
+- Package Validation #248 / `34996184213` — PASS
+- iOS Companion #230 / `34996184151` — PASS
+
+Implementation gate: **6/6 PASS**. Implementation diff from the starting evidence is **1 commit, 20 files, +2,730 / -40**. Global W7 schema remains **73**; P6 owns only additive local operation-delegation persistence.
+
+AUTONOMOUS ACTIVATION VERIFIED = NO. PHYSICAL P3 VERIFIED = NO. LIVE SERVICE VERIFIED = NO. PRODUCTION VERIFIED = NO.
+
 ## Frozen authority boundaries
 
-W7 remains the consequential-action/transaction/approval/recovery/Emergency Stop authority. W8 remains the model health/failover/observability authority. Second Brain remains the memory authority. Life Graph remains a read-through/context layer rather than a duplicate memory store. Deterministic persisted state—not an LLM—decides whether a commitment exists, is due, is completed, can be disclosed, or was approved.
+W7 remains the consequential-action/transaction/approval/recovery/Emergency Stop authority. W8 remains the model health/failover/observability authority. Second Brain remains the memory authority. Life Graph remains a read-through/context layer rather than a duplicate memory store. P4 reminders, P5 memory/context and future P7 observations may provide context but do not authorize consequential actions. Deterministic persisted state—not an LLM—decides durable lifecycle/approval/authorization state.
 
-Automated lifecycle evidence is **not** live reminder delivery. No physical iPhone push, physical-device reminder, live email/calendar delivery, production durability or signed distribution is claimed by this tranche.
+Automated lifecycle and delegation evidence is not live delivery or physical qualification. No physical iPhone push, physical-device reminder, live email/calendar delivery, live consequential action, production durability, signed distribution or physical P3 is claimed by these repository tranches.
