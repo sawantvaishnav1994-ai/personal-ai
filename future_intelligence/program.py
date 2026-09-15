@@ -43,6 +43,8 @@ class FutureIntelligenceProgram:
             automations=runtime.get('automations'),
             events=runtime.get('events'),
             second_brain=runtime.get('second_brain'),
+            memory=runtime.get('memory'),
+            everyday=self.everyday,
             path=root / 'operations.sqlite3',
         )
         self.world = WorldUnderstanding(gate=self.gate, events=runtime.get('events'), path=root / 'world.sqlite3')
@@ -61,7 +63,11 @@ class FutureIntelligenceProgram:
                 'second_brain_linked': p5_link['linked'],
                 'linked_memory_nodes': p5_link['memory_nodes'],
             },
-            'p6': {'implemented': True, 'activation': self.gate.decision('p6').reason},
+            'p6': {
+                'implemented': True,
+                'activation': self.gate.decision('p6').reason,
+                'operations': self.operations.safe_status(),
+            },
             'p7': {'implemented': True, 'activation': self.gate.decision('p7').reason},
             'p8': {'implemented': True, 'activation': self.gate.decision('p8').reason},
             'p9': {'implemented': True, 'activation': self.gate.decision('p9').reason},
