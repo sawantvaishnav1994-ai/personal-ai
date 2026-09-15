@@ -10,6 +10,7 @@ def memory_knowledge_inspection_router(runtime):
     memory = runtime['memory']
     second_brain = runtime['second_brain']
     knowledge = runtime['knowledge']
+    second_brain_life_graph = runtime.get('second_brain_life_graph')
 
     def authenticate(device_id: str | None, token: str | None, scope: str):
         if not device_id or not token or not registry.authenticate(device_id, token):
@@ -42,6 +43,46 @@ def memory_knowledge_inspection_router(runtime):
         rows = second_brain.context(q, limit, allowed_sensitivities=allowed_memory_sensitivities(device_id))
         audit('memory.retrieval.inspected', device_id=device_id, query_length=len(q), count=len(rows))
         return {'query': q, 'memories': rows}
+
+    @router.get('/life-graph')
+    def life_graph_snapshot(
+        node_type: str | None = Query(default=None, max_length=64),
+        limit: int = Query(default=100, ge=1, le=500),
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = authenticate(pa_device, pa_token, 'memory:read')
+        if second_brain_life_graph is None:
+            raise HTTPException(503, 'Second Brain Life Graph integration is unavailable')
+        payload = second_brain_life_graph.graph(
+            type=node_type,
+            limit=limit,
+            allowed_sensitivities=allowed_memory_sensitivities(device_id),
+        )
+        audit(
+            'life_graph.inspected',
+            device_id=device_id,
+            node_type=node_type,
+            node_count=len(payload.get('nodes', [])),
+            edge_count=len(payload.get('edges', [])),
+        )
+        return payload
+
+    @router.get('/life-graph/timeline')
+    def life_graph_timeline(
+        limit: int = Query(default=100, ge=1, le=500),
+        pa_device: str | None = Cookie(default=None),
+        pa_token: str | None = Cookie(default=None),
+    ):
+        device_id = authenticate(pa_device, pa_token, 'memory:read')
+        if second_brain_life_graph is None:
+            raise HTTPException(503, 'Second Brain Life Graph integration is unavailable')
+        payload = second_brain_life_graph.timeline(
+            limit=limit,
+            allowed_sensitivities=allowed_memory_sensitivities(device_id),
+        )
+        audit('life_graph.timeline.inspected', device_id=device_id, count=len(payload.get('items', [])))
+        return payload
 
     @router.get('/memory/{memory_id}/retrieval-explanation')
     def memory_retrieval_explanation(memory_id: str, q: str = Query(min_length=1, max_length=2000), pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
