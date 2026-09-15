@@ -289,7 +289,7 @@ def build_runtime():
                 'needs_approval': True,
                 'urgency': 0.7,
                 'importance': 0.8,
-                'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}."},
+                'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}.",
             },
             context=context_provider(),
         ),
