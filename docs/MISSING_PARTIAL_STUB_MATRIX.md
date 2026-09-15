@@ -11,42 +11,42 @@ Baseline date: 2026-09-15
 | P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation gates complete | frozen |
 | P1 | W7.2 | Observation/application context + sensitive evidence | RESOLVED FOR AUTOMATED SCOPE | automated gates complete | frozen; physical qualification separate |
 | P1 | W7.3 | Allowlists and data-safety policies | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
-| P1 | W7.4 | Safe Browser Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6; final docs `745952cb...` | frozen |
+| P1 | W7.4 | Safe Browser Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
 | P1 | W7.4 | Physical/real-site browser qualification | QUALIFICATION PENDING | automated evidence is not real-site/physical proof | later physical qualification |
-| P1 | W7.5 | Safe Desktop and File Operator | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `f794373c...`; 55 focused PASS; 709 full PASS, 8 warnings; implementation workflows 6/6 | complete docs-only 6/6, then freeze |
-| P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows adapter contracts and Windows packaging are automated evidence only | later real-device Windows qualification |
-| P1 | W7.6 | Verification and recovery | PARTIAL / NEXT | W7.1-W7.5 provide durable foundations; final cross-operator recovery qualification remains | begin only after W7.5 docs 6/6 |
-| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists | after W7 automated scope |
+| P1 | W7.5 | Safe Desktop and File Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
+| P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows contracts and packaging are automated evidence only | later real-device Windows qualification |
+| P1 | W7.6 | Verification and recovery | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | implementation `38eeae2f...`; 778 full PASS, 8 warnings; shared implementation workflows 6/6 | complete docs-only 6/6, then W7 completion audit |
+| P1 | W8 | Model health/failover/observability | PARTIAL | abstraction exists; automated W7 dependency is closing | next dependency-order implementation after W7 audit |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | future signing gate |
-| P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, W7.6, production/physical/signing gates remain | no merge/promotion yet |
+| P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, production/physical/signing gates remain | no production promotion yet |
 
-## W7.5 exact implementation evidence
+## W7.6 exact implementation evidence
 
-- Baseline: `745952cbdc0ab25b93db6dbb3e5324b48fe7837b`.
-- Implementation: `f794373c68b07aae23d7c4cb258f02a765100bb5`.
-- Exact changed files: `desktop/file_operator.py`, `desktop/input_clipboard.py`, `desktop/platform_adapter.py`, `desktop/safe_desktop_operator.py`, `tools/desktop_file.py`, `tools/builtins.py`, `tests/test_w75_file_operator.py`, `tests/test_w75_release_gate.py`, `tests/test_w75_safe_desktop_operator.py`, `tests/test_w75_tool_integration.py`.
-- No W7.5 schema migration; policy schema remains **73** and W7.1 transaction storage is reused.
-- Focused W7.5: **55 PASS**.
-- Full repository: **709 passed, 8 warnings**; `pip check` PASS; compileall PASS; JS N/A.
-- Automated Windows evidence: adapter/security contracts covered in focused tests; `windows-latest` Package Validation installer build PASS. **Not real-world Windows verified**.
-- Implementation workflows: CI #790 / `34889547472`, Reliability/Security #214 / `34889547513`, P3 #182 / `34889547586`, Android #213 / `34889547464`, Package #213 / `34889547577`, iOS #195 / `34889547565` — **6/6 PASS**.
+- Baseline: `acbbefea2ad6d46406ee05f9d2a44676503b3b59`.
+- Implementation: `38eeae2fc7f609ebc7d3e8681833885b8d35310d`.
+- Net implementation diff: exactly 11 approved W7.6 files across `recovery/`, four W7.6 test files, `tools/builtins.py`, `tools/recovery.py`, `tools/registry.py`, and `ui/settings_panel.py`.
+- Schema: additive recovery extension to **73**, using the existing W7.1 operator transaction database; no parallel transaction authority.
+- Full repository: **778 passed, 8 warnings**; `pip check` PASS; compileall PASS.
+- Implementation workflows: CI #828 / `34932656123`, Reliability/Security #226 / `34932656078`, P3 #186 / `34932656117`, Android #225 / `34932656134`, Package #225 / `34932656157`, iOS #207 / `34932656154` — **6/6 PASS**.
 
-## W7.5 resolved automated-scope capabilities
+## W7.6 resolved automated-scope capabilities
 
-- default-deny application/path/clipboard policy is mandatory;
-- absolute/canonical executable identity and separate argument validation; no `shell=True`, unrestricted shell, elevation or PATH execution;
-- verified foreground/window/control identity; visual coordinate fallback limited to verified click;
-- bounded file roots and separate read/write/copy/move/rename/trash/delete operations;
-- traversal/symlink/reparse/mount/UNC/ADS/reserved-name/hard-link defenses;
-- checksum/MIME/size/disk-space/no-overwrite/temporary confinement checks;
-- clipboard read/write separation, bounded content, sequence race detection and secret-safe audit;
-- Emergency Stop/cancellation cleanup and restart/unknown-outcome recovery review;
-- truthful rollback classes: reversible, compensating action, manual recovery, irreversible.
+- durable pre-side-effect dispatch journaling with idempotency, leases and fencing;
+- shared verification outcomes with transaction/action/dispatch/idempotency binding;
+- verifier identity/version, precondition, expected and observed postcondition, evidence checksum and freshness;
+- fail-closed unknown/stale/mismatched verification and no implicit success;
+- no blind automatic retry for consequential operations or application input;
+- separate compensation actions governed by current W7.3 policy, one-use permits, approval/reauthentication and independent verification;
+- manual/irreversible compensation cannot be automated;
+- owner decisions bind transaction/owner/device/session/security epoch/nonce and reject replay;
+- Emergency Stop blocks new dispatch/compensation authorization;
+- redacted recovery reports and digested file/download evidence references;
+- bounded cross-operator composition and Settings → Activities recovery review.
 
 ## Remaining boundaries
 
-W7.5 does not qualify unrestricted shell, admin elevation, UAC bypass, registry/service/driver/security modification, shutdown/restart, software installation, arbitrary process killing, credential/cookie extraction, covert monitoring or unrestricted filesystem access. Those remain blocked.
+Automated W7.6 evidence is not real-world Windows verification, physical-device verification, production verification or live OAuth verification. Simulator and package-build success remain automated evidence only.
 
 Production, Railway and the existing iPhone qualification service are unchanged. W6 live OAuth remains blocked/deferred by the owner-approved paid-infrastructure decision.
 
-Exact W7.6 dependency: final W7.5 documentation SHA must pass all six documentation workflows before W7.6 begins.
+After the W7.6 documentation exact-head 6/6 gate, perform the authoritative W7 completion audit before marking W7 complete or starting the next roadmap milestone.
