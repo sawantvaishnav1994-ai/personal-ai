@@ -2,30 +2,17 @@ name: CI
 
 on:
   push:
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 1a9d379f8cdb372e583eb01dfd6373d307c18db8
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: pip check
       - run: python -m compileall -q app agent automation browser capabilities core dashboard desktop devices future_intelligence integrations knowledge memory models proactive qualification security server tools ui updates vision voice
-      - name: Reproduce failed W8 candidate pytest
-        shell: bash
-        run: |
-          set -o pipefail
-          pytest -q 2>&1 | tee pytest-original-candidate.txt
-      - name: Upload original candidate pytest diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-original-candidate
-          path: pytest-original-candidate.txt
-          if-no-files-found: error
-          retention-days: 1
+      - run: pytest -q
