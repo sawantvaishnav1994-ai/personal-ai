@@ -25,7 +25,9 @@ class SettingsPanel(QDialog):
         lay.addWidget(QLabel('<h3>Activities — Recovery review</h3>'));lay.addWidget(QLabel('Inspect verified steps, uncertainty, redacted evidence, compensation limits and audit references. Consequential recovery decisions still pass through the Trusted Action Core and recent owner reauthentication.'))
         rrow=QHBoxLayout();self.recovery_tx=QLineEdit();self.recovery_tx.setPlaceholderText('Operator transaction ID');rrefresh=QPushButton('Inspect recovery');rrefresh.clicked.connect(self.refresh_recovery_view);rexport=QPushButton('Export recovery report');rexport.clicked.connect(self.export_recovery_report);rrow.addWidget(self.recovery_tx,1);rrow.addWidget(rrefresh);rrow.addWidget(rexport);lay.addLayout(rrow)
         self.recovery_view=QPlainTextEdit();self.recovery_view.setReadOnly(True);self.recovery_view.setMaximumHeight(210);lay.addWidget(self.recovery_view)
-        lay.addWidget(QLabel('Local diagnostics'));self.diagnostics=QPlainTextEdit();self.diagnostics.setReadOnly(True);self.refresh();lay.addWidget(self.diagnostics,1);refresh=QPushButton('Refresh diagnostics');refresh.clicked.connect(self.refresh);lay.addWidget(refresh);self.refresh_policy_view()
+        lay.addWidget(QLabel('<h3>Models — Health & routing</h3>'));lay.addWidget(QLabel('Privacy-safe provider health, circuit state, retry/failover counts and recent generation routing. Health checks never send conversation prompts.'))
+        self.model_view=QPlainTextEdit();self.model_view.setReadOnly(True);self.model_view.setMaximumHeight(230);lay.addWidget(self.model_view);mrow=QHBoxLayout();mrefresh=QPushButton('Refresh model status');mrefresh.clicked.connect(self.refresh_model_view);mprobe=QPushButton('Run bounded health check');mprobe.clicked.connect(lambda:self.refresh_model_view(True));mrow.addWidget(mrefresh);mrow.addWidget(mprobe);lay.addLayout(mrow)
+        lay.addWidget(QLabel('Local diagnostics'));self.diagnostics=QPlainTextEdit();self.diagnostics.setReadOnly(True);self.refresh();lay.addWidget(self.diagnostics,1);refresh=QPushButton('Refresh diagnostics');refresh.clicked.connect(self.refresh);lay.addWidget(refresh);self.refresh_policy_view();self.refresh_model_view()
     def save(self):
         phrase=self.wake.text().strip() or 'Hey Personal';mode=self.mode.currentText();self.prefs.update(onboarding_complete=True,preferred_name=self.name.text().strip(),wake_phrase=phrase,launch_voice_on_start=self.voice.isChecked(),show_memory_hints=self.hints.isChecked(),reduce_motion=self.motion.isChecked(),high_contrast=self.contrast.isChecked(),autonomy_mode=mode)
         gate=self.runtime.get('wake_phrase');tools=self.runtime.get('tools')
@@ -100,6 +102,12 @@ class SettingsPanel(QDialog):
             if not path:return
             Path(path).write_text(json.dumps(report,indent=2,default=str),encoding='utf-8');QMessageBox.information(self,'Recovery report exported','A redacted, checksummed recovery report was exported.')
         except Exception as exc:QMessageBox.warning(self,'Export failed',f'Recovery report could not be exported ({type(exc).__name__}).')
+    def refresh_model_view(self,probe=False):
+        models=self.runtime.get('models')
+        try:
+            report=models.health_status(probe=probe) if models and hasattr(models,'health_status') else models.status(probe=probe)
+            self.model_view.setPlainText(json.dumps(report,indent=2,default=str))
+        except Exception as exc:self.model_view.setPlainText(f'Model diagnostics unavailable: {type(exc).__name__}')
     def create_backup(self):
         path=self.runtime['backups'].create();QMessageBox.information(self,'Backup created',str(path))
     def restore_backup(self):
@@ -109,5 +117,6 @@ class SettingsPanel(QDialog):
         if answer!=QMessageBox.StandardButton.Yes:return
         result=self.runtime['backups'].restore(Path(path));QMessageBox.information(self,'Restore complete',f"Restored {result['restored']} files. Restart Personal AI to reload restored state.")
     def refresh(self):
-        telemetry=self.runtime['telemetry'].snapshot();graph=self.runtime['memory'].graph();devices=self.runtime['device_registry'].list();plugins=self.runtime['plugins'].list() if hasattr(self.runtime['plugins'],'list') else [];tools=self.runtime.get('tools')
-        report={'telemetry':telemetry,'memory':{'nodes':len(graph.get('nodes',[])),'edges':len(graph.get('edges',[]))},'devices':len(devices),'plugins':len(plugins),'autonomy':getattr(tools,'autonomy_mode','ask'),'backup_dir':str(self.runtime['backups'].backup_dir),'policy_safe_default':'deny','operator_recovery_schema':getattr(getattr(tools,'recovery_authority',None),'SCHEMA_VERSION',None)};self.diagnostics.setPlainText(json.dumps(report,indent=2,default=str))
+        telemetry=self.runtime['telemetry'].snapshot();graph=self.runtime['memory'].graph();devices=self.runtime['device_registry'].list();plugins=self.runtime['plugins'].list() if hasattr(self.runtime['plugins'],'list') else [];tools=self.runtime.get('tools');models=self.runtime.get('models')
+        model_summary=models.health_status(probe=False).get('w8',{}) if models and hasattr(models,'health_status') else {}
+        report={'telemetry':telemetry,'model_observability':model_summary,'memory':{'nodes':len(graph.get('nodes',[])),'edges':len(graph.get('edges',[]))},'devices':len(devices),'plugins':len(plugins),'autonomy':getattr(tools,'autonomy_mode','ask'),'backup_dir':str(self.runtime['backups'].backup_dir),'policy_safe_default':'deny','operator_recovery_schema':getattr(getattr(tools,'recovery_authority',None),'SCHEMA_VERSION',None)};self.diagnostics.setPlainText(json.dumps(report,indent=2,default=str))
