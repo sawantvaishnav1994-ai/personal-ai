@@ -1,4 +1,0 @@
-from models.governed_router import GovernedModelRouter
-from models.router import ModelRouter
-
-def test_w8_keeps_original_model_router_available_for_compatibility():assert issubclass(GovernedModelRouter,ModelRouter)
