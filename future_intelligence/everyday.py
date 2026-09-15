@@ -77,7 +77,7 @@ class EverydayIntelligence:
         open_items=self.items(limit=100); attention=self.attention(); forgotten=self.forgotten()
         memories=[]
         if self.second_brain:
-            try: memories=self.second_brain.search('important current goals commitments decisions', limit=8)
+            try: memories=self.second_brain.context('', limit=8)
             except Exception: memories=[]
         integration_state=[]
         if self.integrations:
