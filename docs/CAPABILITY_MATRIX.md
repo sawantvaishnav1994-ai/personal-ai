@@ -14,7 +14,8 @@ Statuses distinguish automated software evidence from real-world Windows, physic
 | W7.4 Safe Browser Operator | AUTOMATED VALIDATED | 52 focused; 654 full; implementation + docs 6/6 | real-site/physical-browser proof pending | `745952cb...` docs |
 | W7.5 Safe Desktop and File Operator | AUTOMATED VALIDATED | 55 focused; 709 full; implementation + docs 6/6 | real-world Windows/physical/production qualification pending | `acbbefea...` docs |
 | W7.6 Verification and Recovery | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING | 778 full PASS, 8 warnings; shared implementation workflows 6/6 PASS | documentation exact-head 6/6; physical/production qualification separate | implementation `38eeae2f...` |
-| Computer operator overall | AUTOMATED SCOPE CANDIDATE COMPLETE | W7.1-W7.6 automated authorities integrated | W7 completion audit + physical/production qualification remain | docs gate then audit |
+| W8 Model Health / Failover / Observability | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED | full repository exact-head PASS; implementation workflows 6/6 PASS | documentation exact-head 6/6; live-provider/local-model/production qualification separate | implementation `42616b2e8faca9b16a5695ac319ea78200e7af74` |
+| Computer operator overall | AUTOMATED SCOPE CANDIDATE COMPLETE | W7.1-W7.6 automated authorities integrated | W7 completion audit + physical/production qualification remain | preserve frozen W7 |
 | Google connector software scope | AUTOMATED VALIDATED / LIVE PENDING | W6 software gates green | real Google account qualification owner-deferred with paid isolated infrastructure | preserve blocker |
 | Production durable storage | BLOCKED | fail-closed hosted guard exists | approved production volume absent | future production gate |
 | Physical P3 | BLOCKED | automated P3 green | mandatory real-device evidence incomplete | physical protocol |
@@ -39,8 +40,16 @@ Consequential operations and application input are never blindly retried. Retry 
 
 Recovery decisions are bound to transaction, owner, device, session, current security epoch and nonce; replay/stale-session decisions fail closed. Emergency Stop blocks new dispatch and compensation authorization. Recovery reporting redacts sensitive fields and uses digested evidence references where raw paths/names are unnecessary. Owner review is exposed under Settings → Activities rather than redesigning Home/AI Core.
 
+## W8 model resilience contract
+
+W8 extends the existing `ModelRouter` through `GovernedModelRouter`; it does not introduce a second provider stack or side-effect authority. Provider/model eligibility is decided by existing capability, sensitivity, local/external and owner-policy rules before health can influence routing. A local-only/sensitive request therefore cannot become externally eligible merely because a local provider is unhealthy.
+
+Provider health is explicit (`UNKNOWN`, `HEALTHY`, `DEGRADED`, `UNHEALTHY`, `UNAVAILABLE`, `DISABLED`) with separate configuration, transport and capability dimensions. Circuit breakers implement `CLOSED → OPEN → HALF_OPEN → CLOSED` and `HALF_OPEN → OPEN`, with locked single-flight half-open admission to prevent recovery thundering herds. Retry and failover have separate bounded budgets; non-retryable authentication/configuration/policy/capability/invalid/malformed classes do not enter uncontrolled retry loops. Attempted targets are unique per candidate sequence, preventing recursive `A → B → A → B` fallback.
+
+Observability retains only bounded safe metadata: generation identity, safe provider/model/capability/sensitivity/routing/result/error identifiers, timestamps/latency, retry/failover counts and attempted/terminal targets. Prompt/response bodies, passwords, API keys, bearer tokens, cookies, authorization headers, environment secrets, clipboard data and memory contents are not retained in generation records. Ordinary status does not probe providers; an owner-requested health probe is explicit, bounded and uses the existing read-only provider request path.
+
+Implementation exact-head workflows at `42616b2e8faca9b16a5695ac319ea78200e7af74`: CI #1047 / `34967707625`; Reliability and Security #239 / `34967707659`; P3 iPhone PWA #199 / `34967707692`; Android Instrumentation #238 / `34967707628`; Package Validation #238 / `34967707632`; iOS Companion #220 / `34967707682` — **6/6 PASS**. Reliability completed dependency audit, compile, full pytest, encrypted backup/restore and 45-second soak. Schema remains **73**.
+
 ## Boundaries
 
-W7.6 is repository/CI qualification only. It does not establish real-world Windows operator verification, physical-device verification, production verification or live OAuth verification. Production, Railway and the existing iPhone qualification service remain unchanged. W6 live OAuth remains blocked/deferred by owner-approved paid-infrastructure deferral.
-
-Current truthful W7.6 classification: **IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED / DOCUMENTATION-HEAD VALIDATION PENDING**.
+W8 is repository/CI qualification. It does not establish live-provider verification, real-world local-model verification, physical-device verification or production verification. No production/Railway deployment, OAuth change, iPhone infrastructure change, provider credential change or Home V1 redesign was performed.
