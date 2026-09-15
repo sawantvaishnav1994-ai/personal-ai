@@ -376,8 +376,13 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
-        run_id = require_runtime('automations').run_workflow(body.workflow_id, background=True)
+        device_id = auth_device(authorization, x_device_id)
+        run_id = require_runtime('automations').run_workflow(
+            body.workflow_id,
+            background=True,
+            owner_id='owner',
+            device_id=device_id,
+        )
         return {'run_id': run_id}
 
     @app.post('/workflows/pause')
@@ -395,13 +400,23 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        device_id = auth_device(authorization, x_device_id)
         engine = require_runtime('automations')
         decision = body.decision.strip().lower()
         if decision == 'approve':
-            return engine.approve_run(body.run_id, body.approval_id)
+            return engine.approve_run(
+                body.run_id,
+                body.approval_id,
+                owner_id='owner',
+                device_id=device_id,
+            )
         if decision == 'reject':
-            return engine.reject_run(body.run_id, body.approval_id)
+            return engine.reject_run(
+                body.run_id,
+                body.approval_id,
+                owner_id='owner',
+                device_id=device_id,
+            )
         raise HTTPException(400, 'decision must be approve or reject')
 
     @app.get('/benchmark')

@@ -4,7 +4,6 @@ import io
 import queue
 import tempfile
 import threading
-import time
 from pathlib import Path
 
 from agent.executor import ExecutionCancelled
@@ -42,6 +41,7 @@ class FullDuplexVoiceSession:
         self.thread = None
         self._play_thread = None
         self._response_thread = None
+        self._lifecycle_lock = threading.RLock()
         self.metrics = {
             'utterances': 0,
             'barge_ins': 0,
@@ -50,18 +50,45 @@ class FullDuplexVoiceSession:
             'voice_threshold': self.vad.threshold,
         }
 
+    @staticmethod
+    def _drain(q):
+        try:
+            while True:
+                q.get_nowait()
+        except queue.Empty:
+            pass
+
     def start(self):
-        if self.thread and self.thread.is_alive():
-            return
-        self._stop.clear()
-        self.thread = threading.Thread(target=self._run, daemon=True, name='personal-ai-full-duplex')
-        self.thread.start()
+        with self._lifecycle_lock:
+            if self.thread and self.thread.is_alive():
+                return
+            self._drain(self._q)
+            self._barge.clear()
+            self._turn_cancel = None
+            self._stop.clear()
+            self.thread = threading.Thread(target=self._run, daemon=True, name='personal-ai-full-duplex')
+            self.thread.start()
 
     def stop(self):
-        self._stop.set()
-        self._barge.set()
-        if self._turn_cancel:
-            self._turn_cancel.set()
+        with self._lifecycle_lock:
+            self._stop.set()
+            self._barge.set()
+            if self._turn_cancel:
+                self._turn_cancel.set()
+            workers = (self._response_thread, self._play_thread, self.thread)
+        for worker in workers:
+            if worker and worker is not threading.current_thread():
+                worker.join(timeout=3)
+        self._drain(self._q)
+        with self._lifecycle_lock:
+            self._turn_cancel = None
+            if self._response_thread and not self._response_thread.is_alive():
+                self._response_thread = None
+            if self._play_thread and not self._play_thread.is_alive():
+                self._play_thread = None
+            if self.thread and not self.thread.is_alive():
+                self.thread = None
+        self._emit('state', state='idle')
 
     def _emit(self, name, **kw):
         if self.events:
@@ -89,12 +116,14 @@ class FullDuplexVoiceSession:
             stream = sd.OutputStream(samplerate=sr, channels=channels, dtype='float32', device=output_device)
             stream.start()
             step = max(256, int(sr * 0.035))
-            for i in range(0, len(audio), step):
-                if self._barge.is_set() or self._stop.is_set():
-                    break
-                stream.write(np.asarray(audio[i:i + step], dtype='float32'))
-            stream.stop()
-            stream.close()
+            try:
+                for index in range(0, len(audio), step):
+                    if self._barge.is_set() or self._stop.is_set():
+                        break
+                    stream.write(np.asarray(audio[index:index + step], dtype='float32'))
+            finally:
+                stream.stop()
+                stream.close()
         except Exception as exc:
             self._emit('voice.error', error=str(exc))
         finally:
@@ -112,13 +141,22 @@ class FullDuplexVoiceSession:
             wav = self.models.synthesize(answer)
             if cancel_event.is_set() or self._stop.is_set():
                 return
-            self._play_thread = threading.Thread(target=self._play, args=(wav,), daemon=True, name='personal-ai-tts')
-            self._play_thread.start()
+            play_thread = threading.Thread(target=self._play, args=(wav,), daemon=True, name='personal-ai-tts')
+            with self._lifecycle_lock:
+                self._play_thread = play_thread
+            play_thread.start()
         except ExecutionCancelled:
             self._emit('voice.turn.cancelled')
+            if not self._stop.is_set():
+                self._emit('state', state='listening')
         except Exception as exc:
             self._emit('voice.error', error=str(exc))
-            self._emit('state', state='listening')
+            if not self._stop.is_set():
+                self._emit('state', state='listening')
+        finally:
+            with self._lifecycle_lock:
+                if self._turn_cancel is cancel_event:
+                    self._turn_cancel = None
 
     def _run(self):
         try:
@@ -141,6 +179,8 @@ class FullDuplexVoiceSession:
             return
 
         def cb(indata, frames, time_info, status):
+            if self._stop.is_set():
+                return
             try:
                 self._q.put_nowait(indata.copy())
             except queue.Full:
@@ -199,12 +239,18 @@ class FullDuplexVoiceSession:
                         self.metrics['utterances'] += 1
                         self._emit('voice.transcript', text=text, metrics=dict(self.metrics))
                         cancel_event = threading.Event()
-                        self._turn_cancel = cancel_event
-                        self._response_thread = threading.Thread(
+                        with self._lifecycle_lock:
+                            previous = self._turn_cancel
+                            if previous:
+                                previous.set()
+                            self._turn_cancel = cancel_event
+                        response_thread = threading.Thread(
                             target=self._respond,
                             args=(text, cancel_event),
                             daemon=True,
                             name='personal-ai-voice-turn',
                         )
-                        self._response_thread.start()
-            self._emit('state', state='idle')
+                        with self._lifecycle_lock:
+                            self._response_thread = response_thread
+                        response_thread.start()
+        self._emit('state', state='idle')

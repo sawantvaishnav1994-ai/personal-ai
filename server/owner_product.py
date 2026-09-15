@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from knowledge.store import KnowledgeError
 from memory.second_brain import MemoryCandidate
+from security.request_context import current_trusted_request
 
 
 class MemoryCreateBody(BaseModel):
@@ -20,7 +21,7 @@ class MemoryCreateBody(BaseModel):
     source: str = Field(default='explicit-owner', max_length=240)
     confidence: float = Field(default=1.0, ge=0, le=1)
     verified: bool = True
-    sensitivity: Literal['normal', 'sensitive', 'secret'] = 'normal'
+    sensitivity: Literal['normal', 'sensitive', 'secret', 'never_store'] = 'normal'
     tags: list[str] = Field(default_factory=list, max_length=50)
     importance: float = Field(default=.7, ge=0, le=1)
     occurred_at: str | None = None
@@ -33,7 +34,7 @@ class MemoryUpdateBody(BaseModel):
     content: str | None = Field(default=None, max_length=20000)
     confidence: float | None = Field(default=None, ge=0, le=1)
     verified: bool | None = None
-    sensitivity: Literal['normal', 'sensitive', 'secret'] | None = None
+    sensitivity: Literal['normal', 'sensitive', 'secret', 'never_store'] | None = None
     tags: list[str] | None = Field(default=None, max_length=50)
     importance: float | None = Field(default=None, ge=0, le=1)
     occurred_at: str | None = None
@@ -128,6 +129,17 @@ def owner_product_router(runtime):
 
     def audit(action: str, *, device_id: str, **payload):
         memory.audit('owner-product', action, {'device_id': device_id, **payload})
+
+    def workflow_authority(device_id: str):
+        context = current_trusted_request()
+        if context is not None and context.device_id != device_id:
+            raise HTTPException(403, 'Authenticated browser session does not match this device')
+        return {
+            'owner_id': 'owner',
+            'device_id': device_id,
+            'session_id': context.session_id if context is not None else None,
+            'reauthenticated_at': context.reauthenticated_at if context is not None else None,
+        }
 
     def knowledge_access(device_id: str):
         classes = {'owner', 'trusted-devices'}
@@ -242,6 +254,8 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'memory:write')
+        if body.sensitivity == 'never_store':
+            raise HTTPException(409, 'NEVER_STORE content cannot be written to durable memory')
         if body.sensitivity in {'sensitive', 'secret'} and not can_read_sensitive_memory(device_id):
             raise HTTPException(403, 'This device cannot create sensitive memory')
         memory_id = second_brain.remember(MemoryCandidate(
@@ -280,6 +294,8 @@ def owner_product_router(runtime):
         existing = memory.get(memory_id)
         if not existing or not filter_memories([existing], device_id):
             raise HTTPException(404, 'Memory not found')
+        if body.sensitivity == 'never_store':
+            raise HTTPException(409, 'Delete this memory instead of marking durable content NEVER_STORE')
         if body.sensitivity in {'sensitive', 'secret'} and not can_read_sensitive_memory(device_id):
             raise HTTPException(403, 'This device cannot mark memory sensitive')
         changes = body.model_dump(exclude_none=True)
@@ -478,7 +494,14 @@ def owner_product_router(runtime):
     def workflow_run(workflow_id: str, body: WorkflowRunBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
-            run_id = runtime['automations'].run_workflow(workflow_id, context=body.context, background=True)
+            run_id = runtime['automations'].run_workflow(
+                workflow_id,
+                context=body.context,
+                background=True,
+                **workflow_authority(device_id),
+            )
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
         except (KeyError, RuntimeError) as exc:
             raise HTTPException(409, str(exc)) from exc
         audit('workflow.started', device_id=device_id, workflow_id=workflow_id, run_id=run_id)
@@ -488,9 +511,13 @@ def owner_product_router(runtime):
     def workflow_cancel(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
-            result = runtime['automations'].cancel_run(run_id)
+            authority = workflow_authority(device_id)
+            authority.pop('reauthenticated_at', None)
+            result = runtime['automations'].cancel_run(run_id, **authority)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
         audit('workflow.cancelled', device_id=device_id, run_id=run_id)
         return result
 
@@ -498,7 +525,11 @@ def owner_product_router(runtime):
     def workflow_resume(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
-            result = runtime['automations'].resume_run(run_id)
+            authority = workflow_authority(device_id)
+            authority.pop('reauthenticated_at', None)
+            result = runtime['automations'].resume_run(run_id, **authority)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
         except (KeyError, RuntimeError) as exc:
             raise HTTPException(409, str(exc)) from exc
         audit('workflow.resumed', device_id=device_id, run_id=run_id)
@@ -507,13 +538,22 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/approve')
     def workflow_approve(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
-        run = runtime['automations']._run(run_id)
+        try:
+            run = runtime['automations']._run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            result = runtime['automations'].approve_run(run_id, approval_id)
-        except (KeyError, PermissionError, RuntimeError) as exc:
+            result = runtime['automations'].approve_run(
+                run_id,
+                approval_id,
+                **workflow_authority(device_id),
+            )
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (KeyError, RuntimeError) as exc:
             raise HTTPException(409, str(exc)) from exc
         audit('workflow.approved', device_id=device_id, run_id=run_id, approval_id=approval_id)
         return result
@@ -521,13 +561,20 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/reject')
     def workflow_reject(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
-        run = runtime['automations']._run(run_id)
+        try:
+            run = runtime['automations']._run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            result = runtime['automations'].reject_run(run_id, approval_id)
-        except (KeyError, PermissionError, RuntimeError) as exc:
+            authority = workflow_authority(device_id)
+            authority.pop('reauthenticated_at', None)
+            result = runtime['automations'].reject_run(run_id, approval_id, **authority)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (KeyError, RuntimeError) as exc:
             raise HTTPException(409, str(exc)) from exc
         audit('workflow.rejected', device_id=device_id, run_id=run_id, approval_id=approval_id)
         return result

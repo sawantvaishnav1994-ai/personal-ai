@@ -4,12 +4,28 @@ import asyncio
 import json
 from app.main import build_runtime
 from core.config import settings
+from core.storage import validate_runtime_storage
+from security.pwa_sessions import PwaSessionStore
 from server.api import create_app
+from server.cloud_security import cloud_security_router
 from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
+from server.memory_knowledge_inspection import memory_knowledge_inspection_router
+from server.pwa_security import pwa_security_router
+from server.pwa_session_middleware import PwaSessionMiddleware
+from server.session_bound_executor import SessionBoundExecutor
+from server.workflow_budget_api import workflow_budget_router
+from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
+from server.connector_api import connector_router
+from server.connector_ui import ConnectorUiMiddleware, connector_ui_router
+from server.connector_oauth_callback import connector_oauth_callback_router
 
+storage_status = validate_runtime_storage(settings)
 runtime=build_runtime()
+runtime['storage_status'] = storage_status
+runtime['pwa_sessions'] = PwaSessionStore(settings.data_dir / 'pwa-sessions.sqlite3')
+print(json.dumps({'event': 'storage.ready', **storage_status}), flush=True)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -19,32 +35,30 @@ async def lifespan(app):
         async def evaluate_model():
             result = await asyncio.to_thread(runtime['model_evaluation'].run)
             safe = {key: value for key, value in result.items() if key != 'cases'}
-            safe['case_results'] = [
-                {'case': item['case'], 'passed': item['passed'], 'error_code': item['error_code']}
-                for item in result['cases']
-            ]
+            safe['case_results'] = [{'case': item['case'], 'passed': item['passed'], 'error_code': item['error_code']} for item in result['cases']]
             print(json.dumps({'event': 'model.dialogue_evaluation', **safe}), flush=True)
         evaluation_task = asyncio.create_task(evaluate_model())
     try:
         yield
     finally:
-        if evaluation_task and not evaluation_task.done():
-            evaluation_task.cancel()
-        runtime['voice'].stop()
-        runtime['automations'].stop()
-        runtime['telemetry'].persist()
-        runtime['apns'].close()
+        if evaluation_task and not evaluation_task.done(): evaluation_task.cancel()
+        runtime['voice'].stop(); runtime['automations'].stop(); runtime['telemetry'].persist(); runtime['apns'].close()
 
-app=create_app(
-    runtime['executor'],
-    settings,
-    device_registry=runtime['device_registry'],
-    device_gateway=runtime['device_gateway'],
-    second_brain=runtime['second_brain'],
-    automations=runtime['automations'],
-    runtime=runtime,
-)
-app.include_router(iphone_pwa_router(runtime, settings))
+app=create_app(runtime['executor'], settings, device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'], second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime)
+app.add_middleware(PwaSessionMiddleware, sessions=runtime['pwa_sessions'], device_registry=runtime['device_registry'], cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)))
+app.add_middleware(WorkflowBudgetUiMiddleware)
+app.add_middleware(ConnectorUiMiddleware)
+pwa_runtime = dict(runtime)
+pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'])
+app.include_router(iphone_pwa_router(pwa_runtime, settings))
+app.include_router(pwa_security_router(runtime))
+app.include_router(cloud_security_router(runtime))
+app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(owner_product_router(runtime))
+app.include_router(workflow_budget_router(runtime))
+app.include_router(workflow_budget_ui_router())
+app.include_router(connector_router(runtime))
+app.include_router(connector_oauth_callback_router())
+app.include_router(connector_ui_router())
 app.include_router(capability_console_router(runtime))
 app.router.lifespan_context=lifespan

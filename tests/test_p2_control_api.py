@@ -15,13 +15,13 @@ from server.api import create_app
 
 
 class Executor:
-    def chat(self, text, cancel_event=None):
+    def chat(self, text, cancel_event=None, **kwargs):
         return f'reply:{text}'
 
-    def approve(self, approval_id):
+    def approve(self, approval_id, **kwargs):
         return f'approved:{approval_id}'
 
-    def reject(self, approval_id):
+    def reject(self, approval_id, **kwargs):
         return 'Action cancelled.'
 
 

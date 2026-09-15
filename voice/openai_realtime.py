@@ -20,6 +20,8 @@ class OpenAIRealtimeVoiceSession:
         self.thread = None
         self._stop = threading.Event()
         self._ws = None
+        self._ws_lock = threading.RLock()
+        self._audio_worker = None
         self._audio_q = queue.Queue(maxsize=128)
         self._play_q = queue.Queue(maxsize=256)
         self._response_active = False
@@ -104,9 +106,11 @@ class OpenAIRealtimeVoiceSession:
         return {'type': 'input_audio_buffer.append', 'audio': base64.b64encode(pcm16).decode('ascii')}
 
     def cancel_response(self):
-        if self._ws and self._response_active:
+        with self._ws_lock:
+            ws = self._ws
+        if ws and self._response_active:
             try:
-                self._ws.send(json.dumps({'type': 'response.cancel'}))
+                ws.send(json.dumps({'type': 'response.cancel'}))
             except Exception:
                 pass
         self._response_active = False
@@ -126,21 +130,19 @@ class OpenAIRealtimeVoiceSession:
             pass
 
     def _send_tool_output(self, call_id, result):
-        if not self._ws:
+        with self._ws_lock:
+            ws = self._ws
+        if not ws:
             return
-        self._ws.send(
-            json.dumps(
-                {
-                    'type': 'conversation.item.create',
-                    'item': {
-                        'type': 'function_call_output',
-                        'call_id': call_id,
-                        'output': json.dumps(result, default=str),
-                    },
-                }
-            )
-        )
-        self._ws.send(json.dumps({'type': 'response.create'}))
+        ws.send(json.dumps({
+            'type': 'conversation.item.create',
+            'item': {
+                'type': 'function_call_output',
+                'call_id': call_id,
+                'output': json.dumps(result, default=str),
+            },
+        }))
+        ws.send(json.dumps({'type': 'response.create'}))
 
     def approve_tool(self, call_id):
         if not self.tool_bridge:
@@ -215,15 +217,24 @@ class OpenAIRealtimeVoiceSession:
     def stop(self):
         self._stop.set()
         self._connected = False
+        with self._ws_lock:
+            ws = self._ws
+            self._ws = None
         try:
-            if self._ws:
-                self._ws.close()
+            if ws:
+                ws.close()
         except Exception:
             pass
         self._drain(self._audio_q)
         self._drain(self._play_q)
         if self.tool_bridge:
             self.tool_bridge.cancel_unapproved(reason='voice_stopped')
+        audio_worker = self._audio_worker
+        if audio_worker and audio_worker is not threading.current_thread():
+            audio_worker.join(timeout=2)
+        thread = self.thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=3)
         self._emit('state', state='idle')
 
     def _run(self):
@@ -247,12 +258,14 @@ class OpenAIRealtimeVoiceSession:
                 if self._stop.wait(backoff):
                     break
                 backoff = min(backoff * 2, 15.0)
+        self._connected = False
 
     def _run_once(self, websocket):
         opened = threading.Event()
 
         def on_open(ws):
-            self._ws = ws
+            with self._ws_lock:
+                self._ws = ws
             ws.send(json.dumps(self.session_update()))
             opened.set()
 
@@ -267,6 +280,9 @@ class OpenAIRealtimeVoiceSession:
 
         def on_close(ws, status, message):
             self._connected = False
+            with self._ws_lock:
+                if self._ws is ws:
+                    self._ws = None
 
         app = websocket.WebSocketApp(
             self.url(),
@@ -276,16 +292,31 @@ class OpenAIRealtimeVoiceSession:
             on_error=on_error,
             on_close=on_close,
         )
-        self._ws = app
+        with self._ws_lock:
+            self._ws = app
         network = threading.Thread(
             target=lambda: app.run_forever(ping_interval=20, ping_timeout=10),
             daemon=True,
+            name='personal-ai-realtime-network',
         )
         network.start()
         if not opened.wait(15):
+            try:
+                app.close()
+            finally:
+                with self._ws_lock:
+                    if self._ws is app:
+                        self._ws = None
             raise RuntimeError('Realtime WebSocket connection timed out')
         self._emit('state', state='listening')
-        threading.Thread(target=self._audio_io, daemon=True, name='personal-ai-realtime-audio').start()
+        audio_worker = threading.Thread(
+            target=self._audio_io,
+            args=(app,),
+            daemon=True,
+            name='personal-ai-realtime-audio',
+        )
+        self._audio_worker = audio_worker
+        audio_worker.start()
         while not self._stop.is_set() and network.is_alive():
             try:
                 chunk = self._audio_q.get(timeout=.1)
@@ -300,17 +331,27 @@ class OpenAIRealtimeVoiceSession:
             app.close()
         except Exception:
             pass
+        with self._ws_lock:
+            if self._ws is app:
+                self._ws = None
         network.join(timeout=3)
+        audio_worker.join(timeout=2)
+        if self._audio_worker is audio_worker:
+            self._audio_worker = None
 
-    def _audio_io(self):
+    def _audio_io(self, connection):
         import sounddevice as sd
 
         rate = self.settings.realtime_sample_rate
         input_device = self.devices.resolve(self.settings.voice_input_device, kind='input') if self.settings.voice_input_device else None
         output_device = self.devices.resolve(self.settings.voice_output_device, kind='output') if self.settings.voice_output_device else None
 
+        def owns_connection():
+            with self._ws_lock:
+                return self._ws is connection
+
         def input_cb(indata, frames, time_info, status):
-            if self._stop.is_set():
+            if self._stop.is_set() or not owns_connection():
                 return
             try:
                 self._audio_q.put_nowait(bytes(indata))
@@ -331,7 +372,7 @@ class OpenAIRealtimeVoiceSession:
             blocksize=max(240, int(rate * .02)),
             device=output_device,
         ) as output:
-            while not self._stop.is_set() and self._ws:
+            while not self._stop.is_set() and owns_connection():
                 try:
                     chunk = self._play_q.get(timeout=.05)
                 except queue.Empty:
