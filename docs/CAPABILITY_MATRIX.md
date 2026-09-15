@@ -2,22 +2,22 @@
 
 Baseline date: 2026-09-15
 
-Statuses distinguish automated software evidence from real-world Windows, physical-device, live-provider and production evidence.
+Statuses distinguish automated software evidence from live service, real-world Windows, physical-device, signed-distribution and production evidence.
 
 | Capability | Status | Automated evidence | Remaining boundary | Exact SHA / next |
 | --- | --- | --- | --- | --- |
 | Home / AI Core | QUALIFICATION | UI/PWA workflows green | physical UX incomplete | frozen design |
 | Trusted Action Core | PARTIAL | durable binding/replay/epoch/reauth; reused by W7.1-W7.6 | live operational proof partial | preserve authority |
 | W7.1 Durable Operator Transaction Core | AUTOMATED VALIDATED | durable transaction/action/audit, cancellation, recovery, Emergency Stop | physical qualification pending | frozen |
-| W7.2 Observation / Sensitive Evidence | AUTOMATED VALIDATED | 85 focused; 557 full | physical desktop/browser proof pending | `2a05e1da...` docs |
-| W7.3 Allowlists / Data-Safety Policies | AUTOMATED VALIDATED | 45 focused; 602 full; implementation + docs 6/6 | physical policy qualification pending | `72408596...` docs |
-| W7.4 Safe Browser Operator | AUTOMATED VALIDATED | 52 focused; 654 full; implementation + docs 6/6 | real-site/physical-browser proof pending | `745952cb...` docs |
-| W7.5 Safe Desktop and File Operator | AUTOMATED VALIDATED | 55 focused; 709 full; implementation + docs 6/6 | real-world Windows/physical/production qualification pending | `acbbefea...` docs |
+| W7.2 Observation / Sensitive Evidence | AUTOMATED VALIDATED | 85 focused; 557 full | physical desktop/browser proof pending | frozen evidence |
+| W7.3 Allowlists / Data-Safety Policies | AUTOMATED VALIDATED | 45 focused; 602 full; implementation + docs 6/6 | physical policy qualification pending | frozen evidence |
+| W7.4 Safe Browser Operator | AUTOMATED VALIDATED | 52 focused; 654 full; implementation + docs 6/6 | real-site/physical-browser proof pending | frozen evidence |
+| W7.5 Safe Desktop / File Operator | AUTOMATED VALIDATED | 55 focused; 709 full; implementation + docs 6/6 | real-world Windows/physical/production qualification pending | frozen evidence |
 | W7.6 Verification and Recovery | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED | frozen W7 baseline contains completed recovery implementation/evidence | physical/production qualification separate | preserve frozen W7 |
 | W8 Model Health / Failover / Observability | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED / REPOSITORY-AUTOMATED SCOPE COMPLETE | implementation and documentation exact-head workflows 6/6 PASS | live-provider/local-model/physical/production qualification separate | implementation `42616b2e8faca9b16a5695ac319ea78200e7af74`; docs `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce` |
-| P4 Everyday Personal Intelligence | IMPLEMENTED FOUNDATION / INTEGRATED / AUTOMATED VALIDATED FOR CURRENT TRANCHE | daily briefing now returns authoritative Second Brain context; full repo 972 PASS | live adapters, real reminder delivery, daily-use acceptance, proactive precision/recall | implementation `fc8f1aeb...` |
-| P5 Second Brain / Life Graph | IMPLEMENTED FOUNDATION / INTEGRATED / AUTOMATED VALIDATED FOR CURRENT TRANCHE | read-through Second Brain→Life Graph linking, privacy filtering, relationships/supersession/deletion behavior tested | graph retrieval/media/long-term corpus quality; physical P3.5 | implementation `fc8f1aeb...` |
-| P6 Autonomous Operations | IMPLEMENTED FOUNDATION / PARTIAL INTEGRATION | durable plans, P3 gate, consequential approval, restart persistence | direct governed delegation/qualification; real P3.4 production-like evidence | next unblocked integration candidate |
+| P4 Everyday Personal Intelligence | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | durable reminder/follow-up lifecycle, deterministic due/snooze/reschedule/terminal states, restart-safe surfacing, briefing integration and fixed precision/recall dataset; full repo 997 PASS | live delivery adapters, real push delivery, daily-use acceptance and physical-device proof | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
+| P5 Second Brain / Life Graph | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | 100/1,000/5,000 corpus retrieval, current/historical/superseded semantics, temporal queries, permission-safe relationship ranking, deletion/retention/context budget; Life Graph remains read-through | media extraction quality, larger/real long-term corpora and physical P3.5 | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
+| P6 Autonomous Operations | IMPLEMENTED FOUNDATION / PARTIAL INTEGRATION | durable plans, P3 gate, consequential approval, restart persistence | direct governed delegation through existing AgentExecutor/AutomationEngine/W7 authority | next recommended repository tranche after this evidence gate |
 | P7 Multimodal Understanding | IMPLEMENTED FOUNDATION | normalized persistent source-attributed observation ledger | real sensors/device evidence; broader qualification | deterministic tests + physical later |
 | P8 Personal AI Everywhere | IMPLEMENTED FOUNDATION / PARTIAL SURFACES | shared surface registry + continuity foundation | physical cross-device proof; watch/earbuds/car/home/AR are not complete surfaces | P3.6 physical later |
 | P9 Hybrid Intelligence | AUTOMATED FOUNDATION; W8 RESILIENCE AUTOMATED VALIDATED | privacy/offline routing foundation plus W8 health/failover/observability | live provider and real local runtime unverified | owner/live qualification later |
@@ -29,34 +29,38 @@ Statuses distinguish automated software evidence from real-world Windows, physic
 | W10 Signed Distribution | BLOCKED / QUALIFICATION | unsigned/dev package and simulator/instrumentation evidence exists | physical-device and signing credentials missing | readiness only until owner gates |
 | W12 Release Readiness | PARTIAL | strong repository/automated evidence | live OAuth/provider/storage, physical devices, signing and production gates | no production promotion |
 
-## Post-W8 P4/P5 implementation evidence
+## P4/P5 retrieval intelligence + reminder lifecycle evidence
 
-Branch: `p5/second-brain-life-graph-qualification-20260915`. Draft PR: #25. Base: frozen W8 documentation head `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`. Implementation: `fc8f1aeb5a8121f0faf911b6840b7ec15d48b609`.
+Starting evidence: `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`.
+Branch: `p4-p5/retrieval-reminder-qualification-20260915`.
+Draft PR: #26, stacked on PR #25.
+Final implementation: `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`.
 
-The P4 repair replaces a swallowed call to nonexistent `SecondBrain.search()` with the authoritative `SecondBrain.context()` retrieval path, so daily briefing can actually include ranked owner memory. The P5 bridge is read-through rather than a second memory database: the existing Second Brain remains authoritative for storage, deletion, retention, supersession, sensitivity and evidence. Owner Life Graph inspection projects live memory nodes/relations/supersession and uses existing device scopes; secret/sensitive content fails closed unless authorized.
+Second Brain remains the sole authoritative memory persistence layer. Existing lexical retrieval, vector retrieval, salience, usage, source/evidence, conflicts, supersession, deletion and retention were extended rather than replaced. Retrieval now fails closed to normal sensitivity by default; sensitive/secret retrieval requires explicit existing authorization. Visible graph relationships can contribute to bounded context/ranking, but permission filtering happens before relationship expansion/counting so hidden nodes cannot become a metadata side-channel. Explanations expose actual ranking factors only. `current_truth()` excludes historical/superseded rows; `context_at()` supports evidence-preserving time-valid queries; retained history stays historical and deletion of the newest value does not resurrect older obsolete values. Context-character budgeting is bounded.
 
-Full repository pytest at the implementation head: **972 passed, 0 failed, 8 warnings in 26.17s**. `pip check`, compileall, `pip-audit`, isolated encrypted backup/restore and 45-second soak passed. Exact implementation-head applicable workflows: CI #1060 / `34980195417`; Reliability and Security #245 / `34980195624`; Android Instrumentation #244 / `34980195358`; Package Validation #244 / `34980195728`; iOS Companion #226 / `34980195661` — **5/5 applicable workflows PASS**. P3 iPhone PWA is path-filtered N/A because no P3/PWA path changed; it is not counted as a pass. iOS remains simulator evidence only.
+P4 `everyday_items` is the authoritative reminder/follow-up lifecycle. The lifecycle is additive and deterministic: `created`, `scheduled`, `due`, `surfaced`, `snoozed`, `completed`, `dismissed`, `cancelled`, `superseded`. Existing `open` behavior remains a compatibility view over active states. Due evaluation uses injected/frozen time and per-item timezone handling, including date-only values. Surfacing uses a persisted surface key/count to prevent repeated surfacing after restart. The existing reminder tool delegates to this lifecycle in the full runtime; the old `tasks` table remains only a compatibility fallback for minimal runtimes that do not construct P4. No third reminder authority was introduced.
 
-## W7.6 recovery contract
+Focused deterministic qualification: **25 collected, 25 passed, 0 failed, 0 warnings in 0.96s**. Large-corpus correctness was qualified at 100, 1,000 and 5,000 memories. Qualification-environment measurements were approximately **3.943 ms**, **18.603 ms**, and **90.067 ms** respectively; 5,000 future-reminder evaluation was approximately **24.772 ms**. The committed CI performance guards are intentionally loose (<5 seconds) regression guards, not product SLAs.
 
-W7.6 composes W7.1 transaction authority, W7.2 evidence/observation discipline, W7.3 default-deny policy/temporary permits, W7.4 browser verification/no-blind-retry behavior, W7.5 desktop/file operator behavior, Trusted Action Core and Emergency Stop. It adds a shared durable verification/recovery layer rather than another execution authority.
+Fixed proactive/forgotten-item benchmark result: **precision 1.0, recall 1.0, 0 false positives, 0 false negatives** for the specified deterministic dataset of due/overdue/unscheduled explicit commitments versus future/completed/cancelled/superseded/irrelevant/duplicate items. This is deterministic state qualification, not an LLM-authority claim or real-world acceptance metric.
 
-Durable dispatch attempts are journaled with transaction/action/idempotency bindings, worker leases and fencing tokens. Verification records bind transaction, action, dispatch and idempotency identity and retain verifier identity/version, precondition, expected postcondition, observed postcondition, checksummed evidence references, timestamp/freshness, result and explanation. Unknown or stale evidence cannot become implicit success.
+Full repository exact-head result: **997 passed, 0 failed, 8 warnings in 30.64s**. `pip check`, compileall and `pip-audit` PASS. Reliability/Security also passed isolated encrypted backup/restore and the 45-second soak.
 
-Consequential operations and application input are never blindly retried. Retry is fail-closed unless objective fresh evidence proves no effect and the operation class is eligible for fresh governance. Compensation is a separate action, cannot reuse the original action, must satisfy current W7.3 policy and one-use permit rules, enforces approval/reauthentication where required, and receives independent verification. Manual-recovery-only and irreversible compensation classes cannot be automated.
+Implementation exact-head workflows at `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`:
 
-Recovery decisions are bound to transaction, owner, device, session, current security epoch and nonce; replay/stale-session decisions fail closed. Emergency Stop blocks new dispatch and compensation authorization. Recovery reporting redacts sensitive fields and uses digested evidence references where raw paths/names are unnecessary. Owner review is exposed under Settings → Activities rather than redesigning Home/AI Core.
+- CI #1065 / `34984377146` — PASS
+- Reliability and Security #247 / `34984377349` — PASS
+- P3 iPhone PWA #204 / `34984377120` — PASS; legitimately triggered by the real `server/cloud_app.py` router mount
+- Android Instrumentation #246 / `34984377166` — PASS
+- Package Validation #246 / `34984377239` — PASS
+- iOS Companion #228 / `34984377173` — PASS; simulator evidence only
 
-## W8 model resilience contract
+Implementation gate: **6/6 PASS**.
 
-W8 extends the existing `ModelRouter` through `GovernedModelRouter`; it does not introduce a second provider stack or side-effect authority. Provider/model eligibility is decided by existing capability, sensitivity, local/external and owner-policy rules before health can influence routing. A local-only/sensitive request therefore cannot become externally eligible merely because a local provider is unhealthy.
+Implementation diff from `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`: **1 commit, 10 files, +1,557 / -119**. No dependency file, production infrastructure, Railway, OAuth, provider credential, signing, W7, W8 or P6 change. Global W7/W8 schema remains **73**. P4 `everyday.sqlite3` is additively extended with lifecycle/audit fields and a local audit table; no global schema-version bump was introduced.
 
-Provider health is explicit (`UNKNOWN`, `HEALTHY`, `DEGRADED`, `UNHEALTHY`, `UNAVAILABLE`, `DISABLED`) with separate configuration, transport and capability dimensions. Circuit breakers implement `CLOSED → OPEN → HALF_OPEN → CLOSED` and `HALF_OPEN → OPEN`, with locked single-flight half-open admission to prevent recovery thundering herds. Retry and failover have separate bounded budgets; non-retryable authentication/configuration/policy/capability/invalid/malformed classes do not enter uncontrolled retry loops. Attempted targets are unique per candidate sequence, preventing recursive `A → B → A → B` fallback.
+## Frozen authority boundaries
 
-Observability retains only bounded safe metadata: generation identity, safe provider/model/capability/sensitivity/routing/result/error identifiers, timestamps/latency, retry/failover counts and attempted/terminal targets. Prompt/response bodies, passwords, API keys, bearer tokens, cookies, authorization headers, environment secrets, clipboard data and memory contents are not retained in generation records. Ordinary status does not probe providers; an owner-requested health probe is explicit, bounded and uses the existing read-only provider request path.
+W7 remains the consequential-action/transaction/approval/recovery/Emergency Stop authority. W8 remains the model health/failover/observability authority. Second Brain remains the memory authority. Life Graph remains a read-through/context layer rather than a duplicate memory store. Deterministic persisted state—not an LLM—decides whether a commitment exists, is due, is completed, can be disclosed, or was approved.
 
-Implementation exact-head workflows at `42616b2e8faca9b16a5695ac319ea78200e7af74`: CI #1047 / `34967707625`; Reliability and Security #239 / `34967707659`; P3 iPhone PWA #199 / `34967707692`; Android Instrumentation #238 / `34967707628`; Package Validation #238 / `34967707632`; iOS Companion #220 / `34967707682` — **6/6 PASS**. Documentation exact-head workflows at `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`: CI #1055 / `34968483715`; Reliability and Security #243 / `34968483919`; P3 iPhone PWA #203 / `34968483669`; Android Instrumentation #242 / `34968483729`; Package Validation #242 / `34968483720`; iOS Companion #224 / `34968483967` — **6/6 PASS**. Schema remains **73**.
-
-## Boundaries
-
-Automated evidence is not live-provider verification, real-world local-model verification, physical-device verification, signed distribution or production verification. No production/Railway deployment, OAuth change, provider credential change, signing credential change or Home V1 redesign was performed by W8 or the post-W8 P4/P5 tranche.
+Automated lifecycle evidence is **not** live reminder delivery. No physical iPhone push, physical-device reminder, live email/calendar delivery, production durability or signed distribution is claimed by this tranche.
