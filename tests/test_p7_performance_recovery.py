@@ -135,7 +135,7 @@ def test_p7_indexed_queries_and_startup_are_bounded(tmp_path):
         assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
 
 
-def test_p7_performance_envelope_is_bounded_and_reported(tmp_path, capsys):
+def test_p7_performance_envelope_is_bounded_and_reported(tmp_path):
     measurements = []
     for label, volume in [('small', 100), ('medium', 600), ('large', 1800)]:
         db = tmp_path / f'{label}.sqlite3'
@@ -180,6 +180,4 @@ def test_p7_performance_envelope_is_bounded_and_reported(tmp_path, capsys):
 
     assert measurements[0]['database_bytes'] < measurements[-1]['database_bytes']
     assert all(row['loaded_observations_in_memory'] == 0 for row in measurements)
-    print('P7_PERFORMANCE_RESULTS=' + json.dumps(measurements, sort_keys=True))
-    captured = capsys.readouterr().out
-    assert 'P7_PERFORMANCE_RESULTS=' in captured
+    print('P7_PERFORMANCE_RESULTS=' + json.dumps(measurements, sort_keys=True), flush=True)
