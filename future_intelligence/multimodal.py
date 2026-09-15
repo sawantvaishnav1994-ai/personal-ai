@@ -476,6 +476,29 @@ class WorldUnderstanding:
             except Exception:
                 pass
 
+    @staticmethod
+    def _rejection_reason(exc: Exception) -> str:
+        if isinstance(exc, PermissionError):
+            return 'permission_or_trust_denied'
+        if isinstance(exc, RuntimeError):
+            return 'adapter_unavailable'
+        text = str(exc).lower()
+        if 'secret' in text or 'credential' in text or 'token' in text:
+            return 'secret_bearing_payload'
+        if 'reference' in text or 'path' in text or 'url' in text:
+            return 'unsafe_content_reference'
+        if 'timestamp' in text or 'observed_at' in text or 'future' in text:
+            return 'invalid_timestamp'
+        if 'confidence' in text:
+            return 'invalid_confidence'
+        if 'location' in text or 'coordinate' in text:
+            return 'invalid_location'
+        if 'sensor' in text or 'unit' in text:
+            return 'invalid_sensor_value'
+        if 'source event identity conflict' in text:
+            return 'source_event_conflict'
+        return 'invalid_observation_payload'
+
     def record_capability(
         self,
         adapter_id: str,
@@ -552,22 +575,28 @@ class WorldUnderstanding:
         return output
 
     def ingest_from_adapter(self, adapter, payload: Mapping[str, Any], *, source_event_id: str, **kwargs):
-        capability = self.capability(adapter.adapter_id)
-        if capability is None:
-            raise RuntimeError('adapter capability has not been registered')
-        if capability['state'] not in {'available', 'simulation_only'}:
-            raise PermissionError(f"adapter capability is {capability['state']}")
-        simulation = bool(capability['simulation_only'])
-        return self.ingest(
-            adapter.modality,
-            payload,
-            source=f'adapter:{adapter.adapter_id}',
-            source_adapter=adapter.adapter_id,
-            device_id=getattr(adapter, 'device_id', None),
-            source_event_id=source_event_id,
-            simulation=simulation,
-            **kwargs,
-        )
+        modality = str(getattr(adapter, 'modality', '') or '').strip().lower()
+        audit_modality = modality if modality in self.MODALITIES else 'unknown'
+        try:
+            capability = self.capability(adapter.adapter_id)
+            if capability is None:
+                raise RuntimeError('adapter capability has not been registered')
+            if capability['state'] not in {'available', 'simulation_only'}:
+                raise PermissionError(f"adapter capability is {capability['state']}")
+            simulation = bool(capability['simulation_only'])
+            return self.ingest(
+                adapter.modality,
+                payload,
+                source=f'adapter:{adapter.adapter_id}',
+                source_adapter=adapter.adapter_id,
+                device_id=getattr(adapter, 'device_id', None),
+                source_event_id=source_event_id,
+                simulation=simulation,
+                **kwargs,
+            )
+        except (RuntimeError, PermissionError, ValueError, TypeError) as exc:
+            self._emit('observation.rejected', reason=self._rejection_reason(exc), modality=audit_modality)
+            raise
 
     def ingest(
         self,
