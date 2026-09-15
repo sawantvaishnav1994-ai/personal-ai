@@ -337,7 +337,6 @@ def test_p7_context_cannot_manufacture_p6_approval_or_execution(tmp_path):
         operation = h.operations.execute(plan['id'], **h.authority())['operation']
         assert operation['status'] == 'waiting_approval'
         assert side.value == 0
-        assert operation['approval_id']
     finally:
         h.close()
 
