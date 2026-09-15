@@ -109,8 +109,8 @@ class WorldUnderstanding:
 
     FORBIDDEN_KEYS = {
         'password', 'passwd', 'passphrase', 'secret', 'client_secret', 'api_key', 'apikey',
-        'access_token', 'refresh_token', 'authorization', 'cookie', 'set_cookie', 'private_key',
-        'bearer_token', 'session_token',
+        'token', 'access_token', 'refresh_token', 'authorization', 'cookie', 'set_cookie',
+        'credential', 'credentials', 'private_key', 'bearer_token', 'session_token',
     }
     REFERENCE_KEYS = {'path', 'file', 'file_path', 'local_path', 'url', 'uri', 'content_url', 'content_uri'}
     SAFE_REFERENCE_SCHEMES = ('blob:', 'object:', 'attachment:', 'observation:')
@@ -346,7 +346,14 @@ class WorldUnderstanding:
     @classmethod
     def _forbidden_key(cls, key: Any) -> bool:
         normalized = str(key).strip().lower().replace('-', '_').replace(' ', '_')
-        return normalized in cls.FORBIDDEN_KEYS or normalized.endswith('_password') or normalized.endswith('_secret')
+        return (
+            normalized in cls.FORBIDDEN_KEYS
+            or normalized.endswith('_password')
+            or normalized.endswith('_secret')
+            or normalized.endswith('_token')
+            or normalized.endswith('_credential')
+            or normalized.endswith('_credentials')
+        )
 
     @classmethod
     def _unsafe_reference(cls, key: Any, value: Any) -> bool:
@@ -477,7 +484,7 @@ class WorldUnderstanding:
                 pass
 
     @staticmethod
-    def _rejection_reason(exc: Exception) -> str:
+    def _rejection_reason(exc: Exception, *, modality: str | None = None) -> str:
         if isinstance(exc, PermissionError):
             return 'permission_or_trust_denied'
         if isinstance(exc, RuntimeError):
@@ -494,6 +501,8 @@ class WorldUnderstanding:
         if 'location' in text or 'coordinate' in text:
             return 'invalid_location'
         if 'sensor' in text or 'unit' in text:
+            return 'invalid_sensor_value'
+        if modality in {'device_sensor', 'wearable'} and ('numeric' in text or 'finite' in text or 'value' in text):
             return 'invalid_sensor_value'
         if 'source event identity conflict' in text:
             return 'source_event_conflict'
@@ -595,7 +604,11 @@ class WorldUnderstanding:
                 **kwargs,
             )
         except (RuntimeError, PermissionError, ValueError, TypeError) as exc:
-            self._emit('observation.rejected', reason=self._rejection_reason(exc), modality=audit_modality)
+            self._emit(
+                'observation.rejected',
+                reason=self._rejection_reason(exc, modality=audit_modality),
+                modality=audit_modality,
+            )
             raise
 
     def ingest(
@@ -1025,32 +1038,55 @@ class WorldUnderstanding:
 
     def expire_due(self) -> int:
         stamp = _iso(self._now())
+        expired_ids: list[str] = []
         if self.path is None:
-            ids = [item['id'] for item in self._memory_rows.values() if item.get('expires_at') and item['expires_at'] <= stamp and item.get('retention_state') == 'active']
+            with self._lock:
+                due_roots = [
+                    item['id'] for item in self._memory_rows.values()
+                    if item.get('expires_at') and item['expires_at'] <= stamp and item.get('retention_state') == 'active'
+                ]
+                target_ids: set[str] = set()
+                for root_id in due_roots:
+                    target_ids.update(self._descendant_ids(root_id))
+                for item_id in target_ids:
+                    current = self._memory_rows.get(item_id)
+                    if not current or current.get('retention_state') != 'active':
+                        continue
+                    self._memory_rows[item_id] = self._tombstone(current, state='expired', deleted_at=stamp)
+                    expired_ids.append(item_id)
         else:
-            with self._con() as con:
-                ids = [row['id'] for row in con.execute(
+            with self._lock, self._con() as con:
+                con.execute('BEGIN IMMEDIATE')
+                due_roots = [row['id'] for row in con.execute(
                     "SELECT id FROM observations WHERE retention_state='active' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at<=?",
                     (stamp,),
                 ).fetchall()]
-        expired = 0
-        for item_id in ids:
-            existing = self._get_unfiltered(item_id)
-            if not existing or existing.get('retention_state') != 'active':
-                continue
-            if self.path is None:
-                self._memory_rows[item_id] = self._tombstone(existing, state='expired', deleted_at=stamp)
-            else:
-                tombstone = self._tombstone(existing, state='expired', deleted_at=stamp)
-                with self._lock, self._con() as con:
+                target_ids: set[str] = set()
+                for root_id in due_roots:
+                    rows = con.execute(
+                        '''WITH RECURSIVE descendants(id) AS (
+                               SELECT ? UNION SELECT p.child_id FROM observation_parents p JOIN descendants d ON p.parent_id=d.id
+                           ) SELECT id FROM descendants''',
+                        (root_id,),
+                    ).fetchall()
+                    target_ids.update(row['id'] for row in rows)
+                for item_id in target_ids:
+                    row = con.execute(
+                        "SELECT * FROM observations WHERE id=? AND retention_state='active' AND deleted_at IS NULL",
+                        (item_id,),
+                    ).fetchone()
+                    if not row:
+                        continue
+                    tombstone = self._tombstone(self._row_item(row), state='expired', deleted_at=stamp)
                     con.execute(
                         '''UPDATE observations SET document=?,payload_hash='deleted',provenance_json='{}',safe_summary=?,
-                           retention_state='expired',deleted_at=? WHERE id=? AND retention_state='active' ''',
+                           retention_state='expired',deleted_at=? WHERE id=? AND retention_state='active' AND deleted_at IS NULL''',
                         (json.dumps(tombstone, sort_keys=True, default=str), tombstone['safe_summary'], stamp, item_id),
                     )
-            expired += 1
+                    expired_ids.append(item_id)
+        for item_id in expired_ids:
             self._emit('observation.expired', observation_id=item_id)
-        return expired
+        return len(expired_ids)
 
     def action_context(
         self,
