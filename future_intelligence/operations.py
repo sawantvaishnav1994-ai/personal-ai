@@ -1,48 +1,80 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
 import json
-from pathlib import Path
 import sqlite3
-import uuid
+import threading
+from pathlib import Path
+
+from future_intelligence.operations_contract import OperationContractMixin, OperationStep
+from future_intelligence.operations_runtime_helpers import OperationRuntimeHelperMixin
+from future_intelligence.operations_runtime import OperationRuntimeMixin
+from future_intelligence.operations_execute import OperationExecuteMixin
+from future_intelligence.operations_control import OperationControlMixin
+from future_intelligence.operations_recovery import OperationRecoveryMixin
+from future_intelligence.operations_store import OperationStoreMixin
+from future_intelligence.operations_outcomes import OperationOutcomeMixin
 
 
-@dataclass(frozen=True)
-class OperationStep:
-    id:str; kind:str; instruction:str; consequential:bool=False; status:str='pending'
+class PersonalOperations(OperationContractMixin, OperationRuntimeHelperMixin, OperationRecoveryMixin, OperationRuntimeMixin, OperationExecuteMixin, OperationControlMixin, OperationStoreMixin, OperationOutcomeMixin):
+    """P6 owner-intent coordinator over existing governed execution authorities.
 
+    This layer owns durable plan/delegation coordination only. Permission, approval,
+    reauthentication, verification, retry/recovery authority and consequential action
+    execution remain below it in the existing AgentExecutor/AutomationEngine/W7 stack.
+    """
 
-class PersonalOperations:
-    """P6 long-horizon operation planner; external effects remain governed."""
-    def __init__(self,*,gate,executor=None,automations=None,events=None,second_brain=None,path:Path|None=None):
-        self.gate=gate;self.executor=executor;self.automations=automations;self.events=events;self.second_brain=second_brain;self._plans={};self._db=None
+    ACTIVE = {'queued', 'executing', 'waiting_approval', 'waiting_reauth', 'verifying'}
+    TERMINAL = {'verified', 'recovered', 'failed', 'cancelled'}
+    RECOVERY = {'recovery_required'}
+    OUTCOME_STATES = {'PLANNED', 'QUEUED', 'DISPATCHED', 'EXECUTED', 'VERIFIED', 'FAILED', 'UNCERTAIN', 'RECOVERED', 'CANCELLED'}
+    PRIVATE_PARAMETER_MARKERS = {
+        'token', 'password', 'secret', 'authorization', 'cookie', 'api_key',
+        'apikey', 'credential', 'private_key', 'access_key', 'refresh_token',
+    }
+    DEFAULT_BUDGET = {
+        'max_runtime_seconds': 900,
+        'max_steps': 50,
+        'max_retries': 0,
+        'max_concurrent_runs': 2,
+        'max_model_calls': 50,
+        'max_tool_calls': 50,
+        'approval_threshold': 'consequential',
+        'owner_override_allowed': False,
+    }
+
+    def __init__(
+        self,
+        *,
+        gate,
+        executor=None,
+        automations=None,
+        events=None,
+        second_brain=None,
+        memory=None,
+        everyday=None,
+        path: Path | None = None,
+    ):
+        self.gate = gate
+        self.executor = executor
+        self.automations = automations
+        self.events = events
+        self.second_brain = second_brain
+        self.memory = memory or getattr(executor, 'memory', None)
+        self.everyday = everyday
+        self._plans: dict[str, dict] = {}
+        self._db = None
+        self._locks: dict[str, threading.RLock] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._threads: dict[str, threading.Thread] = {}
+        self._lock = threading.RLock()
         if path is not None:
-            path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);self._db=sqlite3.connect(path,check_same_thread=False)
-            self._db.execute('CREATE TABLE IF NOT EXISTS operation_plans (id TEXT PRIMARY KEY, document TEXT NOT NULL)')
-            self._plans={row[0]:json.loads(row[1]) for row in self._db.execute('SELECT id,document FROM operation_plans')}
-    def _save(self,plan):
-        if self._db is not None:
-            self._db.execute('INSERT OR REPLACE INTO operation_plans(id,document) VALUES(?,?)',(plan['id'],json.dumps(plan,sort_keys=True)))
-            self._db.commit()
-    def create_plan(self,title:str,steps:list[dict]):
-        if not title.strip() or not steps: raise ValueError('title and steps required')
-        pid=str(uuid.uuid4()); normalized=[]
-        for item in steps[:50]:
-            normalized.append(OperationStep(str(uuid.uuid4()),str(item.get('kind','reason')),str(item.get('instruction','')).strip(),bool(item.get('consequential',False))))
-        self._plans[pid]={'id':pid,'title':title.strip(),'status':'planned','steps':[asdict(s) for s in normalized]}
-        self._save(self._plans[pid])
-        return self._plans[pid]
-    def plan(self,plan_id): return self._plans.get(plan_id)
-    def execute(self,plan_id:str):
-        decision=self.gate.decision('p6')
-        if not decision.allowed: return {'started':False,'blocked':True,'reason':decision.reason,'plan':self.plan(plan_id)}
-        plan=self._plans.get(plan_id)
-        if not plan: raise KeyError('plan not found')
-        if any(step['consequential'] for step in plan['steps']):
-            plan['status']='needs_approval'
-            self._save(plan)
-            if self.events:self.events.emit('future.operation.approval_required',plan_id=plan_id,title=plan['title'])
-            return {'started':False,'approval_required':True,'plan':plan}
-        plan['status']='ready'
-        self._save(plan)
-        return {'started':True,'delegated':False,'plan':plan,'note':'Execution must be delegated through the existing governed executor/automation engine.'}
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._db = sqlite3.connect(path, check_same_thread=False, timeout=30)
+            self._db.row_factory = sqlite3.Row
+            self._init_db()
+            self._plans = {
+                row['id']: json.loads(row['document'])
+                for row in self._db.execute('SELECT id,document FROM operation_plans')
+            }
+            self._recover_interrupted()

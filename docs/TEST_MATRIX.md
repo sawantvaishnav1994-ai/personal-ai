@@ -85,6 +85,77 @@ CI #1065 exact-head full repository result: **997 passed, 0 failed, 8 warnings i
 
 Implementation exact-head gate: **6/6 PASS**. P3 was legitimately triggered because `server/cloud_app.py` mounts the trusted P4 lifecycle router. iOS remains simulator evidence, not physical-device evidence.
 
+## P6 Governed Delegation Integration
+
+Starting evidence SHA: `2a631346b0013adca810da32ed0e7519eca15240`.
+Branch: `p6/governed-delegation-integration-20260915`.
+Draft PR: #27.
+Final implementation SHA: `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`.
+
+### Focused qualification
+
+Result: **44 collected, 44 passed, 0 failed** at the committed implementation candidate. The focused tranche behaviorally qualifies:
+
+- committed structural bindings for helper/class/static methods and required imports;
+- security-epoch persistence and stale-epoch fail-closed continuation;
+- owner/device/session binding;
+- existing approval grant/denial/expiry/revocation and replay protection;
+- Emergency Stop composition;
+- cancellation before effect versus uncertainty after possible consequential dispatch;
+- zero P6 orchestration retries;
+- restart recovery and idempotency;
+- same-destination consequential serialization across different tools;
+- different-destination and legitimate read-only parallel behavior;
+- recursive nested secret-bearing parameter rejection;
+- tool allowlists, destination policy, data classification and verification requirements;
+- budget enforcement through existing AutomationEngine authority;
+- P4 reminder/commitment handoff without authorization transfer;
+- P5/Second Brain memory-context sensitivity filtering;
+- safe Activities/audit and outcome-memory handoff;
+- trusted owner API safe projection;
+- deterministic verified-success, approval-denial/no-dispatch and uncertain-failure/W7.6-recovery E2E flows.
+
+### Full repository and security gate
+
+CI #1071 / `34996184188`:
+
+- `pip check` — PASS (`No broken requirements found.`)
+- compileall — PASS
+- full repository `pytest -q` — **1041 passed, 0 failed, 8 warnings in 41.03s**
+
+Reliability and Security #249 / `34996184334` independently proved:
+
+- `pip-audit -r requirements.txt` — PASS (`No known vulnerabilities found`)
+- compileall — PASS
+- full repository `pytest -q` — **1041 passed, 0 failed, 8 warnings in 35.63s**
+- isolated encrypted backup/restore qualification — PASS
+- isolated recovery tests — **11 passed in 0.27s**
+- 45-second soak — PASS, 6,862 iterations, SQLite integrity `ok`, pending device requests 0
+
+### Implementation exact-head workflows
+
+| Workflow | Run | Run ID | Result |
+| --- | ---: | ---: | --- |
+| CI | #1071 | `34996184188` | PASS |
+| Reliability and Security | #249 | `34996184334` | PASS |
+| P3 iPhone PWA | #206 | `34996184148` | PASS |
+| Android Instrumentation | #248 | `34996184426` | PASS |
+| Package Validation | #248 | `34996184213` | PASS |
+| iOS Companion | #230 | `34996184151` | PASS |
+
+P6 implementation exact-head gate: **6/6 PASS**.
+
+P6 implementation diff from `2a631346b0013adca810da32ed0e7519eca15240`: **1 commit, 20 files, +2,730 / -40**. There were no dependency, workflow-definition, Railway, OAuth, provider credential, production deployment, signing, W7, W8, P4 or P5 authority changes. Global W7 schema remains **73**; P6 adds only additive local operation-delegation persistence.
+
+### P6 evidence boundary
+
+Automated P6 validation does not prove autonomous activation, physical P3, live-service operation or production readiness. Those evidence classes remain separate.
+
+- AUTONOMOUS ACTIVATION VERIFIED = NO
+- PHYSICAL P3 VERIFIED = NO
+- LIVE SERVICE VERIFIED = NO
+- PRODUCTION VERIFIED = NO
+
 ## Evidence boundaries
 
-Repository tests prove deterministic lifecycle/retrieval behavior, not live delivery. No physical iPhone push notification, live email/calendar follow-up, physical-device qualification, production database behavior, signed distribution, live provider or real local model is established here.
+Repository tests prove deterministic lifecycle/retrieval/delegation behavior, not live delivery or physical-device operation. No physical iPhone push notification, live email/calendar follow-up, live consequential side effect, physical-device qualification, production database behavior, signed distribution, live provider or real local model is established by these automated tranches.
