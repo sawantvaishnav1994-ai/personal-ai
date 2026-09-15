@@ -2,127 +2,119 @@
 
 Date: 2026-09-15
 
-## Frozen prior baselines
+## Frozen validated prior tranches
 
 - W7.1 Durable Operator Transaction Core: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**.
 - W7.2 Observation Safety / Sensitive Evidence: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at docs head `2a05e1da4777cdb2393759bd650b264735b1ec97`.
 - W7.3 Allowlists and Data-Safety Policies: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at docs head `72408596db75b3e07b031ddc9a86502a0177902e`.
 - W7.4 Safe Browser Operator: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at docs head `745952cbdc0ab25b93db6dbb3e5324b48fe7837b`.
+- W7.5 Safe Desktop and File Operator: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED** at docs head `acbbefea2ad6d46406ee05f9d2a44676503b3b59`.
 
-None of W7.1-W7.4 is claimed physical-device, production or live-OAuth verified.
+None of these automated classifications imply physical-device, production or live-OAuth verification.
 
-## W7.5 — Safe Desktop and File Operator
+## W7.6 — Verification and Recovery
 
-Baseline SHA: `745952cbdc0ab25b93db6dbb3e5324b48fe7837b`.
+Baseline SHA: `acbbefea2ad6d46406ee05f9d2a44676503b3b59`.
 
-Validated implementation SHA: `f794373c68b07aae23d7c4cb258f02a765100bb5`.
+Validated shared implementation SHA: `38eeae2fc7f609ebc7d3e8681833885b8d35310d`.
 
-### Exact implementation changed files
+The candidate is a direct descendant of the W7.5 docs baseline, 17 commits ahead, with a net implementation delta of exactly 11 files:
 
-- `desktop/file_operator.py`
-- `desktop/input_clipboard.py`
-- `desktop/platform_adapter.py`
-- `desktop/safe_desktop_operator.py`
-- `tools/desktop_file.py`
+- `recovery/cross_operator.py`
+- `recovery/operator_recovery.py`
+- `recovery/recovery_authority.py`
+- `tests/test_w76_adversarial.py`
+- `tests/test_w76_hardening.py`
+- `tests/test_w76_recovery.py`
+- `tests/test_w76_release_gate.py`
 - `tools/builtins.py`
-- `tests/test_w75_file_operator.py`
-- `tests/test_w75_release_gate.py`
-- `tests/test_w75_safe_desktop_operator.py`
-- `tests/test_w75_tool_integration.py`
+- `tools/recovery.py`
+- `tools/registry.py`
+- `ui/settings_panel.py`
 
-No Home V1/AI Core file, production deployment file, Railway configuration or workflow definition was changed. W7.5 adds no database migration; policy schema remains **73**, and W7.1 transaction storage is reused.
+No Home V1/AI Core, W7.4 browser-operator, W7.5 desktop/file-operator, deployment, Railway, production or OAuth file is part of the W7.6 net implementation delta.
 
-### Authoritative flow
+### Authority and schema
 
-`owner request → W7.1 operator transaction → fresh W7.2-style observation → proposed bounded action → W7.3 default-deny policy → Trusted Action approval/recent reauthentication where required → temporary one-use permit(s) for the exact authorized policy bindings → immediate pre-dispatch verification → bounded execution → postcondition verification → redacted audit → completion or recovery_review_required`.
+W7.6 does not create a second transaction authority. It extends the same W7.1 `operator-transactions.sqlite3` authority with additive recovery tables. The recovery schema version is **73**; 72→73 upgrade is additive, older runtime state restores correctly, and no downgrade assumption is introduced.
 
-Composite file actions validate all required source/destination policies before dispatch. Policy checks are completed before permit consumption so policy-use counters cannot change the effective snapshot mid-check.
+Trusted Action Core remains approval/reauthentication authority, W7.3 remains default-deny policy/permit authority, and Emergency Stop remains authoritative.
 
-### Windows application / window controls
+### Dispatch integrity
 
-The platform layer is adapter-based and fails closed on unsupported systems. Windows application launch requires an absolute executable path and verified canonical executable SHA-256; policy may additionally bind publisher/version. Executable and arguments remain separate, shell interpolation is not used, `shell=True` is prohibited, and relative/PATH-style launch is rejected.
+Side-effect uncertainty is journaled durably before dispatch. Dispatch attempts bind transaction, action identity, operation class, idempotency key, worker identity and fencing token. Duplicate idempotency keys return the existing attempt rather than creating a second side effect. Recovery workers use expiring leases and monotonically advancing fencing tokens; stale/expired workers fail closed. Emergency Stop prevents new dispatch.
 
-Window/control operations verify foreground/window identity before input. Type/select require a verified control identity. Coordinate fallback is restricted to click and requires an explicit verified visual target/digest supplied through the W7.2 evidence path. Hidden/disabled/changed targets fail closed. Emergency Stop is rechecked immediately before input; cancellation/failure releases held input state.
+### Verification contract
 
-Unrestricted Command Prompt/PowerShell, arbitrary shell execution, elevation/UAC bypass, registry/service/driver/security modification, shutdown/restart, software installation and arbitrary process killing remain blocked.
+Verification records bind transaction, action, dispatch and idempotency identity. They persist verifier identity/version, precondition, expected postcondition, observed postcondition, bounded evidence references, integrity checksum, verification timestamp/fresh-until, result, explanation and bounded confidence where applicable.
 
-### File operator
+Shared outcomes include `verified_success`, `verified_no_effect`, `verified_partial`, `verified_failure`, `unknown_outcome`, `cancelled_before_dispatch`, `blocked_before_dispatch` and `recovery_review_required`. Unknown outcome never becomes implicit success. Stale or mismatched evidence cannot authorize retry.
 
-W7.5 implements governed metadata, bounded text read, create file/directory, copy, move, rename, list, checksum, trash and separately governed permanent delete.
+### Retry policy
 
-The file adapter checks canonical approved roots and rejects path traversal, raw symlink components, Windows reparse/junction targets, unexpected mounts, unsafe network/UNC paths under default policy, NTFS ADS/reserved-name escapes and hard-link mutation risk. Copy/create use temporary confinement and atomic replacement where possible, enforce no blind overwrite, file-size/disk-space limits, MIME/signature checks and source/destination checksums.
+Consequential operations are never blindly retried: form submission, email/message send, external upload, share/public publish, delete/destructive delete, permission/security-setting modification, purchase, financial transfer and legal acceptance. `application_input` is also no-automatic-retry.
 
-Structured/binary documents such as PDF/Office/archive/executable/image files are not treated as direct model text by the file-read path; they must use the existing Knowledge ingestion route.
+Fresh objective `verified_no_effect` evidence can only make a retry eligible for non-consequential classes; consequential classes still require fresh governance. Unknown, partial, stale or unverified outcomes fail closed to recovery review.
 
-Trash reports `compensating_action_available` and retains recovery metadata. Permanent delete is `irreversible`, requires W7.3 destructive-delete policy, recent owner reauthentication and explicit approval, and verifies target absence. It never claims automatic rollback.
+### Compensation
 
-### Keyboard, mouse and clipboard
+Compensation is a distinct side effect and cannot reuse the original action. Compensation categories are explicit: automatically reversible, compensation available, manual recovery only, or irreversible. Manual/irreversible categories cannot be automated.
 
-Input is foreground-target-bound; no global keyboard hooks, keylogging, credential capture or background input injection was added. Shortcuts are allowlisted and movement/scroll/click are bounded.
+Automatable compensation must pass current W7.3 policy, consume an exact temporary permit once, enforce owner approval and recent reauthentication when required, and link a separate compensation action. Permit replay fails. Compensation receives its own verification; mismatch or uncertain outcome returns to recovery review.
 
-Clipboard read/write are separate owner-visible capabilities. Access is on-demand only with no clipboard monitor/history thread. Content is size-bounded, sequence/change checked and classified for secret/token/password/private-key patterns. Durable observation/audit stores digest/classification/size/sequence rather than raw clipboard secret content. External secret transfer is subject to exact W7.3 destination/classification policy and otherwise fails closed.
+### Owner decisions / recovery UI
 
-### Verification / recovery / rollback
+Recovery decisions bind transaction, owner, device, session, current security epoch and nonce. Replayed nonces, wrong device/session and stale security epochs fail closed. Settings → Activities exposes bounded recovery review/reporting; Home V1 and AI Core are not redesigned.
 
-Application launch verifies process/executable identity/window evidence. Focus verifies expected foreground window. File copy verifies destination checksum; move/rename verify destination existence/source absence/identity; trash verifies source absence and recovery metadata. Password/secret fields are never read back for verification.
+### Evidence/privacy
 
-Duplicate dispatch, process restart, dispatch exception or uncertain consequential postcondition is never blindly retried. The W7.1 transaction moves to `recovery_review_required` when outcome cannot be proven.
-
-Rollback declarations are deliberately narrow: `reversible`, `compensating_action_available`, `manual_recovery_only`, or `irreversible`. An opposite operation is not automatically called rollback.
+Recovery redaction excludes secret/token/password/cookie/authorization, raw clipboard content, sensitive DOM and screenshot bytes. Evidence references reject traversal and are bounded. File paths/download names are represented by SHA-256 references where raw identifiers are unnecessary. No background monitoring or hidden bypass is added.
 
 ### Validation
 
-Focused committed W7.5 tests: **55 PASS**.
-
-Full repository exact implementation-head result: **709 passed, 8 warnings**.
+Full repository exact shared implementation-head result: **778 passed, 8 warnings**.
 
 `pip check`: PASS.
 
 `compileall`: PASS.
 
-Standalone JavaScript syntax: **N/A**, because W7.5 changed no standalone JS file.
+Reliability/Security: dependency audit PASS, full pytest PASS, 45-second soak PASS, isolated encrypted backup/restore qualification PASS.
 
-Migration gate: **N/A for new storage**, because W7.5 adds no schema migration; existing schema 73 and restart/recovery regressions remain green.
+Package Validation: Ubuntu, macOS and Windows jobs PASS.
 
-Automated Windows result: Windows adapter/security contracts are exercised by focused tests; Package Validation successfully built and uploaded the `windows-latest` artifact. This is **not real-world Windows operator verification**.
+P3 iPhone PWA: integration/security workflow PASS, including insecure-production-default fail-closed check.
 
-### Security defects found and repaired during W7.5
+iOS Companion: simulator build/test and unsigned simulator artifact PASS. This is **not physical iPhone verification**.
 
-1. Raw symlink identity could be lost if canonical resolution occurred before the adapter checked it; raw path components are now checked first.
-2. A trash/delete regression initially expected execution without recent reauthentication; the stronger W7.3 delete rule was preserved and the test/contract corrected instead of weakening policy.
-3. Composite source/destination policy evaluation initially interacted badly with one-use permit counters; all required policies are now re-evaluated before any permit consumption.
-4. Hard-linked mutation targets are rejected for owner review.
-5. Type/select cannot fall back to raw coordinates; click coordinate fallback requires verified visual identity.
-6. Clipboard content is digest/classification/sequence bound and raw secret values are excluded from normal durable audit.
-7. Restart, duplicate dispatch and uncertain consequential outcomes return recovery review with no blind retry.
-
-### Exact implementation workflows
+### Exact shared implementation workflows
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #790 | `34889547472` | PASS |
-| Reliability and Security | #214 | `34889547513` | PASS |
-| P3 iPhone PWA | #182 | `34889547586` | PASS |
-| Android Instrumentation | #213 | `34889547464` | PASS |
-| Package Validation | #213 | `34889547577` | PASS |
-| iOS Companion | #195 | `34889547565` | PASS |
+| CI | #828 | `34932656123` | PASS |
+| Reliability and Security | #226 | `34932656078` | PASS |
+| P3 iPhone PWA | #186 | `34932656117` | PASS |
+| Android Instrumentation | #225 | `34932656134` | PASS |
+| Package Validation | #225 | `34932656157` | PASS |
+| iOS Companion | #207 | `34932656154` | PASS |
 
 Implementation gate: **6/6 PASS**.
 
+### Stray temporary-file factual record
+
+`tmp_should_not_create` was introduced by `5ac81b382777c4b6b1709a4e4669723f54592ea7`, contained only `x`, and was removed 18 seconds later by `3223ef7f9016f2418ca09c148de06c49834fe9e3` (`W7.5: remove stray connector test file`). It is absent from the W7.5 final tree and W7.6 implementation tree; final validated package evidence has no matching packaged path/name. No new evidence requires further investigation.
+
 ## Current classification before documentation-head validation
 
-W7.5 is:
+W7.6 is:
 - **IMPLEMENTED**
 - **INTEGRATED**
 - **IMPLEMENTATION-HEAD AUTOMATED VALIDATED**
 - **DOCUMENTATION-HEAD VALIDATION PENDING**
 
-Not claimed: **REAL-WORLD WINDOWS VERIFIED**, **PHYSICAL-DEVICE VERIFIED**, **PRODUCTION VERIFIED**, **LIVE OAUTH VERIFIED**, or **COMPLETE W7**.
+Not claimed: **REAL-WORLD WINDOWS VERIFIED**, **PHYSICAL-DEVICE VERIFIED**, **PRODUCTION VERIFIED** or **LIVE OAUTH VERIFIED**.
 
 ## Production / infrastructure boundary
 
-Production, Railway and the existing iPhone qualification service remain unchanged. W6 live Google OAuth/account qualification remains blocked/deferred because isolated paid qualification infrastructure is owner-deferred. No deployment, merge, paid-service purchase or secret request is part of W7.5.
+Production, Railway and the existing iPhone qualification service remain unchanged. W6 live Google OAuth/account qualification remains blocked/deferred because isolated paid qualification infrastructure is owner-deferred. W7.6 is repository/CI qualification only.
 
-## Exact W7.6 dependency
-
-W7.6 Verification and Recovery may begin only from the final W7.5 documentation SHA after that documentation-only head independently passes the same six required workflows. W7.6 must preserve W7.1-W7.5 authorities and close cross-operator verification/recovery without reintroducing broad execution capabilities.
+After the documentation-only head independently passes all six required workflows, W7.6 may be classified **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED**, followed by the authoritative W7 completion audit.
