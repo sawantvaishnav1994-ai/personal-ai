@@ -29,8 +29,9 @@ class GovernedModelRouter(ModelRouter):
         super().__init__(settings, events=events, audit=audit)
         self.observability = ModelObservability(self.providers)
         self.retry_attempts = max(0, min(3, int(getattr(settings, 'model_retry_attempts', 1))))
-        self.retry_backoff = max(0.0, float(getattr(settings, 'model_retry_backoff_seconds', .05)))
+        self.retry_backoff = max(0.0, min(2.0, float(getattr(settings, 'model_retry_backoff_seconds', .05))))
         self.max_failovers = max(0, min(len(self.providers) - 1, int(getattr(settings, 'model_max_failovers', 3))))
+        self.health_timeout = max(.5, min(10.0, float(self.health_timeout)))
         self.disabled = set(getattr(settings, 'model_disabled_providers', ()) or ())
         for pid, provider in self.providers.items():
             configured = bool(provider.configured and (provider.private or provider.api_key))
@@ -70,13 +71,15 @@ class GovernedModelRouter(ModelRouter):
         attempted=[]; retries=0; failovers=0; last_error=None
         for provider_index,provider in enumerate(candidates[:self.max_failovers+1]):
             attempted.append(provider.id)
+            if provider_index:
+                failovers += 1
+                self.observability.counters['failovers'] += 1
             for attempt in range(self.retry_attempts+1):
                 try:
                     call_started=time.perf_counter(); result=call(provider); latency=round((time.perf_counter()-call_started)*1000,3)
                     transition=self.observability.success(provider.id,latency)
                     if transition:self._record('model.circuit_transition',provider=provider.id,state=transition)
                     if provider_index:
-                        failovers+=1; self.observability.counters['failovers']+=1
                         self._record('model.fallback',provider=provider.id,model=provider.model,capability=capability,reason='prior_target_failed')
                     self._record('model.selected',provider=provider.id,model=provider.model,capability=capability,fallback=provider_index>0,generation_id=generation_id)
                     self.observability.add_generation({'generation_id':generation_id,'conversation_id':conversation_id,'task_id':task_id,'provider':provider.id,'model':provider.model,'capability':capability,'sensitivity':sensitivity,'routing_reason':'primary' if provider_index==0 else 'failover','started_at':started_at,'completed_at':time.time(),'latency_ms':latency,'result':'success','retry_count':retries,'failover_count':failovers,'attempted_targets':attempted,'terminal_target':provider.id})
@@ -103,7 +106,8 @@ class GovernedModelRouter(ModelRouter):
                     self._request(provider,'GET','/models',timeout=self.health_timeout)
                     self.observability.success(provider.id,round((time.perf_counter()-started)*1000,3))
                 except ModelError as exc:
-                    self.observability.failure(provider.id,self._error_class(exc),retryable=self._error_class(exc) not in NON_RETRYABLE)
+                    error_class=self._error_class(exc)
+                    self.observability.failure(provider.id,error_class,retryable=error_class not in NON_RETRYABLE)
         base=super().status(probe=False)
         base['w8']=self.observability.snapshot()
         return base
