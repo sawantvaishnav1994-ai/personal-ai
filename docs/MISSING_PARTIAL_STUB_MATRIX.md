@@ -6,12 +6,14 @@ Baseline date: 2026-09-15
 | --- | --- | --- | --- | --- | --- |
 | P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | approved production volume absent | attach only at future approved production gate |
 | P0 | W3/W12 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute physical protocol later |
-| P0 | P4 | Daily briefing ↔ Second Brain context | RESOLVED FOR CURRENT AUTOMATED SCOPE | verified integration defect repaired and regression-tested | preserve; qualify daily use later |
-| P0 | P5 | Second Brain ↔ Life Graph linking | RESOLVED FOR CURRENT AUTOMATED SCOPE | read-through integration and owner inspection now implemented/validated | continue graph/corpus quality qualification |
-| P1 | P5 | Graph retrieval / long-term corpus quality | PARTIAL QUALIFICATION | foundation exists but representative corpus metrics are not authoritative yet | build deterministic corpus/relevance/temporal/conflict suite |
-| P1 | P5 | Media extraction quality | PARTIAL | document/media pipeline quality needs broader fixture evidence | add deterministic extraction-quality qualification |
-| P1 | P4 | Reminder/follow-up execution and proactive precision | PARTIAL | software foundation exists; delivery lifecycle and precision/recall need deeper evidence | automate local lifecycle/quality tests before live accounts |
-| P1 | P6 | PersonalOperations governed delegation | PARTIAL INTEGRATION | P6 plan facade persists/gates plans but reports non-consequential execution as delegated false | integrate only through existing W7-governed executor/automation path and test fail-closed |
+| P0 | P4 | Daily briefing ↔ Second Brain context | RESOLVED FOR AUTOMATED SCOPE | authoritative current-memory context and permission filtering regression-tested | preserve; daily-use qualification later |
+| P0 | P4 | Reminder/follow-up deterministic lifecycle | RESOLVED FOR CURRENT AUTOMATED SCOPE | durable lifecycle, due engine, restart/idempotency, owner inspection, forgotten-item benchmark validated | live delivery and daily-use proof remain separate |
+| P0 | P5 | Second Brain ↔ Life Graph linking | RESOLVED FOR AUTOMATED SCOPE | read-through integration and owner inspection validated; no duplicate authority | preserve |
+| P0 | P5 | Retrieval/corpus/temporal/supersession qualification | RESOLVED FOR CURRENT AUTOMATED SCOPE | 100/1,000/5,000 corpus, ranking explanations, temporal/current truth, privacy, deletion/retention and context budget validated | expand only when real long-term corpus evidence warrants it |
+| P1 | P4 | Live reminder/push/email/calendar delivery | QUALIFICATION PENDING | deterministic scheduling is not physical/live delivery | owner/live adapter + physical protocol later |
+| P1 | P4 | Natural-language commitment extraction daily-use precision | PARTIAL | fixed deterministic state benchmark is not a real-world language/acceptance corpus | build representative acceptance corpus without making LLM authoritative |
+| P1 | P5 | Media extraction quality | PARTIAL | document/media pipeline quality needs broader fixture evidence | add deterministic extraction-quality qualification when prioritized |
+| P1 | P6 | PersonalOperations governed delegation | PARTIAL INTEGRATION | plan facade persists/gates plans but non-consequential execution still reports delegated false | next recommended tranche: compose through existing AgentExecutor/AutomationEngine/W7 authority |
 | P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED | owner postponed paid isolated infrastructure | preserve checkpoint |
 | P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real account/consent deliberately not connected | resume only after owner approval |
 | P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation gates complete | frozen |
@@ -28,16 +30,22 @@ Baseline date: 2026-09-15
 | P1 | P9 | Live provider / real local model | QUALIFICATION PENDING | W8 automated routing/resilience is not real provider/local runtime evidence | owner-approved bounded live/local protocol later |
 | P1 | P10 | Advanced autonomy activation | BLOCKED/FAIL-CLOSED BY PREREQUISITES | persistent agents exist but P3 permissions/automation/memory/continuity/reliability must qualify first | continue repository validation without activation bypass |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | readiness work only until owner signing/device gates |
-| P1 | W12 | Release readiness | PARTIAL | W6 live OAuth, production storage/service, physical and signing gates remain | no production promotion yet |
+| P1 | W12 | Release readiness | PARTIAL | live OAuth/providers, production storage/service, physical and signing gates remain | no production promotion yet |
 
-## Post-W8 implementation evidence
+## P4/P5 retrieval/reminder automated-scope closure
 
-Frozen W8 implementation: `42616b2e8faca9b16a5695ac319ea78200e7af74`. Frozen W8 documentation/evidence head: `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`. W8 implementation and documentation exact-head gates are both 6/6 PASS. The historical failed candidate `1a9d379f8cdb372e583eb01dfd6373d307c18db8` remains failure/remediation evidence only.
+Starting evidence: `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`.
+Final implementation: `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`.
+Draft PR: #26.
 
-Post-W8 branch: `p5/second-brain-life-graph-qualification-20260915`. Implementation SHA: `fc8f1aeb5a8121f0faf911b6840b7ec15d48b609`. Draft PR: #25.
+Focused qualification: **25 passed, 0 failed in 0.96s**. Full repository: **997 passed, 0 failed, 8 warnings in 30.64s**. `pip check`, compileall, `pip-audit`, encrypted backup/restore and 45-second soak passed.
 
-The tranche repaired P4 daily briefing memory integration and added non-duplicating P5 Second Brain↔Life Graph linking with privacy-filtered owner inspection. Full repository: **972 passed, 0 failed, 8 warnings in 26.17s**. CI #1060 / `34980195417`, Reliability/Security #245 / `34980195624`, Android #244 / `34980195358`, Package #244 / `34980195728`, and iOS #226 / `34980195661` all PASS. P3 iPhone PWA is path-filtered N/A because no P3/PWA path changed; it is not counted as a pass. Reliability/Security passed `pip-audit`, compileall, full pytest, encrypted backup/restore and 45-second soak.
+Implementation exact-head workflows: CI #1065 / `34984377146`; Reliability/Security #247 / `34984377349`; P3 #204 / `34984377120`; Android #246 / `34984377166`; Package #246 / `34984377239`; iOS #228 / `34984377173` — **6/6 PASS**.
+
+Large deterministic retrieval corpora 100/1,000/5,000 returned the target correctly; measured qualification latencies were ~3.943/~18.603/~90.067 ms. 5,000-reminder evaluation measured ~24.772 ms. Fixed forgotten-item dataset achieved precision 1.0 / recall 1.0 / 0 FP / 0 FN. These are automated deterministic measurements, not daily-use/live-delivery evidence.
+
+Global schema remains **73**; P4 storage has additive lifecycle/audit columns/table only. No dependency, Railway, production, OAuth, provider credential, signing, W7, W8 or P6 implementation change occurred.
 
 ## Remaining evidence classes
 
-Automated repository evidence must remain distinct from live service, physical-device, signed-distribution and production evidence. Physical P3, live OAuth/providers, real local model, production durable storage, real Windows/iPhone/Android qualification and signing credentials remain unresolved external gates. W10 must not displace higher-value unblocked P4/P5/P6 repository work merely because it is the next numbered workstream.
+Automated repository evidence must remain distinct from live service, physical-device, signed-distribution and production evidence. Live reminder delivery remains **NOT VERIFIED**. Physical P3 remains incomplete. Live OAuth/providers, real local model, production durable storage, real Windows/iPhone/Android qualification and signing credentials remain external gates.

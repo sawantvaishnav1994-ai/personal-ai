@@ -2,7 +2,7 @@
 
 Baseline date: 2026-09-15
 
-## W7 validated history
+## Frozen validated history
 
 | Batch | Implementation SHA | Focused / full evidence | Required workflow gates |
 | --- | --- | --- | --- |
@@ -11,54 +11,80 @@ Baseline date: 2026-09-15
 | W7.3 Allowlists / Data-Safety Policies | `893db9ef...` | 45 focused; 602 full, 8 warnings | implementation + documentation 6/6 PASS |
 | W7.4 Safe Browser Operator | `839cc9d5...` | 52 focused; 654 full, 8 warnings | implementation + documentation 6/6 PASS |
 | W7.5 Safe Desktop / File Operator | `f794373c...` | 55 focused; 709 full, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.6 Verification / Recovery | `38eeae2fc7f609ebc7d3e8681833885b8d35310d` | **778 full PASS, 8 warnings** | frozen W7 automated evidence |
+| W7.6 Verification / Recovery | `38eeae2fc7f609ebc7d3e8681833885b8d35310d` | 778 full PASS, 8 warnings | frozen W7 automated evidence |
+| W8 Model Health / Failover / Observability | `42616b2e8faca9b16a5695ac319ea78200e7af74` | 965 full PASS, 8 warnings | implementation + docs 6/6 PASS; frozen |
+| Post-W8 P4/P5 Life Graph integration | `fc8f1aeb5a8121f0faf911b6840b7ec15d48b609` | 972 full PASS, 8 warnings | 5/5 applicable implementation + docs PASS; frozen |
 
-## W8 Model Health / Failover / Observability
+## P4/P5 Retrieval Intelligence + Reminder/Follow-up Lifecycle
 
-Baseline: `dad974fc1058678a07daae1702849178d2cf2dd2`.
-Failed historical candidate: `1a9d379f8cdb372e583eb01dfd6373d307c18db8`.
-Final implementation SHA: `42616b2e8faca9b16a5695ac319ea78200e7af74`.
-Final documentation/evidence head: `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`.
+Starting evidence SHA: `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`.
+Branch: `p4-p5/retrieval-reminder-qualification-20260915`.
+Draft PR: #26.
+Final implementation SHA: `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`.
 
-The failed candidate was reproduced with diagnostic capture: **978 passed, 7 failed, 8 warnings in 93.73s**. All seven failures were brittle source/string-inspection tests rather than behavioral product failures. The final implementation contains substantive behavioral coverage for provider health, configuration/transport/capability states, circuit transitions and concurrency, bounded retry/failover, privacy eligibility, error taxonomy, safe observability, explicit probes, local-model unavailability, failure injection, W7 compatibility and production/schema boundaries.
+### Focused qualification
 
-Final implementation full repository: **965 passed, 0 failed, 8 warnings**. `pip check`, compileall and `pip-audit` passed; Reliability/Security completed encrypted backup/restore and 45-second soak. Implementation exact-head workflows: CI #1047 / `34967707625`; Reliability #239 / `34967707659`; P3 #199 / `34967707692`; Android #238 / `34967707628`; Package #238 / `34967707632`; iOS #220 / `34967707682` — **6/6 PASS**.
+Focused qualification covered:
 
-Documentation exact-head workflows at `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`: CI #1055 / `34968483715`; Reliability #243 / `34968483919`; P3 #203 / `34968483669`; Android #242 / `34968483729`; Package #242 / `34968483720`; iOS #224 / `34968483967` — **6/6 PASS**.
+- `tests/test_p5_retrieval_qualification.py`
+- `tests/test_p4_reminder_lifecycle.py`
+- `tests/test_p4_proactive_precision_recall.py`
+- `tests/test_p4_reminder_tool_delegation.py`
 
-W8 classification: **IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED / REPOSITORY-AUTOMATED SCOPE COMPLETE**. This is not live-provider, real-world local-model, physical-device or production verification.
+Result: **25 collected, 25 passed, 0 failed, 0 warnings in 0.96s** in the isolated qualification harness.
 
-## Post-W8 P4 Everyday Intelligence + P5 Second Brain/Life Graph tranche
+P5 cases qualify deterministic 100 / 1,000 / 5,000 memory corpora, existing vector search behavior, lexical correctness, visible relationship expansion/ranking, hidden sensitive relationship side-channel protection, normal-only default sensitivity, A→B→C supersession, historical/current truth, deletion without obsolete resurrection, time-valid queries, exact duplicate suppression, retention removal and context-character budgeting.
 
-Base: frozen W8 documentation/evidence head `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce`.
-Branch: `p5/second-brain-life-graph-qualification-20260915`.
-Draft PR: #25.
-Implementation SHA: `fc8f1aeb5a8121f0faf911b6840b7ec15d48b609`.
+P4 cases qualify exact-time due evaluation, date-only timezone handling, snooze/reschedule/completion/dismissal/cancellation/supersession, persisted restart/idempotency, reminder tool delegation to P4 authority, memory-linked follow-ups, normal/sensitive/secret filtering, deleted-memory exclusion, daily briefing due/overdue integration, evidence-based forgotten items, privacy-safe operational audit, trusted owner API authorization and 5,000-reminder evaluation.
 
-Behavior qualified in this tranche:
+### Deterministic precision / recall dataset
 
-- P4 daily briefing retrieves real authoritative Second Brain context rather than swallowing a call to nonexistent `SecondBrain.search()`.
-- P5 provides read-through Second Brain→Life Graph projection without creating a second memory persistence authority.
-- normal-sensitivity memory is visible by default; sensitive/secret memory remains fail-closed unless existing device authorization permits it.
-- Second Brain relationships are projected into the graph view.
-- authoritative memory supersession is represented in graph relationships and historical state.
-- deletion is reflected immediately because no memory copy is stored in Life Graph.
-- owner Life Graph snapshot/timeline endpoints require trusted-device memory-read authority and preserve existing sensitive-memory scope behavior.
-- existing Life Graph database remains independent for explicitly-created life nodes; linking does not rewrite Second Brain/Knowledge architecture.
+Expected positive set:
 
-Seven behavioral tests were added across the P4/P5/API suites. Full repository exact-head result: **972 passed, 0 failed, 8 warnings in 26.17s**. `pip check` PASS and compileall PASS.
+1. overdue explicit John follow-up;
+2. due explicit proposal commitment;
+3. explicit unscheduled promise.
+
+Explicit negative set includes future follow-up, completed commitment, cancelled commitment, superseded commitment, irrelevant goal and a duplicate commitment.
+
+Result: **precision 1.0; recall 1.0; false positives 0; false negatives 0**. This benchmark validates deterministic lifecycle selection only. It is not an LLM language-understanding benchmark and does not establish live daily-use precision.
+
+### Performance evidence
+
+Qualification-environment measurements:
+
+| Corpus/load | Result | Measured latency |
+| --- | --- | ---: |
+| 100 memories | target ranked first | ~3.943 ms |
+| 1,000 memories | target ranked first | ~18.603 ms |
+| 5,000 memories | target ranked first | ~90.067 ms |
+| 5,000 scheduled future reminders | 0 due, correct | ~24.772 ms |
+
+The committed tests use <5 second bounds only as broad regression guards. These values are not production SLAs and no premature optimization was introduced. Existing vector search remains the current SQLite/full-scan foundation.
+
+### Full repository gate
+
+CI #1065 exact-head full repository result: **997 passed, 0 failed, 8 warnings in 30.64s**.
+
+- `pip check` — PASS
+- compileall — PASS
+- `pip-audit -r requirements.txt` — PASS
+- isolated encrypted backup/restore qualification — PASS
+- `python tests/soak_runtime.py --seconds 45` — PASS
+
+### Exact-head workflows
 
 | Workflow | Run | Run ID | Result |
 | --- | ---: | ---: | --- |
-| CI | #1060 | `34980195417` | PASS |
-| Reliability and Security | #245 | `34980195624` | PASS |
-| Android Instrumentation | #244 | `34980195358` | PASS |
-| Package Validation | #244 | `34980195728` | PASS |
-| iOS Companion | #226 | `34980195661` | PASS |
-| P3 iPhone PWA | path-filtered N/A | — | N/A — no P3/PWA path changed |
+| CI | #1065 | `34984377146` | PASS |
+| Reliability and Security | #247 | `34984377349` | PASS |
+| P3 iPhone PWA | #204 | `34984377120` | PASS |
+| Android Instrumentation | #246 | `34984377166` | PASS |
+| Package Validation | #246 | `34984377239` | PASS |
+| iOS Companion | #228 | `34984377173` | PASS |
 
-Implementation applicable-workflow gate: **5/5 PASS**. P3 is explicitly N/A for this diff and is not counted as passing. Reliability/Security passed `pip-audit`, compileall, full pytest, isolated encrypted backup/restore and 45-second soak. Package Validation passed macOS, Windows and Ubuntu. iOS is simulator evidence only.
+Implementation exact-head gate: **6/6 PASS**. P3 was legitimately triggered because `server/cloud_app.py` mounts the trusted P4 lifecycle router. iOS remains simulator evidence, not physical-device evidence.
 
-## Remaining qualification boundary
+## Evidence boundaries
 
-This post-W8 tranche does not establish live email/calendar/reminder delivery, physical P3.5 Second Brain quality, production durability, live provider qualification, a real local model, signed distribution or production readiness. Those remain separate evidence classes in the post-W8 checkpoint and capability/missing matrices.
+Repository tests prove deterministic lifecycle/retrieval behavior, not live delivery. No physical iPhone push notification, live email/calendar follow-up, physical-device qualification, production database behavior, signed distribution, live provider or real local model is established here.
