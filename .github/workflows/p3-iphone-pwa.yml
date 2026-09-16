@@ -13,6 +13,13 @@ on:
       - 'core/config.py'
       - '.env.example'
       - '.github/workflows/p3-iphone-pwa.yml'
+      - 'future_intelligence/**'
+      - 'tests/test_p10_*.py'
+      - 'tests/p10_soak.py'
+      - 'docs/P10_*.md'
+      - 'docs/CAPABILITY_MATRIX.md'
+      - 'docs/MISSING_PARTIAL_STUB_MATRIX.md'
+      - 'docs/TEST_MATRIX.md'
 
 permissions:
   contents: read
