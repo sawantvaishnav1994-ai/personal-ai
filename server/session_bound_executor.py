@@ -3,6 +3,7 @@ from __future__ import annotations
 from agent.executor import ReauthenticationRequired
 from models.router import ModelError
 from security.request_context import current_trusted_request
+from server.logical_request_middleware import current_logical_request_id
 
 
 class OwnerReauthenticationRequired(ModelError):
@@ -22,8 +23,6 @@ class SessionBoundExecutor:
     def __init__(self, executor, *, continuity=None, surface: str = 'pwa'):
         self._executor = executor
         self._surface = str(surface or 'pwa')
-        # Backwards-compatible constructor only. Conversation authority belongs
-        # to CanonicalTurnRuntime, not this authentication bridge.
         self._continuity = continuity
 
     def __getattr__(self, name):
@@ -64,6 +63,12 @@ class SessionBoundExecutor:
         call_kwargs['session_id'] = context.session_id
         call_kwargs['reauthenticated_at'] = context.reauthenticated_at
         call_kwargs.setdefault('surface', self._surface)
+        logical_request_id = current_logical_request_id()
+        if logical_request_id:
+            explicit = call_kwargs.get('request_id')
+            if explicit is not None and str(explicit) != logical_request_id:
+                raise PermissionError('logical request identity mismatch')
+            call_kwargs['request_id'] = logical_request_id
         return self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs))
 
     def approve(self, approval_id: str, **kwargs):
@@ -82,7 +87,6 @@ class SessionBoundExecutor:
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
         self._owner_only(kwargs)
-        # Reject has a deliberately narrow authority surface in AgentExecutor.
         return self._executor.reject(
             approval_id,
             device_id=context.device_id,
