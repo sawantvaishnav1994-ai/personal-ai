@@ -7,6 +7,7 @@ from core.config import settings
 from core.storage import validate_runtime_storage
 from security.pwa_sessions import PwaSessionStore
 from server.api import create_app
+from server.activities_api import activities_router
 from server.cloud_security import cloud_security_router
 from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
@@ -28,36 +29,13 @@ from server.connector_oauth_callback import connector_oauth_callback_router
 
 
 class CanonicalConversationProjection:
-    """Compatibility view for legacy PWA conversation helpers.
-
-    The PWA still reads/renames/archives/exports the canonical ContinuityService,
-    but user/assistant message writes are owned by CanonicalTurnRuntime. Suppressing
-    only those duplicate projections prevents two records per turn while the PWA
-    route is incrementally simplified.
-    """
-
-    def __init__(self, continuity):
-        self._continuity = continuity
-
-    def __getattr__(self, name):
-        return getattr(self._continuity, name)
-
+    """Compatibility view for legacy PWA conversation helpers."""
+    def __init__(self, continuity): self._continuity = continuity
+    def __getattr__(self, name): return getattr(self._continuity, name)
     def append(self, thread_id, *, device_id, kind, payload, event_id=None):
         if kind in {'user_message', 'assistant_message'} and event_id is None:
-            return {
-                'event_id': None,
-                'sequence': None,
-                'thread_id': thread_id,
-                'duplicate': True,
-                'projection': 'canonical-turn-runtime',
-            }
-        return self._continuity.append(
-            thread_id,
-            device_id=device_id,
-            kind=kind,
-            payload=payload,
-            event_id=event_id,
-        )
+            return {'event_id': None, 'sequence': None, 'thread_id': thread_id, 'duplicate': True, 'projection': 'canonical-turn-runtime'}
+        return self._continuity.append(thread_id, device_id=device_id, kind=kind, payload=payload, event_id=event_id)
 
 
 storage_status = validate_runtime_storage(settings)
@@ -93,6 +71,7 @@ pwa_runtime['continuity'] = CanonicalConversationProjection(runtime['continuity'
 app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(pwa_security_router(runtime))
 app.include_router(cloud_security_router(runtime))
+app.include_router(activities_router(runtime))
 app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(memory_governance_router(runtime))
 app.include_router(everyday_intelligence_router(runtime))
