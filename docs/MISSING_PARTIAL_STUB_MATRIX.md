@@ -22,41 +22,43 @@ This matrix separates repository/automated closure from physical-device, live-pr
 | P1 | W8 | Model health/failover/observability | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head gates complete | live-provider/local-model qualification separate |
 | P1 | P7 | Multimodal observation/context hardening | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head six-workflow gates complete | preserve frozen P7; physical sensors later |
 | P1 | P7 | Real sensor/device multimodal qualification | QUALIFICATION PENDING / DEFERRED | deterministic adapters/platform workflows are not physical evidence | final pre-release physical protocol |
-| P1 | P7 | Process-wide soak RSS attribution | OBSERVED / NOT PROVEN DEFECT | prior process-wide RSS retention not independently attributed | investigate only if future evidence shows unbounded growth |
 | P1 | P8 | Governed cross-device continuity repository scope | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head gates complete | preserve frozen P8 |
 | P1 | P8 | Real iPhone/Android/desktop cross-device qualification | QUALIFICATION PENDING / DEFERRED | CI/simulators are not physical cross-device proof | final pre-release physical protocol |
-| P1 | P9 | Hybrid AI repository implementation | IMPLEMENTATION GATE RESOLVED | frozen implementation `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`; 53 P9 tests; 1184 full; exact-head implementation workflows 6/6 | documentation/evidence exact-head gate |
+| P1 | P9 | Hybrid AI repository scope | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`; evidence `0e1081751a7efafc9c9f35a2afb9c6d431875b92`; both exact-head gates 6/6 | live-provider/local-model/physical/production proof separate |
 | P1 | P9 | Live provider / real local model | QUALIFICATION PENDING / DEFERRED | deterministic mocks and self-hosted architecture are not real inference/provider proof | owner-approved real local/provider protocol near final integration |
 | P1 | P9 | Real local GPU performance/model quality | QUALIFICATION PENDING / DEFERRED | repository route performance is not model inference performance | qualify on owner hardware later |
-| P1 | P10 | Advanced autonomy | NOT STARTED IN THIS CONTINUATION | P9 directive explicitly stops before P10 | separate owner directive required |
+| P1 | P10 | Advanced autonomy repository implementation | IMPLEMENTATION GATE RESOLVED | frozen implementation `4544df7a68d447871e17c3c2dc221efc12722abb`; 54 P10 tests; 1238 full; implementation exact-head workflows 6/6 | docs-only evidence exact-head gate |
+| P1 | P10 | P6/W7 governance integration | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | P10 delegates consequential work, approval, verification and recovery to canonical P6/W7 authorities | preserve authority separation |
+| P1 | P10 | P7/P8/P9/W8 integration | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | bounded world context, continuity and governed model routing/failover are integrated without permission transfer | physical/live provider/device proof separate |
+| P1 | P10 | Goals/plans/replanning/owner control | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | bounded structured durable orchestration, dependency validation, pause/resume/cancel and E-stop boundaries qualified | live autonomy proof separate |
+| P1 | P10 | Agent/background/proactivity foundation | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | subordinate worker metadata, durable background adapter and suggestion-vs-action separation qualified | deployed long-running/live behavior separate |
+| P1 | P10 | Concurrency/durability/encrypted recovery | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | shared SQLite synchronization, integrity, restart uncertainty and encrypted recovery qualified | production-scale durability separate |
+| P1 | P10 | Real/live autonomy | QUALIFICATION PENDING / DEFERRED | repository deterministic qualification is not deployed long-running autonomy | owner-approved live protocol later |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | readiness only until owner signing/device gates |
 | P1 | W12 | Release readiness | PARTIAL | live OAuth/providers/storage, physical and signing gates remain | no production promotion |
 
-## P7/P8 closure correction
+## P10 implementation closure
 
-P7 repository/automated evidence is closed on its frozen lineage: implementation `c0498146a0753b24da611e392181970b227a63d4`, evidence `5f13ff2a994e2d257ba1c8d4d4f6cdd6a32d481e`, both required exact-head gates 6/6 PASS. Physical multimodal/live/production evidence remains separate.
+P10 branch: `p10/advanced-autonomy-qualification-20260916`. Draft PR #32 remains OPEN / DRAFT / UNMERGED. Exact start base: P9 evidence `0e1081751a7efafc9c9f35a2afb9c6d431875b92`. Frozen implementation: `4544df7a68d447871e17c3c2dc221efc12722abb`.
 
-P8 repository/automated evidence is closed: implementation `041584c50e2e2df8e74aa67843eebd2c2e0e058c`, evidence `bd36011cc71d57110e60843019e52bc6b1963a61`, both required exact-head gates 6/6 PASS. Real iPhone/Android/desktop cross-device, live service and production remain unverified.
+Repository/automated gap audit found no unexplained P10 MISSING/PARTIAL/STUB item after the final model-routing and governed-parameter repairs. Existing authorities are reused instead of duplicated: P6/W7 own consequential operations, approval, execution, verification, recovery and E-stop; P7 owns observation context; P8 owns continuity/device/session trust; P9 owns governed model routing; W8 owns model health/failover/observability; Memory and Knowledge remain separate canonical authorities.
 
-## P9 implementation closure candidate
+Qualification: **54 P10 focused/adversarial/A-X/durability tests PASS**; full repository **1238 passed, 0 failed, 24 warnings**; encrypted recovery **15 passed**; compileall and `pip check` PASS; `pip-audit` no known vulnerabilities. Final 45-second P10 soak completed **6,330 iterations**, event history remained bounded at **500**, and SQLite integrity was `ok`.
 
-P9 branch: `p9/hybrid-ai-qualification-20260916`. Draft PR: #31, OPEN / DRAFT / UNMERGED. Exact start base: P8 evidence `bd36011cc71d57110e60843019e52bc6b1963a61`. Frozen implementation: `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`.
+Implementation exact-head gate at `4544df7a68d447871e17c3c2dc221efc12722abb`: CI #1221 / `35086639540`; Reliability/Security #303 / `35086639510`; P3 #241 / `35086639531`; Android #302 / `35086639552`; Package #302 / `35086639563`; iOS #284 / `35086639521` — **6/6 PASS**.
 
-Repository qualification passed deterministic owner privacy routing, capability filtering, W8 health/circuit/failover composition, local/self-hosted and optional external adapter semantics, bounded Memory/Knowledge/P7 safe context, P8 trusted device/session checks, malicious-model/P6 authority boundary, Emergency Stop, concurrent isolation, restart, safe usage metadata, encrypted recovery, performance and mixed soak.
-
-P9 focused/adversarial/E2E/performance set: **53 passed**. Full repository: **1184 passed, 0 failed, 24 warnings**. Encrypted isolated recovery: **14 passed**. `pip-audit` reported no known vulnerabilities; compileall and `pip check` passed.
-
-P9 45-second soak: **1,079,693 iterations**, RSS growth **2,007,040 bytes**, bounded history **160**, local success/fallback/privacy-block/timeout each exercised 179,949 times, circuit-open/recovery transitions and 2,159 restarts exercised. No real provider/model calls were made.
-
-Implementation exact-head workflows at the frozen SHA: CI #1171 / `35072821803`; Reliability/Security #279 / `35072821905`; P3 #231 / `35072821832`; Android #278 / `35072821844`; Package #278 / `35072822017`; iOS #260 / `35072821977` — **6/6 PASS**.
-
-Implementation diff from exact P8 evidence: **19 commits, 10 files, +749 / -48**. Scope contains only P9 model-policy/router/configuration, reliability qualification and tests. No P10, Railway/production deployment, production OAuth/credentials, signing or physical qualification is included.
-
-The only repository-scope P9 gate remaining at this document state is the documentation/evidence exact-head six-workflow validation. Real local model, real external provider, live Hybrid AI routing, physical-device and production verification remain intentionally deferred and must not be inferred from CI.
+The only remaining P10 repository closure step at this document state is the documentation-only evidence exact-head six-workflow gate. Real local/external providers, physical devices/sensors, live background autonomy, live service and production remain intentionally deferred.
 
 REAL_LOCAL_MODEL_VERIFIED = NO
 REAL_EXTERNAL_PROVIDER_VERIFIED = NO
-PHYSICAL_DEVICE_VERIFICATION = NO
+PHYSICAL_IPHONE_VERIFIED = NO
+PHYSICAL_ANDROID_VERIFIED = NO
+PHYSICAL_DESKTOP_VERIFIED = NO
+REAL_MICROPHONE_VERIFIED = NO
+REAL_CAMERA_VERIFIED = NO
+REAL_LOCATION_VERIFIED = NO
+REAL_WEARABLE_VERIFIED = NO
+LIVE_BACKGROUND_AUTONOMY_VERIFIED = NO
 LIVE_HYBRID_ROUTING_VERIFIED = NO
 LIVE_SERVICE_VERIFIED = NO
 PRODUCTION_VERIFIED = NO
