@@ -20,6 +20,7 @@ from server.multimodal_world_api import multimodal_world_router
 from server.continuity_sync_api import continuity_sync_router
 from server.pwa_security import pwa_security_router
 from server.pwa_session_middleware import PwaSessionMiddleware
+from server.logical_request_middleware import LogicalRequestMiddleware
 from server.session_bound_executor import SessionBoundExecutor
 from server.workflow_budget_api import workflow_budget_router
 from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
@@ -62,6 +63,9 @@ async def lifespan(app):
         runtime['voice'].stop(); runtime['automations'].stop(); runtime['telemetry'].persist(); runtime['apns'].close()
 
 app=create_app(runtime['executor'], settings, device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'], second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime)
+# LogicalRequestMiddleware carries only client idempotency metadata. Trusted
+# identity is still established by PwaSessionMiddleware and SessionBoundExecutor.
+app.add_middleware(LogicalRequestMiddleware)
 app.add_middleware(PwaSessionMiddleware, sessions=runtime['pwa_sessions'], device_registry=runtime['device_registry'], cookie_max_age=60 * 60 * 24 * max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650)))
 app.add_middleware(WorkflowBudgetUiMiddleware)
 app.add_middleware(ConnectorUiMiddleware)
