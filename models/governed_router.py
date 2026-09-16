@@ -108,20 +108,6 @@ class GovernedModelRouter(ModelRouter):
         self.observability.add_generation({'generation_id':generation_id,'conversation_id':conversation_id,'task_id':task_id,'provider':getattr(last_error,'provider',None),'capability':capability,'sensitivity':sensitivity,'routing_reason':'exhausted','started_at':started_at,'completed_at':time.time(),'result':'failed','retry_count':retries,'failover_count':failovers,'attempted_targets':attempted,'terminal_target':getattr(last_error,'provider',None),'error_code':self._error_class(last_error) if last_error else 'unknown_failure'})
         raise last_error or ModelUnavailable(provider=self.primary)
 
-    def health_status(self, *, probe: bool = False) -> dict:
-        if probe:
-            for provider in self.providers.values():
-                if provider.id in self.disabled or not provider.configured or (not provider.private and not provider.api_key): continue
-                if not self.observability.allowed(provider.id): continue
-                started=time.perf_counter()
-                try:self._request(provider,'GET','/models',timeout=self.health_timeout); self.observability.success(provider.id,round((time.perf_counter()-started)*1000,3))
-                except ModelError as exc:
-                    error_class=self._error_class(exc); self.observability.failure(provider.id,error_class,retryable=error_class not in NON_RETRYABLE)
-        base=super().status(probe=False); base['w8']=self.observability.snapshot(); base['p9']={'privacy_mode':self.owner_privacy,'allowed_providers':list(self.owner_allowed),'blocked_providers':sorted(self.disabled),'model_output_authority':False}; return base
-
-    def status(self, *, probe: bool = False) -> dict:
-        return self.health_status(probe=probe)
-
     def _chat_call(self, provider, messages, temperature):
         response=self._request(provider,'POST','/chat/completions',json={'model':provider.model,'messages':messages,'temperature':temperature})
         try:
@@ -150,3 +136,17 @@ class GovernedModelRouter(ModelRouter):
             messages=[{'role':'system','content':system},{'role':'user','content':request_text}]
             return self._chat_call(provider,messages,.3)
         return self._run('chat',call,sensitivity=request.sensitivity,hybrid_request=request)
+
+    def health_status(self, *, probe: bool = False) -> dict:
+        if probe:
+            for provider in self.providers.values():
+                if provider.id in self.disabled or not provider.configured or (not provider.private and not provider.api_key): continue
+                if not self.observability.allowed(provider.id): continue
+                started=time.perf_counter()
+                try:self._request(provider,'GET','/models',timeout=self.health_timeout); self.observability.success(provider.id,round((time.perf_counter()-started)*1000,3))
+                except ModelError as exc:
+                    error_class=self._error_class(exc); self.observability.failure(provider.id,error_class,retryable=error_class not in NON_RETRYABLE)
+        base=super().status(probe=False); base['w8']=self.observability.snapshot(); base['p9']={'privacy_mode':self.owner_privacy,'allowed_providers':list(self.owner_allowed),'blocked_providers':sorted(self.disabled),'model_output_authority':False}; return base
+
+    def status(self, *, probe: bool = False) -> dict:
+        return self.health_status(probe=probe)
