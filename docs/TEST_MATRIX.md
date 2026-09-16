@@ -7,155 +7,138 @@ Baseline date: 2026-09-16
 | Batch | Implementation SHA | Focused / full evidence | Required workflow gates |
 | --- | --- | --- | --- |
 | W7.1 Durable Operator Transaction Core | `fe52b6ff...` | 471 full PASS | implementation + documentation complete |
-| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f...` | 85 focused; 557 full, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.3 Allowlists / Data-Safety Policies | `893db9ef...` | 45 focused; 602 full, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.4 Safe Browser Operator | `839cc9d5...` | 52 focused; 654 full, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.5 Safe Desktop / File Operator | `f794373c...` | 55 focused; 709 full, 8 warnings | implementation + documentation 6/6 PASS |
-| W7.6 Verification / Recovery | `38eeae2fc7f609ebc7d3e8681833885b8d35310d` | 778 full PASS, 8 warnings | frozen W7 automated evidence |
-| W8 Model Health / Failover / Observability | `42616b2e8faca9b16a5695ac319ea78200e7af74` | 965 full PASS, 8 warnings | implementation + docs 6/6 PASS; frozen |
-| Post-W8 P4/P5 Life Graph integration | `fc8f1aeb5a8121f0faf911b6840b7ec15d48b609` | 972 full PASS, 8 warnings | 5/5 applicable implementation + docs PASS; frozen |
+| W7.2 Observation Safety / Sensitive Evidence | `78ba7e7f...` | 85 focused; 557 full | implementation + documentation complete |
+| W7.3 Allowlists / Data-Safety Policies | `893db9ef...` | 45 focused; 602 full | implementation + documentation complete |
+| W7.4 Safe Browser Operator | `839cc9d5...` | 52 focused; 654 full | implementation + documentation complete |
+| W7.5 Safe Desktop / File Operator | `f794373c...` | 55 focused; 709 full | implementation + documentation complete |
+| W7.6 Verification / Recovery | `38eeae2fc7f609ebc7d3e8681833885b8d35310d` | 778 full PASS | frozen W7 automated evidence |
+| W8 Model Health / Failover / Observability | `42616b2e8faca9b16a5695ac319ea78200e7af74` | 965 full PASS | implementation + docs 6/6 PASS; frozen |
+| P7 Multimodal Understanding | `c0498146a0753b24da611e392181970b227a63d4` | 44 focused; 1085 full | implementation + evidence 6/6 PASS; repository scope closed |
+| P8 Cross-device Continuity | `041584c50e2e2df8e74aa67843eebd2c2e0e058c` | 46 focused; 1127 full prior qualification | implementation + evidence 6/6 PASS; repository scope closed |
+| P9 Hybrid AI | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | 53 P9 focused/adversarial/E2E/perf; 1184 full | implementation 6/6 PASS; evidence gate pending |
 
-## P4/P5 Retrieval Intelligence + Reminder/Follow-up Lifecycle
+## P7 repository closure
 
-Starting evidence SHA: `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`.
-Branch: `p4-p5/retrieval-reminder-qualification-20260915`.
-Draft PR: #26.
-Final implementation SHA: `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`.
+P7 implementation `c0498146a0753b24da611e392181970b227a63d4` and final evidence lineage `5f13ff2a994e2d257ba1c8d4d4f6cdd6a32d481e` both passed the canonical six exact-head workflows. Physical camera, microphone, location, wearable, live-service and production verification remain separate.
 
-Focused qualification covered `tests/test_p5_retrieval_qualification.py`, `tests/test_p4_reminder_lifecycle.py`, `tests/test_p4_proactive_precision_recall.py`, and `tests/test_p4_reminder_tool_delegation.py`.
+## P8 repository closure
 
-Result: **25 collected, 25 passed, 0 failed, 0 warnings in 0.96s**. The fixed proactive/forgotten-item benchmark achieved **precision 1.0; recall 1.0; false positives 0; false negatives 0**. Corpus qualification covered 100/1,000/5,000 memories and 5,000 scheduled reminders. Qualification latencies were approximately 3.943/18.603/90.067 ms for memory retrieval and 24.772 ms for 5,000-reminder evaluation. These are deterministic qualification measurements, not production SLAs.
+P8 implementation `041584c50e2e2df8e74aa67843eebd2c2e0e058c` and P8 evidence `bd36011cc71d57110e60843019e52bc6b1963a61` both passed the canonical six exact-head workflows. Automated continuity qualification is not physical cross-device verification.
 
-CI exact-head full repository result: **997 passed, 0 failed, 8 warnings in 30.64s**. `pip check`, compileall, `pip-audit`, isolated encrypted backup/restore and 45-second soak passed.
+## P9 Hybrid AI — Frozen implementation qualification
 
-Implementation exact-head workflows: CI #1065 / `34984377146`; Reliability and Security #247 / `34984377349`; P3 iPhone PWA #204 / `34984377120`; Android Instrumentation #246 / `34984377166`; Package Validation #246 / `34984377239`; iOS Companion #228 / `34984377173` — **6/6 PASS**.
+Start base: exact P8 evidence `bd36011cc71d57110e60843019e52bc6b1963a61`.
+Branch: `p9/hybrid-ai-qualification-20260916`.
+Draft PR: #31, OPEN / DRAFT / UNMERGED.
+Frozen implementation SHA: `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`.
 
-## P6 Governed Delegation Integration
+### Authority and architecture qualification
 
-Starting evidence SHA: `2a631346b0013adca810da32ed0e7519eca15240`.
-Branch: `p6/governed-delegation-integration-20260915`.
-Draft PR: #27.
-Final implementation SHA: `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`.
+P9 reuses `ModelRouter`, `GovernedModelRouter` and W8 `ModelObservability`/`CircuitBreaker`. Tests verify that privacy/capability/owner policy filters resources before execution, W8 health/circuit state may remove but never create eligibility, bounded retry/failover terminates, and attempted provider targets are unique. `self_hosted` is the first-class local route; external provider adapters remain optional and require eligibility/configuration.
 
-Focused qualification: **44 collected, 44 passed, 0 failed**. Full repository CI: **1041 passed, 0 failed, 8 warnings in 41.03s**. Reliability independently ran **1041 passed, 8 warnings in 35.63s**, `pip-audit` with no known vulnerabilities, encrypted backup/restore plus 11 isolated recovery tests, and a 45-second soak with SQLite integrity `ok`.
+Memory, Knowledge, P7 and P8 remain external canonical authorities. `SafeContext` is bounded; external projection excludes Memory and Knowledge contents and includes only bounded safe derived world context/references. Device/session trust fails closed. Model output is always untrusted and has no approval/action authority. Consequential Emergency Stop remains authoritative.
 
-P6 qualification verifies security-epoch binding, owner/device/session binding, existing approval/replay/Emergency Stop composition, truthful cancellation/uncertainty semantics, zero orchestration retries, restart recovery/idempotency, consequential serialization, nested-secret rejection, allowlists/policies/budgets, P4/P5 context handoff without authorization transfer, safe owner inspection and deterministic success/denial/recovery flows.
+### Focused / adversarial / deterministic E2E
 
-Implementation exact-head workflows: CI #1071 / `34996184188`; Reliability and Security #249 / `34996184334`; P3 iPhone PWA #206 / `34996184148`; Android Instrumentation #248 / `34996184426`; Package Validation #248 / `34996184213`; iOS Companion #230 / `34996184151` — **6/6 PASS**.
+Committed P9 qualification files:
 
-## P7 Multimodal World Understanding — Final Implementation Qualification
+- `tests/test_p9_hybrid_ai.py`
+- `tests/test_p9_adversarial.py`
+- `tests/test_p9_e2e.py`
+- `tests/test_p9_performance_recovery.py`
 
-P7 start base: `0d2203aa78bfe7dc935ea42887c7ba9cf1e94427`.
-Branch: `p7/multimodal-world-understanding-qualification-20260915`.
-Draft PR: #28.
-Final implementation SHA: `c0498146a0753b24da611e392181970b227a63d4`.
+Combined exact-head Reliability result: **53 passed in 0.52 s**.
 
-### Defect closure regression qualification
+Mandatory adversarial coverage includes forged/malformed provider result, timeout, all unavailable, privacy-forbidden fallback, capability mismatch, unavailable/open circuit, failover-loop attempt, prompt injection, fake owner approval, fake security state, tool escalation, Memory exfiltration, P7 raw-context leakage contract, secret-exfiltration attempt, owner-policy bypass, revoked device, stale session, concurrent routing isolation and Emergency Stop bypass.
 
-The final focused suite covers the original four findings and the requested surrounding adversarial cases:
+Deterministic E2E A–L all pass:
 
-- sensor rejection classification: positive Infinity, negative Infinity, NaN, malformed sensor value, invalid unit and out-of-contract value all fail closed and audit as `invalid_sensor_value` without raw rejected payload;
-- recursive secret rejection: normalized `credential`, `credentials`, password/passwd/secret/token/access-token/refresh-token/API-key/authorization/cookie/private-key equivalents, nested maps/lists and case variants reject before persistence; tested marker is absent from exception text, database bytes, Activities/event payload, audit payload and bounded governed context;
-- lineage/retention: RAW→DERIVED and RAW→EXTRACTED→INTERPRETED→DERIVED, siblings, multiple levels, multi-parent descendants, parent/ancestor expiration and deletion, restart, duplicate expiry/deletion, bounded query, owner inspection and governed action context all fail closed for lineage-invalid descendants while tombstoned provenance/audit state remains retained;
-- P7→P6 boundary: legitimate governed context reaches P6 orchestration, but authorization remains false, approval/execution/verification/recovery/Emergency Stop remain P6/W7-controlled, and public projections do not expose `approval_id` or other internal consequential identifiers.
+A — healthy local route — PASS
+B — local failure + external allowed — PASS
+C — local failure + external forbidden — PASS
+D — capability-based selection — PASS
+E — timeout + legitimate failover — PASS
+F — all eligible providers unavailable — PASS
+G — bounded authorized Memory/Knowledge context — PASS
+H — safe P7-derived context only for external route — PASS
+I — P8 trusted-device/fresh-session AI use — PASS
+J — malicious model cannot authorize P6 action — PASS
+K — restart/concurrent routing remains isolated — PASS
+L — Emergency Stop blocks consequential action — PASS
 
-Focused exact-head result: **44 passed, 0 failed, 9 warnings in 7.21s**.
+### Full repository and security
 
-### Security and adversarial coverage
+Reliability/Security exact-head full repository result: **1184 passed, 0 failed, 24 warnings in 66.97 s**.
 
-Qualification includes nested secrets, unsafe references, NaN/±Infinity, malformed sensor values, abusive timestamps, privacy-before-persistence, provenance/lineage spoofing controls, trusted owner API authorization, P3 trusted/untrusted device behavior, P7→P6 authority-boundary behavior and Emergency Stop preservation. No security test was weakened to obtain a pass.
+- `pip-audit -r requirements.txt` — **PASS: No known vulnerabilities found**
+- compileall — **PASS**
+- CI `pip check` — **PASS**
+- isolated encrypted backup/restore/recovery — **14 passed in 0.74 s**
 
-`pip-audit -r requirements.txt` — **PASS: No known vulnerabilities found**.
-Compileall — **PASS**.
-`pip check` — **PASS: No broken requirements found**.
+No security test was removed or weakened to obtain P9 qualification. Earlier P9 candidate failures were fixed by respecting frozen W8 source/health boundaries and by correcting the P9 soak model; W8 runtime security semantics were preserved.
 
-### Deterministic E2E coverage
+### Performance and boundedness
 
-A. simulated observation → validation/privacy → persistence → bounded retrieval → owner inspection — PASS.
+Qualification-environment router/policy measurements:
 
-B. RAW → EXTRACTED → INTERPRETED → DERIVED — PASS.
+| Measurement | Result |
+| --- | ---: |
+| 5,000 privacy/policy selections | 0.006051 s |
+| 1,000 health-aware eligible selections | 0.004593 s |
+| 500 governed mock routes | 0.009515 s |
+| router restart | 0.000074 s |
+| bounded generation history after test | 200 |
 
-C. duplicate → restart → duplicate → one logical observation — PASS.
+These measure router/policy overhead using deterministic mock calls. They are **not** real local-model or external-LLM inference latency and are not production SLAs.
 
-D. concurrent duplicate delivery → deterministic result — PASS.
+Context qualification bounds each source to 8 entries and each item to 2,000 characters in the test contract. W8 generation history remains bounded at 200; owner-visible snapshots remain bounded. Concurrent tests use independent request policy and context and verify no cross-request policy leakage or deadlock.
 
-E. secret-bearing payload → reject → categorical payload-free audit — PASS.
+### Encrypted backup / restore
 
-F. fresh → stale → expired → correct context behavior — PASS.
+P9 recovery qualification verifies encrypted isolated backup/restore of safe owner/provider policy metadata and confirms plaintext test credentials/Authorization material are absent from the archive. Runtime circuit state does not restore stale authority; restart rebuilds bounded runtime state. Real provider credentials are not part of P9 repository evidence.
 
-G. source expiration/deletion → descendants unusable as fresh governed context — PASS.
+### P9 mixed soak
 
-H. P3 trusted/untrusted device behavior — PASS.
+45-second exact-head P9 soak:
 
-I. P7 context → P6 → existing authorization still required — PASS.
+- iterations: **1,079,693**
+- RSS start: **33,099,776**
+- RSS peak: **35,106,816**
+- RSS end: **35,106,816**
+- RSS growth: **2,007,040 bytes**
+- healthy local routes: **179,949**
+- external-eligible failover successes: **179,949**
+- privacy-blocked local-only failures: **179,949**
+- timeout/failover cases: **179,949**
+- observed circuit-open states: **179,229**
+- deterministic circuit recoveries: **178,508**
+- router restarts: **2,159**
+- final bounded generation history: **160**
 
-J. Emergency Stop → consequential action remains blocked despite P7 context — PASS.
+The same Reliability workflow also ran the existing 45-second repository soak: **6,634 iterations**, SQLite integrity `ok`, pending device requests 0, P7/P8 SQLite integrity `ok`. No real AI provider or physical GPU/model was used.
 
-### Performance qualification
-
-At 100 / 600 / 1,800 observations:
-
-| Volume | Ingest | Restart | Bounded query | Duplicate | DB bytes | Python history loaded |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 0.117669 s | 0.000501 s | 0.000601 s | 0.000383 s | 229,376 | 0 |
-| 600 | 0.535670 s | 0.000751 s | 0.001261 s | 0.000376 s | 1,085,440 | 0 |
-| 1,800 | 1.585818 s | 0.001379 s | 0.001638 s | 0.000391 s | 3,129,344 | 0 |
-
-Extended measurements: provenance lookup **0.001021 s**; concurrent ingestion of 64 unique observations **0.072918 s**; descendant delete cascade **0.001240 s**; expiration of 40 source/descendant observations **0.003209 s**; measured startup state `loaded_observations_in_memory = 0`.
-
-The measurements verify that P7 did not restore the old whole-ledger Python startup materialization. They are qualification measurements, not production SLAs.
-
-### Backup / restore
-
-Encrypted backup/restore plus isolated recovery qualification: **12 passed in 0.38s**. Representative P7 state preserves observation/source-event IDs, idempotency, provenance, lineage, privacy, retention, deletion and expiration semantics. The final case explicitly restores an expired RAW source plus a longer-retained child and verifies neither reactivates and lineage-invalid context remains unavailable.
-
-### Final candidate soak
-
-45-second P7-inclusive soak:
-
-- iterations: **6,610**
-- SQLite integrity: **ok**
-- P7 SQLite integrity: **ok**
-- pending device requests: **0**
-- P7 events: **331**
-- P7 observations: **465**
-- P7 database bytes: **1,130,496**
-- P7 historical observations loaded in Python: **0**
-- RSS start: **46,886,912**
-- RSS peak: **128,077,824**
-- RSS end: **128,110,592**
-- RSS growth: **81,223,680 bytes**
-
-The process-wide RSS increase remains an observation, not proof of either a leak or harmless allocator/cache retention. P7-specific bounded-state evidence establishes that historical observations are not materialized as an unbounded Python ledger.
-
-### Full repository gate
-
-Exact-head direct CI full repository: **1085 passed, 0 failed, 15 warnings in 38.77s**.
-Reliability/Security independent full repository: **1085 passed, 0 failed, 15 warnings in 40.46s**.
-
-### Implementation exact-head workflows
+### Implementation exact-head workflow gate
 
 | Workflow | Run | Run ID | Head SHA | Result |
 | --- | ---: | ---: | --- | --- |
-| CI | #1140 | `35042584877` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
-| Reliability and Security | #273 | `35042584893` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
-| P3 iPhone PWA | #225 | `35042584920` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
-| Android Instrumentation | #272 | `35042584924` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
-| Package Validation | #272 | `35042584939` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
-| iOS Companion | #254 | `35042584896` | `c0498146a0753b24da611e392181970b227a63d4` | PASS |
+| CI | #1171 | `35072821803` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
+| Reliability and Security | #279 | `35072821905` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
+| P3 iPhone PWA | #231 | `35072821832` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
+| Android Instrumentation | #278 | `35072821844` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
+| Package Validation | #278 | `35072822017` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
+| iOS Companion | #260 | `35072821977` | `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb` | PASS |
 
-Implementation gate: **6/6 PASS**. PR workflows validate GitHub's PR merge ref against the unchanged P7 base while their workflow-run head SHA is the frozen implementation SHA; direct push CI independently checked out the implementation SHA itself.
+Implementation exact-head gate: **6/6 PASS**.
 
-Cumulative implementation/test diff from P7 start base: **18 commits, 9 files, +2,387 / -30**. No P6 runtime files changed and no P8/P9/P10 implementation, deployment, OAuth, production credential, signing or new authority was introduced.
+Implementation diff from exact P8 evidence: **19 commits, 10 files, +749 / -48**. No P10 implementation, production/Railway deployment, production OAuth/provider credentials, signing or physical-device qualification is included.
 
 ### Evidence boundary
 
-REAL_CAMERA_VERIFIED = NO
-REAL_MICROPHONE_VERIFIED = NO
-REAL_LOCATION_VERIFIED = NO
-REAL_WEARABLE_VERIFIED = NO
-PHYSICAL_MULTIMODAL_VERIFIED = NO
+REAL_LOCAL_MODEL_VERIFIED = NO
+REAL_EXTERNAL_PROVIDER_VERIFIED = NO
+PHYSICAL_DEVICE_VERIFICATION = NO
+LIVE_HYBRID_ROUTING_VERIFIED = NO
 LIVE_SERVICE_VERIFIED = NO
 PRODUCTION_VERIFIED = NO
 
-The documentation/evidence exact-head workflow gate remains required before P7 may be classified repository-automated evidence complete.
+The documentation/evidence exact-head six-workflow gate remains required before P9 repository/automated scope closure. P10 is NOT STARTED.
