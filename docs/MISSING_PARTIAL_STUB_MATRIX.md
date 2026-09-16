@@ -2,88 +2,61 @@
 
 Baseline date: 2026-09-16
 
+This matrix separates repository/automated closure from physical-device, live-provider, signed-distribution and production evidence.
+
 | Priority | Workstream | Item | Current status | Why not complete | Next bounded action |
 | --- | --- | --- | --- | --- | --- |
 | P0 | W1 | Main Railway durable storage | BLOCKED/PARTIAL | approved production volume absent | attach only at future approved production gate |
-| P0 | W3/W12 | Physical P3 / multi-browser | BLOCKED/QUALIFICATION | real-device evidence required | execute physical protocol later |
+| P0 | W3/W12 | Physical P3 / multi-browser | DEFERRED / QUALIFICATION PENDING | real-device evidence required | execute physical protocol near final release |
 | P0 | P4 | Daily briefing ↔ Second Brain context | RESOLVED FOR AUTOMATED SCOPE | authoritative current-memory context and permission filtering regression-tested | preserve; daily-use qualification later |
-| P0 | P4 | Reminder/follow-up deterministic lifecycle | RESOLVED FOR CURRENT AUTOMATED SCOPE | durable lifecycle, due engine, restart/idempotency, owner inspection, forgotten-item benchmark validated | live delivery and daily-use proof remain separate |
-| P0 | P5 | Second Brain ↔ Life Graph linking | RESOLVED FOR AUTOMATED SCOPE | read-through integration and owner inspection validated; no duplicate authority | preserve |
-| P0 | P5 | Retrieval/corpus/temporal/supersession qualification | RESOLVED FOR CURRENT AUTOMATED SCOPE | 100/1,000/5,000 corpus, ranking explanations, temporal/current truth, privacy, deletion/retention and context budget validated | expand only when real long-term corpus evidence warrants it |
-| P1 | P4 | Live reminder/push/email/calendar delivery | QUALIFICATION PENDING | deterministic scheduling is not physical/live delivery | owner/live adapter + physical protocol later |
-| P1 | P4 | Natural-language commitment extraction daily-use precision | PARTIAL | fixed deterministic state benchmark is not a real-world language/acceptance corpus | build representative acceptance corpus without making LLM authoritative |
-| P1 | P5 | Media extraction quality | PARTIAL | document/media pipeline quality needs broader fixture evidence | add deterministic extraction-quality qualification when prioritized |
-| P1 | P6 | PersonalOperations governed delegation | RESOLVED FOR REPOSITORY/AUTOMATED IMPLEMENTATION SCOPE | governed delegation composes through existing AgentExecutor/AutomationEngine/W7 with verification/recovery; 44 focused and 1041 full tests green; implementation workflows 6/6 PASS | preserve frozen evidence; autonomous/live/physical/production proof remain separate |
-| P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED | owner postponed paid isolated infrastructure | preserve checkpoint |
-| P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real account/consent deliberately not connected | resume only after owner approval |
-| P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation gates complete | frozen |
-| P1 | W7.2 | Observation/application context + sensitive evidence | RESOLVED FOR AUTOMATED SCOPE | automated gates complete | frozen; physical qualification separate |
-| P1 | W7.3 | Allowlists and data-safety policies | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
-| P1 | W7.4 | Safe Browser Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
-| P1 | W7.4 | Physical/real-site browser qualification | QUALIFICATION PENDING | automated evidence is not real-site/physical proof | later physical qualification |
-| P1 | W7.5 | Safe Desktop and File Operator | RESOLVED FOR AUTOMATED SCOPE | implementation + documentation 6/6 | frozen |
-| P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows contracts and packaging are automated evidence only | later real-device Windows qualification |
-| P1 | W7.6 | Verification and recovery | RESOLVED FOR AUTOMATED SCOPE | frozen W7 baseline includes completed recovery implementation/evidence | preserve frozen W7 |
-| P1 | W8 | Model health/failover/observability | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation and documentation exact-head gates both 6/6 PASS | live-provider/local-model qualification remains separate |
-| P1 | P7 | Multimodal observation/context hardening | RESOLVED FOR IMPLEMENTATION-HEAD AUTOMATED SCOPE | one canonical WorldUnderstanding hardened; 44 focused and 1085 full tests green; adversarial/E2E/performance/recovery/soak and implementation workflows 6/6 PASS | documentation/evidence exact-head gate must pass before repository/automated closure |
-| P1 | P7 | Real sensor/device multimodal qualification | QUALIFICATION PENDING | deterministic simulated adapters and platform workflows are not camera/microphone/location/wearable physical evidence | perform real-device protocol only with owner/device access later |
-| P1 | P7 | Process-wide soak RSS attribution | OBSERVED / NOT PROVEN DEFECT | 45-second candidate soak retained 81,223,680 bytes process RSS while P7 loaded-observation count stayed 0 and SQLite remained bounded | do not call leak or harmless without heap attribution; investigate only if future evidence shows unbounded growth |
-| P1 | P8 | Real cross-device/surface qualification | PARTIAL / QUALIFICATION PENDING | registry/continuity foundation does not make every listed surface a complete runtime | do not start until P7 evidence closure |
-| P1 | P9 | Live provider / real local model | QUALIFICATION PENDING | W8 automated routing/resilience is not real provider/local runtime evidence | owner-approved bounded live/local protocol later |
-| P1 | P10 | Advanced autonomy activation | BLOCKED/FAIL-CLOSED BY PREREQUISITES | persistent agents exist but P3 permissions/automation/memory/continuity/reliability must qualify first | continue repository validation without activation bypass |
-| P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | readiness work only until owner signing/device gates |
-| P1 | W12 | Release readiness | PARTIAL | live OAuth/providers, production storage/service, physical and signing gates remain | no production promotion yet |
+| P0 | P4 | Reminder/follow-up deterministic lifecycle | RESOLVED FOR CURRENT AUTOMATED SCOPE | durable lifecycle/due/restart/idempotency validated | live delivery/daily-use proof separate |
+| P0 | P5 | Second Brain ↔ Life Graph linking | RESOLVED FOR AUTOMATED SCOPE | read-through integration validated; no duplicate authority | preserve |
+| P0 | P5 | Retrieval/corpus/temporal/supersession qualification | RESOLVED FOR CURRENT AUTOMATED SCOPE | deterministic corpus/privacy/deletion/retention qualification complete | expand only with real long-term corpus evidence |
+| P1 | P4 | Live reminder/push/email/calendar delivery | QUALIFICATION PENDING | deterministic scheduling is not physical/live delivery | live adapter + physical protocol later |
+| P1 | P4 | Natural-language commitment extraction daily-use precision | PARTIAL | fixed deterministic benchmark is not real acceptance corpus | representative acceptance corpus later |
+| P1 | P5 | Media extraction quality | PARTIAL | broader fixture evidence needed | deterministic extraction-quality qualification when prioritized |
+| P1 | P6 | PersonalOperations governed delegation | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | canonical P6/W7 authority composition validated | live/physical/production proof separate |
+| P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-DEFERRED | paid isolated infrastructure postponed | preserve checkpoint |
+| P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real consent/account deliberately not connected | resume only after owner approval |
+| P1 | W7.1-W7.6 | Governed computer/action stack | RESOLVED FOR AUTOMATED SCOPE | frozen implementation/evidence gates complete | physical/production qualification later |
+| P1 | W8 | Model health/failover/observability | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head gates complete | live-provider/local-model qualification separate |
+| P1 | P7 | Multimodal observation/context hardening | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head six-workflow gates complete | preserve frozen P7; physical sensors later |
+| P1 | P7 | Real sensor/device multimodal qualification | QUALIFICATION PENDING / DEFERRED | deterministic adapters/platform workflows are not physical evidence | final pre-release physical protocol |
+| P1 | P7 | Process-wide soak RSS attribution | OBSERVED / NOT PROVEN DEFECT | prior process-wide RSS retention not independently attributed | investigate only if future evidence shows unbounded growth |
+| P1 | P8 | Governed cross-device continuity repository scope | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation/evidence exact-head gates complete | preserve frozen P8 |
+| P1 | P8 | Real iPhone/Android/desktop cross-device qualification | QUALIFICATION PENDING / DEFERRED | CI/simulators are not physical cross-device proof | final pre-release physical protocol |
+| P1 | P9 | Hybrid AI repository implementation | IMPLEMENTATION GATE RESOLVED | frozen implementation `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`; 53 P9 tests; 1184 full; exact-head implementation workflows 6/6 | documentation/evidence exact-head gate |
+| P1 | P9 | Live provider / real local model | QUALIFICATION PENDING / DEFERRED | deterministic mocks and self-hosted architecture are not real inference/provider proof | owner-approved real local/provider protocol near final integration |
+| P1 | P9 | Real local GPU performance/model quality | QUALIFICATION PENDING / DEFERRED | repository route performance is not model inference performance | qualify on owner hardware later |
+| P1 | P10 | Advanced autonomy | NOT STARTED IN THIS CONTINUATION | P9 directive explicitly stops before P10 | separate owner directive required |
+| P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | readiness only until owner signing/device gates |
+| P1 | W12 | Release readiness | PARTIAL | live OAuth/providers/storage, physical and signing gates remain | no production promotion |
 
-## P4/P5 retrieval/reminder automated-scope closure
+## P7/P8 closure correction
 
-Starting evidence: `4985dd014ec8c29c9f90c2dba8f153ea8a5bb969`.
-Final implementation: `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b`.
-Draft PR: #26.
+P7 repository/automated evidence is closed on its frozen lineage: implementation `c0498146a0753b24da611e392181970b227a63d4`, evidence `5f13ff2a994e2d257ba1c8d4d4f6cdd6a32d481e`, both required exact-head gates 6/6 PASS. Physical multimodal/live/production evidence remains separate.
 
-Focused qualification: **25 passed, 0 failed in 0.96s**. Full repository: **997 passed, 0 failed, 8 warnings in 30.64s**. `pip check`, compileall, `pip-audit`, encrypted backup/restore and 45-second soak passed.
+P8 repository/automated evidence is closed: implementation `041584c50e2e2df8e74aa67843eebd2c2e0e058c`, evidence `bd36011cc71d57110e60843019e52bc6b1963a61`, both required exact-head gates 6/6 PASS. Real iPhone/Android/desktop cross-device, live service and production remain unverified.
 
-Implementation exact-head workflows: CI #1065 / `34984377146`; Reliability/Security #247 / `34984377349`; P3 #204 / `34984377120`; Android #246 / `34984377166`; Package #246 / `34984377239`; iOS #228 / `34984377173` — **6/6 PASS**.
+## P9 implementation closure candidate
 
-Large deterministic retrieval corpora 100/1,000/5,000 returned the target correctly; measured qualification latencies were ~3.943/~18.603/~90.067 ms. 5,000-reminder evaluation measured ~24.772 ms. Fixed forgotten-item dataset achieved precision 1.0 / recall 1.0 / 0 FP / 0 FN. These are automated deterministic measurements, not daily-use/live-delivery evidence.
+P9 branch: `p9/hybrid-ai-qualification-20260916`. Draft PR: #31, OPEN / DRAFT / UNMERGED. Exact start base: P8 evidence `bd36011cc71d57110e60843019e52bc6b1963a61`. Frozen implementation: `bfb9b574e2dfbd2e0026ab1affbe74ba9a17e7eb`.
 
-Global schema remains **73**; P4 storage has additive lifecycle/audit columns/table only. No dependency, Railway, production, OAuth, provider credential, signing, W7, W8 or P6 implementation change occurred.
+Repository qualification passed deterministic owner privacy routing, capability filtering, W8 health/circuit/failover composition, local/self-hosted and optional external adapter semantics, bounded Memory/Knowledge/P7 safe context, P8 trusted device/session checks, malicious-model/P6 authority boundary, Emergency Stop, concurrent isolation, restart, safe usage metadata, encrypted recovery, performance and mixed soak.
 
-## P6 governed delegation implementation closure
+P9 focused/adversarial/E2E/performance set: **53 passed**. Full repository: **1184 passed, 0 failed, 24 warnings**. Encrypted isolated recovery: **14 passed**. `pip-audit` reported no known vulnerabilities; compileall and `pip check` passed.
 
-Starting evidence: `2a631346b0013adca810da32ed0e7519eca15240`.
-Final implementation: `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`.
-Draft PR: #27.
+P9 45-second soak: **1,079,693 iterations**, RSS growth **2,007,040 bytes**, bounded history **160**, local success/fallback/privacy-block/timeout each exercised 179,949 times, circuit-open/recovery transitions and 2,159 restarts exercised. No real provider/model calls were made.
 
-Focused qualification: **44 collected, 44 passed, 0 failed**. CI full repository: **1041 passed, 0 failed, 8 warnings in 41.03s**. Reliability/Security independently ran **1041 passed, 8 warnings in 35.63s**, `pip-audit` with no known vulnerabilities, encrypted backup/restore plus 11 isolated recovery tests, and a 45-second soak with SQLite integrity `ok`.
+Implementation exact-head workflows at the frozen SHA: CI #1171 / `35072821803`; Reliability/Security #279 / `35072821905`; P3 #231 / `35072821832`; Android #278 / `35072821844`; Package #278 / `35072822017`; iOS #260 / `35072821977` — **6/6 PASS**.
 
-Implementation workflows: CI #1071 / `34996184188`; Reliability/Security #249 / `34996184334`; P3 #206 / `34996184148`; Android #248 / `34996184426`; Package #248 / `34996184213`; iOS #230 / `34996184151` — **6/6 PASS**.
+Implementation diff from exact P8 evidence: **19 commits, 10 files, +749 / -48**. Scope contains only P9 model-policy/router/configuration, reliability qualification and tests. No P10, Railway/production deployment, production OAuth/credentials, signing or physical qualification is included.
 
-P6 uses the existing AgentExecutor/AutomationEngine/ToolRegistry/W7 authorities and adds no competing executor, permission, approval, transaction, retry, recovery or memory authority. It persists owner/device/session/security epoch binding; stale epochs fail closed. Consequential resource serialization uses the governed destination. Nested secret-bearing parameter keys are recursively rejected. Cancellation after possible consequential dispatch remains uncertain/recovery-required rather than falsely cancelled/no-effect. Orchestration retries remain zero.
+The only repository-scope P9 gate remaining at this document state is the documentation/evidence exact-head six-workflow validation. Real local model, real external provider, live Hybrid AI routing, physical-device and production verification remain intentionally deferred and must not be inferred from CI.
 
-Implementation diff: **1 commit, 20 files, +2,730 / -40**. Global W7 schema remains **73**. P6 owns additive local operation-delegation persistence only. No dependency, workflow-definition, Railway, production, OAuth, provider credential or signing change occurred.
-
-AUTONOMOUS ACTIVATION VERIFIED = NO. PHYSICAL P3 VERIFIED = NO. LIVE SERVICE VERIFIED = NO. PRODUCTION VERIFIED = NO.
-
-## P7 multimodal world-understanding implementation closure candidate
-
-Starting evidence: `0d2203aa78bfe7dc935ea42887c7ba9cf1e94427`.
-Final implementation: `c0498146a0753b24da611e392181970b227a63d4`.
-Draft PR: #28.
-
-P7 retains the existing `WorldUnderstanding` authority. Repository qualification closes the identified defects: sensor validation rejects `NaN`, positive/negative infinity and malformed/out-of-contract sensor values with safe `invalid_sensor_value` classification; recursive normalized secret-bearing key rejection covers `credential`, `credentials`, password/token/API/authorization/cookie/private-key equivalents before persistence; source expiration/deletion invalidates dependent descendants across multiple lineage levels and restart while retaining tombstoned provenance/audit metadata; and the P7→P6 test now verifies the authority boundary without demanding internal `approval_id` exposure.
-
-Focused exact-head qualification: **44 passed, 0 failed, 9 warnings in 7.21s**. Exact-head direct CI full repository: **1085 passed, 0 failed, 15 warnings in 38.77s**. Reliability independently ran **1085 passed, 0 failed, 15 warnings in 40.46s**, `pip-audit` with no known vulnerabilities, encrypted backup/restore/recovery **12 passed in 0.38s**, deterministic performance qualification, and a P7-inclusive 45-second soak.
-
-Implementation workflows: CI #1140 / `35042584877`; Reliability/Security #273 / `35042584893`; P3 #225 / `35042584920`; Android #272 / `35042584924`; Package #272 / `35042584939`; iOS #254 / `35042584896` — **6/6 PASS** at implementation SHA `c0498146a0753b24da611e392181970b227a63d4`.
-
-Performance evidence demonstrates indexed bounded reads/restart with 0 historical observations loaded into Python state, plus explicit provenance lookup, 64-way concurrent ingestion, delete-cascade and retention-expiration measurements. The candidate soak completed 6,610 iterations; both SQLite integrity checks were `ok`; pending device requests 0; P7 loaded-observation state 0. Process RSS growth remained materially positive at 81,223,680 bytes, so no unsupported leak/harmlessness conclusion is made.
-
-Implementation diff from P7 start base: **18 commits, 9 files, +2,387 / -30**. No P6 runtime file, P8/P9/P10 implementation, Railway/production deployment, OAuth/provider credential, signing, or alternate P7/P6/W7 authority was added.
-
-The remaining P7 gate at this document state is documentation/evidence exact-head validation. Real camera, microphone, location, wearable, physical multimodal, live-service and production evidence remain unavailable and must not be inferred from automated fixtures/simulators/platform workflows.
-
-REAL_CAMERA_VERIFIED = NO. REAL_MICROPHONE_VERIFIED = NO. REAL_LOCATION_VERIFIED = NO. REAL_WEARABLE_VERIFIED = NO. PHYSICAL_MULTIMODAL_VERIFIED = NO. LIVE_SERVICE_VERIFIED = NO. PRODUCTION_VERIFIED = NO.
-
-## Remaining evidence classes
-
-Automated repository evidence must remain distinct from live service, physical-device, signed-distribution and production evidence. Live reminder delivery remains **NOT VERIFIED**. Physical P3 remains incomplete. Live OAuth/providers, real local model, production durable storage, real Windows/iPhone/Android qualification and signing credentials remain external gates. P8 repository work must not begin until P7 documentation/evidence exact-head workflows pass and P7 is classified repository/automated evidence-closed.
+REAL_LOCAL_MODEL_VERIFIED = NO
+REAL_EXTERNAL_PROVIDER_VERIFIED = NO
+PHYSICAL_DEVICE_VERIFICATION = NO
+LIVE_HYBRID_ROUTING_VERIFIED = NO
+LIVE_SERVICE_VERIFIED = NO
+PRODUCTION_VERIFIED = NO
