@@ -10,6 +10,7 @@ from capabilities.dialogue_evaluation import ModelDialogueEvaluation
 from capabilities.scenarios import CompetitiveScenarioSuite
 from core.config import settings
 from core.events import EventBus
+from core.personal_ai_runtime import CanonicalTurnRuntime
 from core.preferences import Preferences
 from core.telemetry import Telemetry
 from devices.continuity import ContinuityService
@@ -87,7 +88,7 @@ def build_runtime():
 
     tools = ToolRegistry(settings)
     tools.set_autonomy_mode(str(preferences.get('autonomy_mode', settings.autonomy_mode)))
-    executor = AgentExecutor(
+    agent_executor = AgentExecutor(
         models=models,
         tools=tools,
         memory=memory,
@@ -95,6 +96,15 @@ def build_runtime():
         second_brain=second_brain,
         knowledge=knowledge,
         telemetry=telemetry,
+    )
+    # V1 canonical orchestration path. It deliberately delegates intelligence,
+    # permissions, approval, tool execution, verification and recovery to the
+    # existing qualified authorities underneath AgentExecutor.
+    executor = CanonicalTurnRuntime(
+        agent_executor,
+        continuity,
+        settings.data_dir / 'turn-runtime.sqlite3',
+        events=events,
     )
 
     def context_provider():
@@ -129,6 +139,8 @@ def build_runtime():
         integration_adapters=adapters,
     )
 
+    # Voice now uses the exact same canonical turn runtime as text/Home/device
+    # surfaces. STT/TTS remain replaceable transport providers, never authority.
     voice = RealtimeVoiceSession(models, executor, events)
     voice_qualification = VoiceQualificationRecorder(
         settings.data_dir / 'voice-qualification.sqlite3',
@@ -159,6 +171,8 @@ def build_runtime():
         'proactive': proactive,
         'tools': tools,
         'executor': executor,
+        'turn_runtime': executor,
+        'agent_executor': agent_executor,
         'automations': automations,
         'integrations': integrations,
         'integration_adapters': adapters,
@@ -204,9 +218,9 @@ def build_runtime():
     def append_continuity(kind, text, device_id=None, conversation_id=None):
         if not text:
             return
-        # Thread-aware surfaces persist directly so they can atomically pair the
-        # UI event with the selected conversation. Legacy/device commands still
-        # flow through this event bridge using the device's active thread.
+        # CanonicalTurnRuntime supplies conversation_id and persists its selected
+        # thread directly. This bridge remains only for legacy internal emitters
+        # that have not originated from a user-facing V1 turn.
         if conversation_id:
             return
         source_device = str(device_id or 'desktop')
