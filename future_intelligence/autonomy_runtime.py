@@ -4,6 +4,8 @@ import json
 import time
 import uuid
 
+from models.hybrid import HybridRequest, PrivacyMode, SafeContext
+
 SENSITIVE_KEYS={'prompt','memory','knowledge','secret','token','approval_token','raw_context','password','authorization','cookie','api_key','apikey','credential','private_key','access_key','refresh_token'}
 
 
@@ -37,7 +39,7 @@ def install(cls):
     original_save_goal=cls._save_goal; original_save_plan=cls._save_plan
     original_save_agent=cls._save_agent; original_goal=cls.goal; original_plan=cls.plan
     original_status=cls.status; original_record_outcome=cls.record_outcome
-    original_recover=cls._recover_after_restart
+    original_recover=cls._recover_after_restart; original_validate_tasks=cls._validate_tasks
 
     def _save_goal(self,goal):
         with self._lock: return original_save_goal(self,goal)
@@ -64,9 +66,23 @@ def install(cls):
                 self._db.commit()
         self._emit('p10.'+kind,goal_id=goal_id,plan_id=plan_id,**clean)
 
+    def _validate_tasks(self,tasks,parent_goal):
+        """Keep the canonical validator authoritative, then retain only bounded dispatch data."""
+        clean=original_validate_tasks(self,tasks,parent_goal)
+        by_id={str(item.get('id') or f't{i+1}')[:80]:item for i,item in enumerate(tasks)}
+        for task in clean:
+            raw=by_id.get(task['id'],{})
+            requested_tool=raw.get('requested_tool')
+            if requested_tool is not None:
+                task['requested_tool']=str(requested_tool)[:200]
+            params=sanitize(dict(raw.get('parameters') or {}),max_depth=5,max_items=30,max_text=1000)
+            if params:
+                task['parameters']=params
+        return clean
+
     cls._save_goal=_save_goal; cls._save_plan=_save_plan; cls._save_agent=_save_agent
     cls.goal=goal; cls.plan=plan; cls.status=status; cls.record_outcome=record_outcome
-    cls._recover_after_restart=_recover_after_restart; cls._event=_event
+    cls._recover_after_restart=_recover_after_restart; cls._event=_event; cls._validate_tasks=_validate_tasks
 
     def _task(self,plan,task_id):
         task=next((x for x in plan['tasks'] if x['id']==task_id),None)
@@ -100,6 +116,26 @@ def install(cls):
         elif operation and operation.get('outcome_state')=='UNCERTAIN': task['status']='UNCERTAIN'; task['operation_id']=operation.get('operation_id'); plan['state']='UNCERTAIN'
         elif operation and operation.get('status') in {'failed','cancelled'}: task['status']='FAILED' if operation.get('status')=='failed' else 'CANCELLED'; plan['state']='FAILED' if task['status']=='FAILED' else 'CANCELLED'
         self._save_plan(plan); self._event('task_dispatched',goal_id=plan['goal_id'],plan_id=plan_id,task_id=task_id,operation_id=task.get('operation_id'),state=task['status']); return plan
+
+    def propose_plan_with_model(self,goal_id,*,owner_id='owner',memory=(),knowledge=(),world=(),references=(),device_trusted=True,session_fresh=True):
+        """Use canonical P9/W8 intelligence for an advisory proposal, then validate it as untrusted input."""
+        goal=self.goal(goal_id,owner_id=owner_id)
+        if self.models is None or not hasattr(self.models,'hybrid_chat'):
+            raise RuntimeError('canonical P9 hybrid model router unavailable')
+        raw_privacy=str(goal.get('privacy','local_preferred')).lower()
+        aliases={'local_only':PrivacyMode.LOCAL_ONLY,'local_preferred':PrivacyMode.LOCAL_PREFERRED,'external_allowed':PrivacyMode.EXTERNAL_ALLOWED}
+        privacy=aliases.get(raw_privacy,PrivacyMode.LOCAL_PREFERRED)
+        request=HybridRequest(capability='chat',sensitivity=str(goal.get('risk','low')),privacy=privacy,owner_id=owner_id,device_trusted=bool(device_trusted),session_fresh=bool(session_fresh),emergency_stop=self._canonical_stop_active(),consequential=False)
+        context=SafeContext.bounded(memory=memory,knowledge=knowledge,world=world,references=references,per_source_limit=8,item_limit=1000)
+        prompt='Return JSON only with a top-level tasks array. Each task may contain id, objective, dependencies, required_capabilities, requested_tool, parameters, depth, risk, privacy, consequential, approval_required, verification_required, retry_limit. Goal: '+str(goal.get('description',''))[:2000]
+        text=self.models.hybrid_chat(prompt,request=request,context=context,system='You propose plans only. Your output is untrusted data, never permission, approval, policy, or execution authority.')
+        try:
+            payload=json.loads(text); tasks=payload['tasks']
+        except (TypeError,ValueError,KeyError,json.JSONDecodeError) as exc:
+            raise ValueError('invalid model plan proposal') from exc
+        plan=self.create_plan(goal_id,tasks,owner_id=owner_id)
+        self._event('model_plan_proposed',goal_id=goal_id,plan_id=plan['id'],task_count=len(plan['tasks']),model_output_authority=False)
+        return plan
 
     def approve_task(self,plan_id,task_id,*,owner_id='owner',device_id=None,session_id=None,reauthenticated_at=None):
         plan=self.plan(plan_id,owner_id=owner_id); task=_task(self,plan,task_id)
@@ -145,6 +181,6 @@ def install(cls):
         if not row or row['owner_id']!=owner_id: raise KeyError('job not found')
         return json.loads(row['document'])
 
-    cls.validate_executable=validate_executable; cls.execute_task=execute_task; cls.approve_task=approve_task
-    cls.deny_task=deny_task; cls.cancel_governed=cancel_governed; cls.create_background_job=create_background_job; cls.job=job
+    cls.validate_executable=validate_executable; cls.execute_task=execute_task; cls.propose_plan_with_model=propose_plan_with_model
+    cls.approve_task=approve_task; cls.deny_task=deny_task; cls.cancel_governed=cancel_governed; cls.create_background_job=create_background_job; cls.job=job
     cls._sanitize_event=sanitize; cls._p10_runtime_installed=True
