@@ -331,6 +331,42 @@ class ContinuitySync:
             else:
                 raise ValueError('unsupported cross-device source reference')
 
+    def _commit_parsed(self, *, device_id: str, session_id: str, current_epoch: int, thread_id: str, parsed):
+        """Serialize receipt/state coordination so concurrent delivery stays idempotent.
+
+        Canonical conversation writes still flow through ContinuityService; this lock
+        only protects P8's receipt/sequence coordination around those writes.
+        """
+        with self._lock:
+            last_client_sequence = self._prepare_state(device_id, current_epoch)
+            accepted = []
+            duplicates = []
+            for client_sequence, event_id, kind, payload, payload_hash in parsed:
+                previous_event = self._receipt_by_event(device_id, event_id)
+                if previous_event is not None:
+                    if int(previous_event['security_epoch']) != current_epoch or int(previous_event['client_sequence']) != client_sequence or previous_event['thread_id'] != thread_id or previous_event['payload_hash'] != payload_hash:
+                        raise ValueError('sync event identity conflict')
+                    duplicates.append(event_id)
+                    last_client_sequence = max(last_client_sequence, client_sequence)
+                    continue
+                previous_sequence = self._receipt_by_sequence(device_id, current_epoch, client_sequence)
+                if previous_sequence is not None:
+                    raise ValueError('sync sequence identity conflict')
+                if client_sequence <= last_client_sequence:
+                    raise ValueError('out-of-order or replayed sync event')
+                server = self._append_idempotent(
+                    thread_id, device_id=device_id, kind=kind, payload=payload, client_event_id=event_id,
+                )
+                self._save_receipt(
+                    device_id=device_id, event_id=event_id, client_sequence=client_sequence,
+                    thread_id=thread_id, payload_hash=payload_hash, server_event_id=server['event_id'],
+                    server_sequence=server['sequence'], epoch=current_epoch,
+                )
+                last_client_sequence = client_sequence
+                accepted.append(event_id)
+            self._save_state(device_id, session_id, current_epoch, last_client_sequence)
+            return last_client_sequence, accepted, duplicates
+
     def reconcile(self, *, device_id: str, session_id: str, security_epoch: int, events: list[Mapping[str, Any]] | None = None, thread_id: str | None = None, after_sequence: int = 0, limit: int = 200) -> dict[str, Any]:
         device_id = self._assert_device(device_id)
         current_epoch = self._current_epoch()
@@ -377,31 +413,13 @@ class ContinuitySync:
             self._validate_source_refs(payload, device_id)
             parsed.append((client_sequence, event_id, kind, payload, self._hash_payload(kind, payload)))
         parsed.sort(key=lambda row: row[0])
-        last_client_sequence = self._prepare_state(device_id, current_epoch)
-        accepted = []
-        duplicates = []
-        for client_sequence, event_id, kind, payload, payload_hash in parsed:
-            previous_event = self._receipt_by_event(device_id, event_id)
-            if previous_event is not None:
-                if int(previous_event['security_epoch']) != current_epoch or int(previous_event['client_sequence']) != client_sequence or previous_event['thread_id'] != thread['id'] or previous_event['payload_hash'] != payload_hash:
-                    raise ValueError('sync event identity conflict')
-                duplicates.append(event_id)
-                last_client_sequence = max(last_client_sequence, client_sequence)
-                continue
-            previous_sequence = self._receipt_by_sequence(device_id, current_epoch, client_sequence)
-            if previous_sequence is not None:
-                raise ValueError('sync sequence identity conflict')
-            if client_sequence <= last_client_sequence:
-                raise ValueError('out-of-order or replayed sync event')
-            server = self._append_idempotent(thread['id'], device_id=device_id, kind=kind, payload=payload, client_event_id=event_id)
-            self._save_receipt(
-                device_id=device_id, event_id=event_id, client_sequence=client_sequence,
-                thread_id=thread['id'], payload_hash=payload_hash, server_event_id=server['event_id'],
-                server_sequence=server['sequence'], epoch=current_epoch,
-            )
-            last_client_sequence = client_sequence
-            accepted.append(event_id)
-        self._save_state(device_id, session_id, current_epoch, last_client_sequence)
+        last_client_sequence, accepted, duplicates = self._commit_parsed(
+            device_id=device_id,
+            session_id=session_id,
+            current_epoch=current_epoch,
+            thread_id=thread['id'],
+            parsed=parsed,
+        )
         server_limit = max(1, min(int(limit), self.MAX_SERVER_EVENTS))
         after = max(0, int(after_sequence))
         server_events = [self._safe_server_event(item) for item in self.continuity.events_for_thread(thread['id'], after_sequence=after, limit=server_limit)]
