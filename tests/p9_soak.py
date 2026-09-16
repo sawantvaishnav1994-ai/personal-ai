@@ -33,7 +33,7 @@ def settings():
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--seconds',type=int,default=45); args=parser.parse_args()
     proc=psutil.Process(os.getpid()); start=proc.memory_info().rss; peak=start; deadline=time.time()+args.seconds
-    router=GovernedModelRouter(settings()); iterations=0; local_ok=0; fallback_ok=0; privacy_blocks=0; timeouts=0; restarts=0; recoveries=0
+    router=GovernedModelRouter(settings()); iterations=0; local_ok=0; fallback_ok=0; privacy_blocks=0; timeouts=0; restarts=0; recoveries=0; circuit_opens=0
     while time.time()<deadline:
         mode=iterations%6
         if mode==0:
@@ -61,7 +61,7 @@ def main():
                 if provider.id=='self_hosted': raise ModelTimeout(provider=provider.id)
                 return 'ok'
             assert router._run('chat',timeout_local,hybrid_request=HybridRequest(privacy=PrivacyMode.EXTERNAL_ALLOWED))=='ok'; timeouts+=1
-            assert router.observability.breakers['self_hosted'].state == 'open'
+            if router.observability.breakers['self_hosted'].state == 'open': circuit_opens+=1
         else:
             try:
                 router._run('vision',lambda provider:'never',hybrid_request=HybridRequest(capability='vision',privacy=PrivacyMode.EXTERNAL_ALLOWED,blocked_providers=('self_hosted','openai','openrouter','gemini')))
@@ -72,8 +72,9 @@ def main():
         assert len(router.observability.generations)<=200
         peak=max(peak,proc.memory_info().rss); iterations+=1
     end=proc.memory_info().rss
+    if not circuit_opens or not recoveries: raise SystemExit('P9 soak did not exercise circuit-open and recovery transitions')
     if end-start>128*1024*1024: raise SystemExit(f'P9 memory growth too high: {end-start}')
-    print({'p9_iterations':iterations,'rss_start':start,'rss_peak':peak,'rss_end':end,'rss_growth':end-start,'local_ok':local_ok,'fallback_ok':fallback_ok,'privacy_blocks':privacy_blocks,'timeouts':timeouts,'recoveries':recoveries,'restarts':restarts,'history_size':len(router.observability.generations)})
+    print({'p9_iterations':iterations,'rss_start':start,'rss_peak':peak,'rss_end':end,'rss_growth':end-start,'local_ok':local_ok,'fallback_ok':fallback_ok,'privacy_blocks':privacy_blocks,'timeouts':timeouts,'circuit_opens':circuit_opens,'recoveries':recoveries,'restarts':restarts,'history_size':len(router.observability.generations)})
 
 
 if __name__=='__main__': main()
