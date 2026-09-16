@@ -13,7 +13,7 @@ Baseline date: 2026-09-15
 | P1 | P4 | Live reminder/push/email/calendar delivery | QUALIFICATION PENDING | deterministic scheduling is not physical/live delivery | owner/live adapter + physical protocol later |
 | P1 | P4 | Natural-language commitment extraction daily-use precision | PARTIAL | fixed deterministic state benchmark is not a real-world language/acceptance corpus | build representative acceptance corpus without making LLM authoritative |
 | P1 | P5 | Media extraction quality | PARTIAL | document/media pipeline quality needs broader fixture evidence | add deterministic extraction-quality qualification when prioritized |
-| P1 | P6 | PersonalOperations governed delegation | RESOLVED FOR REPOSITORY/AUTOMATED IMPLEMENTATION SCOPE | governed delegation composes through existing AgentExecutor/AutomationEngine/W7 with verification/recovery; 44 focused and 1041 full tests green; implementation workflows 6/6 PASS | preserve frozen evidence; autonomous/live/physical/production proof remain separate |
+| P1 | P6 | PersonalOperations governed delegation | RESOLVED FOR REPOSITORY/AUTOMATED IMPLEMENTATION SCOPE | governed delegation composes through existing AgentExecutor/AutomationEngine/W7 with verification/recovery; 44 focused and 1041 full tests green; implementation workflows 6/6 PASS | complete docs exact-head evidence gate; autonomous/live/physical/production proof remain separate |
 | P1 | W6 | Isolated Google connector qualification service | BLOCKED — OWNER-APPROVED PAID INFRASTRUCTURE DEFERRED | owner postponed paid isolated infrastructure | preserve checkpoint |
 | P1 | W6 | Live Google OAuth/account qualification | BLOCKED BY DEFERRED HOSTED INFRASTRUCTURE | real account/consent deliberately not connected | resume only after owner approval |
 | P1 | W7.1 | Durable Operator Transaction Core | RESOLVED FOR AUTOMATED SCOPE | implementation/documentation gates complete | frozen |
@@ -25,9 +25,9 @@ Baseline date: 2026-09-15
 | P1 | W7.5 | Real-world Windows desktop/file qualification | QUALIFICATION PENDING | Windows contracts and packaging are automated evidence only | later real-device Windows qualification |
 | P1 | W7.6 | Verification and recovery | RESOLVED FOR AUTOMATED SCOPE | frozen W7 baseline includes completed recovery implementation/evidence | preserve frozen W7 |
 | P1 | W8 | Model health/failover/observability | RESOLVED FOR REPOSITORY/AUTOMATED SCOPE | implementation and documentation exact-head gates both 6/6 PASS | live-provider/local-model qualification remains separate |
-| P1 | P7 | Multimodal observation/context hardening | RESOLVED FOR IMPLEMENTATION-HEAD AUTOMATED SCOPE | canonical WorldUnderstanding hardened; 40 focused and 1081 full tests green; security/performance/recovery/soak and implementation workflows 6/6 PASS | documentation exact-head gate must pass before repository/automated evidence closure |
-| P1 | P7 | Real sensor/device multimodal qualification | QUALIFICATION PENDING | deterministic simulated adapters and platform workflows are not camera/microphone/location/wearable physical evidence | perform real-device protocol only with owner/device access later |
-| P1 | P8 | Real cross-device/surface qualification | PARTIAL / QUALIFICATION PENDING | registry/continuity foundation does not make every listed surface a complete runtime | begin bounded P8 repository tranche only after P7 evidence-head gate |
+| P1 | P7 | Multimodal observation/context hardening | PARTIAL FOUNDATION | normalized software observation ledger exists but adapter capability truth, provenance/privacy, retention/freshness, adversarial qualification and governed P6 context integration require a bounded repository tranche | audit and harden only after P6 evidence closure |
+| P1 | P7 | Real sensor/device multimodal qualification | QUALIFICATION PENDING | normalized software observations do not prove camera/location/wearable availability | deterministic tests now; physical sensors later |
+| P1 | P8 | Real cross-device/surface qualification | PARTIAL / QUALIFICATION PENDING | registry/continuity foundation does not make every listed surface a complete runtime | qualify implemented surfaces and physical handoff later |
 | P1 | P9 | Live provider / real local model | QUALIFICATION PENDING | W8 automated routing/resilience is not real provider/local runtime evidence | owner-approved bounded live/local protocol later |
 | P1 | P10 | Advanced autonomy activation | BLOCKED/FAIL-CLOSED BY PREREQUISITES | persistent agents exist but P3 permissions/automation/memory/continuity/reliability must qualify first | continue repository validation without activation bypass |
 | P1 | W10 | Signed Windows/Android/iOS distribution | BLOCKED/QUALIFICATION | signing/physical evidence missing | readiness work only until owner signing/device gates |
@@ -63,24 +63,6 @@ Implementation diff: **1 commit, 20 files, +2,730 / -40**. Global W7 schema rema
 
 AUTONOMOUS ACTIVATION VERIFIED = NO. PHYSICAL P3 VERIFIED = NO. LIVE SERVICE VERIFIED = NO. PRODUCTION VERIFIED = NO.
 
-## P7 multimodal world-understanding implementation closure candidate
-
-Starting evidence: `0d2203aa78bfe7dc935ea42887c7ba9cf1e94427`.
-Final implementation: `821e04fe5214b793b8511877a9676cd78e9d86da`.
-Draft PR: #28.
-
-P7 retains the existing `WorldUnderstanding` authority. Repository qualification now resolves the prior foundation gaps: strict payload and secret validation, privacy-before-persistence, stable source-event idempotency, explicit RAW/EXTRACTED/INTERPRETED/DERIVED provenance, truthful adapter capabilities, bounded indexed database retrieval, concurrency/restart behavior, modality-specific freshness, retention/deletion/expiration with descendant invalidation, trusted owner inspection, safe Activities/audit, P3 device trust, P7→P6 context-only integration, and Emergency Stop preservation.
-
-Focused exact-head qualification: **40 passed, 0 failed, 9 warnings in 6.23s**. CI full repository: **1081 passed, 0 failed, 15 warnings in 37.51s**. Reliability independently ran **1081 passed, 0 failed, 15 warnings in 37.75s**, `pip-audit` with no known vulnerabilities, **12 encrypted recovery tests in 0.33s**, deterministic performance qualification, and a P7-inclusive 45-second soak.
-
-Implementation workflows: CI #1100 / `35008003160`; Reliability/Security #263 / `35008003169`; P3 #216 / `35008003085`; Android #262 / `35008003142`; Package #262 / `35008003101`; iOS #244 / `35008003281` — **6/6 PASS** at exact implementation SHA.
-
-Implementation diff: **13 commits, 9 files, +2,128 / -30**. No P8/P9/P10 implementation, Railway/production deployment, OAuth/provider credential, signing, or alternate P7/P6/W7 authority was added.
-
-The remaining P7 gate at this document state is documentation/evidence exact-head validation. Real camera, microphone, location, wearable, physical multimodal, live-service and production evidence remain unavailable and must not be inferred from automated fixtures/simulators/platform workflows.
-
-REAL_CAMERA_VERIFIED = NO. REAL_MICROPHONE_VERIFIED = NO. REAL_LOCATION_VERIFIED = NO. REAL_WEARABLE_VERIFIED = NO. PHYSICAL_MULTIMODAL_VERIFIED = NO. LIVE_SERVICE_VERIFIED = NO. PRODUCTION_VERIFIED = NO.
-
 ## Remaining evidence classes
 
-Automated repository evidence must remain distinct from live service, physical-device, signed-distribution and production evidence. Live reminder delivery remains **NOT VERIFIED**. Physical P3 remains incomplete. Live OAuth/providers, real local model, production durable storage, real Windows/iPhone/Android qualification and signing credentials remain external gates. P8 repository work may begin only after P7 documentation/evidence exact-head workflows pass and P7 is classified repository/automated evidence-closed.
+Automated repository evidence must remain distinct from live service, physical-device, signed-distribution and production evidence. Live reminder delivery remains **NOT VERIFIED**. Physical P3 remains incomplete. Live OAuth/providers, real local model, production durable storage, real Windows/iPhone/Android qualification and signing credentials remain external gates. P7 repository hardening is the next candidate only after the P6 documentation exact-head gate closes and the roadmap/matrices are re-read.
