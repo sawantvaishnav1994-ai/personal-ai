@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import pytest
 
+from models.governed_router import GovernedModelRouter
 from models.hybrid import HybridPolicy, HybridRequest, PrivacyMode, SafeContext
 from models.router import ModelUnavailable, Provider
 
@@ -77,3 +78,9 @@ def test_no_cross_request_policy_state():
 def test_safe_context_truncates_oversized_items():
     ctx=SafeContext.bounded(memory=['x'*5000])
     assert len(ctx.memory[0]) == 2000
+
+
+def test_usage_accounting_accepts_only_safe_numeric_metadata():
+    safe=GovernedModelRouter._safe_usage({'usage':{'prompt_tokens':12,'completion_tokens':5,'total_tokens':17,'cost':0.002,'api_key':'must-not-copy','raw_prompt':'must-not-copy'}})
+    assert safe == {'input_tokens':12,'output_tokens':5,'total_tokens':17,'cost':0.002}
+    assert GovernedModelRouter._safe_usage({'usage':{'prompt_tokens':-1,'cost':'unknown'}}) == {}
