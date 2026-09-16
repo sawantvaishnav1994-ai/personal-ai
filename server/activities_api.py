@@ -7,7 +7,7 @@ from security.request_context import current_trusted_request
 
 
 def activities_router(runtime):
-    """Owner-authorized user-safe Activities view over canonical audit."""
+    """Least-privilege owner-safe Activities view over canonical Audit."""
     router = APIRouter(prefix='/iphone/api/activities', tags=['activities'])
     registry = runtime['device_registry']
     projection = ActivitiesProjection(runtime['memory'])
@@ -18,12 +18,12 @@ def activities_router(runtime):
             raise HTTPException(401, 'Trusted owner session required')
         if not registry.is_active(context.device_id):
             raise HTTPException(401, 'Trusted device is revoked')
-        # Activities can reveal operational metadata; use the existing audit/read
-        # capability when present and otherwise require owner-level chat trust.
-        if hasattr(registry, 'authorize'):
-            allowed = registry.authorize(context.device_id, 'audit:read') or registry.authorize(context.device_id, 'ai:chat')
-            if not allowed:
-                raise HTTPException(403, 'This device is not permitted to read Activities')
+        # Activities is a bounded projection, not generic chat authority. The
+        # device registry already provisions the dedicated activities:read scope.
+        # Never fall back to ai:chat: chat permission must not expose operational
+        # activity metadata.
+        if not hasattr(registry, 'authorize') or not registry.authorize(context.device_id, 'activities:read'):
+            raise HTTPException(403, 'This device is not permitted to read Activities')
         return context
 
     @router.get('')
