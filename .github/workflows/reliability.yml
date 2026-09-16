@@ -19,7 +19,7 @@ jobs:
       - name: P7 performance measurements
         run: pytest -q -s tests/test_p7_performance_recovery.py::test_p7_performance_envelope_is_bounded_and_reported
       - name: P8 focused qualification
-        run: pytest -q tests/test_p8_cross_device_continuity.py tests/test_p8_security_e2e.py tests/test_p8_performance_recovery.py
+        run: pytest -q tests/test_p8_cross_device_continuity.py tests/test_p8_security_e2e.py tests/test_p8_e2e.py tests/test_p8_performance_recovery.py
       - name: P8 performance measurements
         run: pytest -q -s tests/test_p8_performance_recovery.py::test_p8_performance_envelope_is_bounded_and_reported
       - run: pytest -q
