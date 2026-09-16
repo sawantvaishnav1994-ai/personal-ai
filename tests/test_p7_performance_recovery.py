@@ -219,6 +219,7 @@ def test_p7_performance_envelope_is_bounded_and_reported(tmp_path):
     assert measurements[0]['database_bytes'] < measurements[-1]['database_bytes']
     assert all(row['loaded_observations_in_memory'] == 0 for row in measurements)
     print('P7_PERFORMANCE_RESULTS=' + json.dumps(measurements, sort_keys=True), flush=True)
+    test_p7_extended_performance_paths_are_measured_and_bounded(tmp_path)
 
 
 def test_sensor_rejection_classification_covers_nonfinite_malformed_unit_and_out_of_contract(tmp_path):
