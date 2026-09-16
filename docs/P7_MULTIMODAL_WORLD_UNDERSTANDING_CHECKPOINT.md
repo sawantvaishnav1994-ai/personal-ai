@@ -159,6 +159,8 @@ Files are limited to P7 implementation/API/program wiring, the reliability workf
 
 At this documentation commit the final evidence-head workflow rerun is still required. Only after that exact evidence SHA is green may P7 be classified repository-automated evidence complete.
 
+The immutable evidence document records implementation-head workflow facts. Evidence-head workflow results necessarily execute after the evidence commit and are recorded in the final closure report rather than prospectively embedded here.
+
 REAL_CAMERA_VERIFIED = NO
 REAL_MICROPHONE_VERIFIED = NO
 REAL_LOCATION_VERIFIED = NO
