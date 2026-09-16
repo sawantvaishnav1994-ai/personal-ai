@@ -15,6 +15,7 @@ from server.memory_knowledge_inspection import memory_knowledge_inspection_route
 from server.everyday_intelligence_api import everyday_intelligence_router
 from server.personal_operations_api import personal_operations_router
 from server.multimodal_world_api import multimodal_world_router
+from server.continuity_sync_api import continuity_sync_router
 from server.pwa_security import pwa_security_router
 from server.pwa_session_middleware import PwaSessionMiddleware
 from server.session_bound_executor import SessionBoundExecutor
@@ -60,6 +61,7 @@ app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(everyday_intelligence_router(runtime))
 app.include_router(personal_operations_router(runtime))
 app.include_router(multimodal_world_router(runtime))
+app.include_router(continuity_sync_router(runtime))
 app.include_router(owner_product_router(runtime))
 app.include_router(workflow_budget_router(runtime))
 app.include_router(workflow_budget_ui_router())
