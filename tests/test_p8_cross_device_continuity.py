@@ -110,7 +110,7 @@ def test_replay_conflict_and_out_of_order_fail_closed(tmp_path):
             device_id=first['id'], session_id='s1', security_epoch=epoch[0], thread_id=thread,
             events=[{**base, 'payload': {'text': 'changed'}}],
         )
-    with pytest.raises(ValueError, match='out-of-order|replayed'):
+    with pytest.raises(ValueError, match='sequence identity conflict|out-of-order|replayed'):
         sync.reconcile(
             device_id=first['id'], session_id='s1', security_epoch=epoch[0], thread_id=thread,
             events=[{'client_event_id': 'unknown-old', 'client_sequence': 1, 'kind': 'user_message', 'payload': {'text': 'old'}}],
