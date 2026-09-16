@@ -11,6 +11,7 @@ from future_intelligence.everywhere import PersonalAIEverywhere
 from future_intelligence.sovereignty import HybridIntelligenceRouter
 from future_intelligence.autonomy import AdvancedAutonomy
 from future_intelligence.autonomy_runtime import install as install_autonomy_runtime
+from core.p10_approval_continuation import install as install_p10_turn_continuation
 
 install_autonomy_runtime(AdvancedAutonomy)
 
@@ -27,10 +28,15 @@ class FutureIntelligenceProgram:
             except Exception: pass
         runtime['everyday_intelligence']=self.everyday
         self.life_graph=LifeGraph(root/'life-graph.sqlite3'); self.second_brain_life_graph=SecondBrainLifeGraph(self.life_graph,runtime.get('second_brain')); runtime['second_brain_life_graph']=self.second_brain_life_graph
-        self.operations=PersonalOperations(gate=self.gate,executor=runtime.get('executor'),automations=runtime.get('automations'),events=runtime.get('events'),second_brain=runtime.get('second_brain'),memory=runtime.get('memory'),everyday=self.everyday,path=root/'operations.sqlite3')
+        # PersonalOperations coordinates P6 but delegates consequential execution and
+        # approval consumption directly to the already-qualified AgentExecutor.  The
+        # CanonicalTurnRuntime remains the outer logical-turn authority and must not
+        # be recursively re-entered by an operation approval resume.
+        turn_executor=runtime.get('executor'); governed_executor=runtime.get('agent_executor') or turn_executor
+        self.operations=PersonalOperations(gate=self.gate,executor=governed_executor,automations=runtime.get('automations'),events=runtime.get('events'),second_brain=runtime.get('second_brain'),memory=runtime.get('memory'),everyday=self.everyday,path=root/'operations.sqlite3')
         memory=runtime.get('memory')
         self.world=WorldUnderstanding(gate=self.gate,events=runtime.get('events'),path=root/'world.sqlite3',device_registry=runtime.get('device_registry'),audit=getattr(memory,'audit',None) if memory is not None else None)
-        executor=runtime.get('executor'); approvals=getattr(executor,'approvals',None) if executor is not None else None
+        executor=turn_executor; approvals=getattr(governed_executor,'approvals',None) if governed_executor is not None else None
         epoch_provider=approvals.current_security_epoch if approvals is not None and hasattr(approvals,'current_security_epoch') else (lambda:0)
         self.continuity_sync=ContinuitySync(runtime.get('continuity'),gate=self.gate,device_registry=runtime.get('device_registry'),security_epoch_provider=epoch_provider,operations=self.operations,world=self.world,events=runtime.get('events')); runtime['continuity_sync']=self.continuity_sync
         self.everywhere=PersonalAIEverywhere(gate=self.gate,device_registry=runtime.get('device_registry'),continuity=runtime.get('continuity'),continuity_sync=self.continuity_sync)
@@ -40,8 +46,9 @@ class FutureIntelligenceProgram:
         if canonical_stop is None and runtime.get('automations') is not None:
             budgets=getattr(runtime.get('automations'),'budgets',None)
             if budgets is not None and hasattr(budgets,'emergency_stopped'): canonical_stop=budgets.emergency_stopped
-        self.autonomy=AdvancedAutonomy(gate=self.gate,operations=self.operations,events=runtime.get('events'),path=root/'autonomy.sqlite3',executor=executor,automations=runtime.get('automations'),models=runtime.get('models'),memory=runtime.get('second_brain') or runtime.get('memory'),knowledge=runtime.get('knowledge'),world=self.world,continuity=self.continuity_sync,emergency_stop_provider=canonical_stop)
+        self.autonomy=AdvancedAutonomy(gate=self.gate,operations=self.operations,events=runtime.get('events'),path=root/'autonomy.sqlite3',executor=governed_executor,automations=runtime.get('automations'),models=runtime.get('models'),memory=runtime.get('second_brain') or runtime.get('memory'),knowledge=runtime.get('knowledge'),world=self.world,continuity=self.continuity_sync,emergency_stop_provider=canonical_stop)
         runtime['advanced_autonomy']=self.autonomy
+        if turn_executor is not None: install_p10_turn_continuation(type(turn_executor))
 
     def status(self):
         p5_link=self.second_brain_life_graph.status(); p4_status=self.everyday.safe_status()
