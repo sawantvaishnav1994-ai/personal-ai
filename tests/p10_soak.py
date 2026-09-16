@@ -1,9 +1,11 @@
 from __future__ import annotations
-import argparse,json,os,tempfile,time
+import argparse,json,os,sys,tempfile,time
 from pathlib import Path
 try:
  import psutil
 except Exception: psutil=None
+ROOT=Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from future_intelligence.autonomy import AdvancedAutonomy
 from future_intelligence.autonomy_runtime import install
 install(AdvancedAutonomy)
@@ -29,9 +31,11 @@ def main(seconds):
    try: a.create_plan(g['id'],[{'id':'x'},{'id':'x'}])
    except ValueError: blocked+=1
   iterations+=1; peak=max(peak,rss())
- r1=rss(); events=a._db.execute('select count(*) from p10_events').fetchone()[0]; goals=a._db.execute('select count(*) from p10_goals').fetchone()[0]; plans=a._db.execute('select count(*) from p10_plans').fetchone()[0]
- out={'seconds':seconds,'iterations':iterations,'success':success,'expected_blocked':blocked,'cancelled':cancelled,'replans':replans,'uncertain':uncertain,'rss_start':r0,'rss_peak':peak,'rss_end':r1,'rss_growth':max(0,r1-r0),'events_retained':events,'goals':goals,'plans':plans}
- assert iterations>0 and events<=a.MAX_HISTORY and blocked>0 and uncertain>0
+ r1=rss()
+ with a._lock:
+  events=a._db.execute('select count(*) from p10_events').fetchone()[0]; goals=a._db.execute('select count(*) from p10_goals').fetchone()[0]; plans=a._db.execute('select count(*) from p10_plans').fetchone()[0]; integrity=a._db.execute('PRAGMA integrity_check').fetchone()[0]
+ out={'seconds':seconds,'iterations':iterations,'success':success,'expected_blocked':blocked,'cancelled':cancelled,'replans':replans,'uncertain':uncertain,'rss_start':r0,'rss_peak':peak,'rss_end':r1,'rss_growth':max(0,r1-r0),'events_retained':events,'goals':goals,'plans':plans,'sqlite_integrity':integrity}
+ assert iterations>0 and events<=a.MAX_HISTORY and blocked>0 and uncertain>0 and integrity=='ok'
  print('P10_SOAK_RESULTS='+json.dumps(out,sort_keys=True),flush=True)
 if __name__=='__main__':
  p=argparse.ArgumentParser(); p.add_argument('--seconds',type=int,default=45); args=p.parse_args(); main(args.seconds)
