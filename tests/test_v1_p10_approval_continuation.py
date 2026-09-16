@@ -28,38 +28,39 @@ class Executor:
 class Autonomy:
     def __init__(self):
         self.value={'id':'p1','state':'WAITING_APPROVAL','tasks':[{'id':'k1','status':'WAITING_APPROVAL','approval_ref':'a1','operation_id':'o1','requested_tool':'send','objective':'send governed message'}]}
-        self.approved=0;self.denied=0
+        self.approved=0;self.denied=0;self.executed=[];self.estop=False
     def plan(self,*a,**k): return self.value
-    def ready_tasks(self,*a,**k): return []
+    def ready_tasks(self,*a,**k): return [x for x in self.value['tasks'] if x['status']=='READY']
     def approve_task(self,*a,**k):
-        self.approved+=1;self.value['tasks'][0]['status']='COMPLETED';self.value['tasks'][0]['result_ref']='o1';self.value['state']='COMPLETED';return self.value
+        if self.estop: raise PermissionError('Emergency Stop active')
+        self.approved+=1;self.value['tasks'][0]['status']='COMPLETED';self.value['tasks'][0]['result_ref']='o1'
+        self.value['state']='COMPLETED' if all(x['status']=='COMPLETED' for x in self.value['tasks']) else 'RUNNING';return self.value
     def deny_task(self,*a,**k):
         self.denied+=1;self.value['tasks'][0]['status']='CANCELLED';self.value['state']='CANCELLED';return self.value
+    def execute_task(self,plan_id,task_id,**kwargs):
+        if self.estop: raise PermissionError('Emergency Stop blocks consequential work')
+        self.executed.append(task_id);task=next(x for x in self.value['tasks'] if x['id']==task_id);task['status']='COMPLETED';task['result_ref']='op-'+task_id
+        self.value['state']='COMPLETED' if all(x['status']=='COMPLETED' for x in self.value['tasks']) else 'RUNNING';return self.value
 
 
-def bound_runtime(tmp_path):
-    install(CanonicalTurnRuntime);lower=Executor();r=CanonicalTurnRuntime(lower,Continuity(),tmp_path/'turns.sqlite3');a=Autonomy();r.attach_autonomy(a)
+def bound_runtime(tmp_path, *, autonomy=None, db_name='turns.sqlite3'):
+    install(CanonicalTurnRuntime);lower=Executor();r=CanonicalTurnRuntime(lower,Continuity(),tmp_path/db_name);a=autonomy or Autonomy();r.attach_autonomy(a)
     r._insert_started(request_id='r1',owner_id='owner',conversation_id='c1',device_id='d1',session_id='s1',surface='pwa',input_modality='text',privacy_level='normal',risk_level='low',user_text='do governed work')
     r._update('r1','needs_approval',approval_id='a1',p10_goal_id='g1',p10_plan_id='p1')
     return r,lower,a
 
 
 def test_p10_approval_continues_orchestration_not_lower_turn_approval(tmp_path):
-    r,lower,a=bound_runtime(tmp_path)
-    answer=r.approve('a1',owner_id='owner',device_id='d1',session_id='s1')
-    assert a.approved==1 and lower.approve_calls==0
-    assert r.turn('r1')['status']=='completed'
+    r,lower,a=bound_runtime(tmp_path);answer=r.approve('a1',owner_id='owner',device_id='d1',session_id='s1')
+    assert a.approved==1 and lower.approve_calls==0 and r.turn('r1')['status']=='completed'
     assert 'Completed the governed request' in answer
     assert len([k for k in r.continuity.events if k=='r1:assistant'])==1
 
 
 def test_p10_denial_is_durable_and_does_not_call_lower_turn_reject(tmp_path):
-    r,lower,a=bound_runtime(tmp_path)
-    answer=r.reject('a1',owner_id='owner',device_id='d1',session_id='s1')
-    assert a.denied==1 and lower.reject_calls==0
-    assert r.turn('r1')['status']=='cancelled'
-    assert r.turn('r1')['error_code']=='approval_denied'
-    assert 'cancelled' in answer.lower()
+    r,lower,a=bound_runtime(tmp_path);answer=r.reject('a1',owner_id='owner',device_id='d1',session_id='s1')
+    assert a.denied==1 and lower.reject_calls==0 and r.turn('r1')['status']=='cancelled'
+    assert r.turn('r1')['error_code']=='approval_denied' and 'cancelled' in answer.lower()
 
 
 def test_p10_approval_requires_same_device_and_session(tmp_path):
@@ -77,3 +78,26 @@ def test_duplicate_p10_approval_does_not_repeat_orchestration(tmp_path):
     except PermissionError:pass
     else:raise AssertionError('consumed P10 approval must fail closed')
     assert a.approved==1
+
+
+def test_estop_dominates_pending_p10_approval(tmp_path):
+    a=Autonomy();r,lower,a=bound_runtime(tmp_path,autonomy=a);a.estop=True
+    try:r.approve('a1',owner_id='owner',device_id='d1',session_id='s1')
+    except PermissionError as exc: assert 'Emergency Stop' in str(exc)
+    else: raise AssertionError('E-stop must block P10 approval continuation')
+    assert a.approved==0 and lower.approve_calls==0 and r.turn('r1')['status']=='needs_approval'
+
+
+def test_multitask_plan_continues_after_governed_approval(tmp_path):
+    a=Autonomy();a.value['tasks'].extend([{'id':'k2','status':'READY','objective':'second','consequential':False},{'id':'k3','status':'READY','objective':'third','consequential':False}])
+    r,lower,a=bound_runtime(tmp_path,autonomy=a);answer=r.approve('a1',owner_id='owner',device_id='d1',session_id='s1')
+    assert a.approved==1 and a.executed==['k2','k3'] and lower.approve_calls==0
+    assert r.turn('r1')['status']=='completed' and 'op-k2' in answer and 'op-k3' in answer
+
+
+def test_install_is_idempotent_and_does_not_recursively_wrap(tmp_path):
+    approve=CanonicalTurnRuntime.approve;reject=CanonicalTurnRuntime.reject
+    install(CanonicalTurnRuntime);install(CanonicalTurnRuntime)
+    assert CanonicalTurnRuntime.approve is approve and CanonicalTurnRuntime.reject is reject
+    r,lower,_=bound_runtime(tmp_path);r.approve('a1',owner_id='owner',device_id='d1',session_id='s1')
+    assert lower.approve_calls==0
