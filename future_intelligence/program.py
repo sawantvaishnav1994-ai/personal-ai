@@ -47,7 +47,14 @@ class FutureIntelligenceProgram:
             everyday=self.everyday,
             path=root / 'operations.sqlite3',
         )
-        self.world = WorldUnderstanding(gate=self.gate, events=runtime.get('events'), path=root / 'world.sqlite3')
+        memory = runtime.get('memory')
+        self.world = WorldUnderstanding(
+            gate=self.gate,
+            events=runtime.get('events'),
+            path=root / 'world.sqlite3',
+            device_registry=runtime.get('device_registry'),
+            audit=getattr(memory, 'audit', None) if memory is not None else None,
+        )
         self.everywhere = PersonalAIEverywhere(gate=self.gate, device_registry=runtime.get('device_registry'), continuity=runtime.get('continuity'))
         self.hybrid = HybridIntelligenceRouter(gate=self.gate)
         self.autonomy = AdvancedAutonomy(gate=self.gate, operations=self.operations, events=runtime.get('events'), path=root / 'autonomy.sqlite3')

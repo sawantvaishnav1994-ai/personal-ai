@@ -14,9 +14,13 @@ jobs:
       - run: pip install -r requirements.txt pip-audit
       - run: pip-audit -r requirements.txt
       - run: python -m compileall -q app agent automation browser core dashboard desktop devices future_intelligence integrations knowledge memory models security server tools ui updates vision voice packaging
+      - name: P7 focused qualification
+        run: pytest -q tests/test_p7_multimodal_core.py tests/test_p7_security_e2e.py tests/test_p7_performance_recovery.py
+      - name: P7 performance measurements
+        run: pytest -q -s tests/test_p7_performance_recovery.py::test_p7_performance_envelope_is_bounded_and_reported
       - run: pytest -q
       - name: Isolated encrypted backup/restore qualification
-        run: pytest -q tests/test_isolated_recovery.py tests/test_v10_recovery.py
+        run: pytest -q tests/test_isolated_recovery.py tests/test_v10_recovery.py tests/test_p7_performance_recovery.py::test_p7_encrypted_backup_restore_preserves_governed_observation_state
   soak:
     runs-on: ubuntu-latest
     steps:

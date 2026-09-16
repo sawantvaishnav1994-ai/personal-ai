@@ -1,6 +1,6 @@
 # Personal AI — Capability Matrix
 
-Baseline date: 2026-09-15
+Baseline date: 2026-09-16
 
 Statuses distinguish automated software evidence from live service, real-world Windows, physical-device, signed-distribution and production evidence.
 
@@ -17,9 +17,9 @@ Statuses distinguish automated software evidence from live service, real-world W
 | W8 Model Health / Failover / Observability | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED / REPOSITORY-AUTOMATED SCOPE COMPLETE | implementation and documentation exact-head workflows 6/6 PASS | live-provider/local-model/physical/production qualification separate | implementation `42616b2e8faca9b16a5695ac319ea78200e7af74`; docs `bd8bdcfb25aee06ea078408e0a0da477fcfdfbce` |
 | P4 Everyday Personal Intelligence | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | durable reminder/follow-up lifecycle, deterministic due/snooze/reschedule/terminal states, restart-safe surfacing, briefing integration and fixed precision/recall dataset; full repo 997 PASS | live delivery adapters, real push delivery, daily-use acceptance and physical-device proof | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
 | P5 Second Brain / Life Graph | IMPLEMENTED / INTEGRATED / AUTOMATED VALIDATED FOR RETRIEVAL-REMINDER TRANCHE | 100/1,000/5,000 corpus retrieval, current/historical/superseded semantics, temporal queries, permission-safe relationship ranking, deletion/retention/context budget; Life Graph remains read-through | media extraction quality, larger/real long-term corpora and physical P3.5 | implementation `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b` |
-| P6 Autonomous Operations | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED | governed delegation composes through existing AgentExecutor/AutomationEngine/W7; 44 focused PASS; 1041 full PASS; implementation workflows 6/6 PASS | documentation exact-head gate, then autonomous/live/physical/production qualification remain separate | implementation `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`; PR #27 |
-| P7 Multimodal Understanding | IMPLEMENTED FOUNDATION | normalized persistent source-attributed observation ledger | real sensors/device evidence; broader qualification | deterministic hardening/qualification after P6 evidence closure |
-| P8 Personal AI Everywhere | IMPLEMENTED FOUNDATION / PARTIAL SURFACES | shared surface registry + continuity foundation | physical cross-device proof; watch/earbuds/car/home/AR are not complete surfaces | P3.6 physical later |
+| P6 Autonomous Operations | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED | governed delegation composes through existing AgentExecutor/AutomationEngine/W7; 44 focused PASS; 1041 full PASS; implementation workflows 6/6 PASS | autonomous/live/physical/production qualification remain separate | implementation `e674ee80b66ba6c6dbe734ef1825df6a56c19d3f`; PR #27 |
+| P7 Multimodal Understanding | IMPLEMENTED / INTEGRATED / IMPLEMENTATION-HEAD AUTOMATED VALIDATED | hardened single `WorldUnderstanding`; 8 modalities; 44 focused PASS; 1085 full PASS; adversarial/E2E/performance/recovery/soak green; implementation workflows 6/6 PASS | documentation/evidence exact-head gate, then physical sensors/live service/production remain separate | implementation `c0498146a0753b24da611e392181970b227a63d4`; PR #28 |
+| P8 Personal AI Everywhere | IMPLEMENTED FOUNDATION / PARTIAL SURFACES | shared surface registry + continuity foundation | physical cross-device proof; watch/earbuds/car/home/AR are not complete surfaces | do not start until P7 evidence closure |
 | P9 Hybrid Intelligence | AUTOMATED FOUNDATION; W8 RESILIENCE AUTOMATED VALIDATED | privacy/offline routing foundation plus W8 health/failover/observability | live provider and real local runtime unverified | owner/live qualification later |
 | P10 Advanced Autonomous Intelligence | IMPLEMENTED FOUNDATION / FAIL-CLOSED ACTIVATION | persistent agents, allowlists, budgets, Emergency Stop, outcomes/self-evaluation | activation and deeper governed execution depend on P3 prerequisites | validate without bypassing P3 |
 | Computer operator overall | AUTOMATED SCOPE CANDIDATE COMPLETE | W7.1-W7.6 automated authorities integrated | physical/production qualification remain | preserve frozen W7 |
@@ -50,7 +50,7 @@ Implementation exact-head workflows at `14f0d5dbe532d5edf7ec910270d0d9114f5f9d8b
 
 - CI #1065 / `34984377146` — PASS
 - Reliability and Security #247 / `34984377349` — PASS
-- P3 iPhone PWA #204 / `34984377120` — PASS; legitimately triggered by the real `server/cloud_app.py` router mount
+- P3 iPhone PWA #204 / `34984377120` — PASS
 - Android Instrumentation #246 / `34984377166` — PASS
 - Package Validation #246 / `34984377239` — PASS
 - iOS Companion #228 / `34984377173` — PASS; simulator evidence only
@@ -85,8 +85,38 @@ Implementation gate: **6/6 PASS**. Implementation diff from the starting evidenc
 
 AUTONOMOUS ACTIVATION VERIFIED = NO. PHYSICAL P3 VERIFIED = NO. LIVE SERVICE VERIFIED = NO. PRODUCTION VERIFIED = NO.
 
+## P7 multimodal world understanding implementation evidence
+
+Starting evidence SHA: `0d2203aa78bfe7dc935ea42887c7ba9cf1e94427`.
+Branch: `p7/multimodal-world-understanding-qualification-20260915`.
+Draft PR: #28.
+Final implementation SHA: `c0498146a0753b24da611e392181970b227a63d4`.
+
+P7 extends the existing `WorldUnderstanding` authority rather than creating a second multimodal framework. The normalized persistent observation contract covers all eight declared modalities, stable source-event identity, typed timestamps/confidence, privacy/payload classification, provenance/parents, RAW/EXTRACTED/INTERPRETED/DERIVED lineage, freshness, retention, deletion/expiration, simulation truth, safe summaries and device-trust state. Persistent reads are bounded indexed SQLite queries; startup does not load the observation history into a Python list.
+
+The defect-closure tranche correctly classifies invalid sensor data as `invalid_sensor_value`, recursively rejects normalized secret-bearing keys including `credential`/`credentials` before persistence, cascades lineage expiration/deletion so descendants cannot remain fresh governed context after a required source becomes unusable, and fixes the P7→P6 test assumption without exposing P6 internal approval identifiers. P6/W7 retain permission, approval, execution, verification, recovery and Emergency Stop authority.
+
+Focused P7 exact-head result: **44 passed, 0 failed, 9 warnings in 7.21s**. Full repository exact-head direct CI: **1085 passed, 0 failed, 15 warnings in 38.77s**; Reliability independently ran **1085 passed, 0 failed, 15 warnings in 40.46s**. `pip check`, compileall and `pip-audit` PASS; `pip-audit` reported no known vulnerabilities. Encrypted backup/restore and isolated recovery qualification: **12 passed in 0.38s**, including source-expiration lineage persistence across restore.
+
+Performance qualification at 100/600/1,800 observations measured ingest at 0.117669/0.535670/1.585818 s, restart at 0.000501/0.000751/0.001379 s, bounded query at 0.000601/0.001261/0.001638 s, and duplicate handling at 0.000383/0.000376/0.000391 s. Extended measurements: provenance lookup 0.001021 s; concurrent 64-observation ingestion 0.072918 s; delete cascade 0.001240 s; expiration of 40 source/descendant rows 0.003209 s. Historical observations loaded into Python memory at startup remained **0**. Database size grew from 229,376 to 3,129,344 bytes across the volume sweep. These are qualification measurements, not production SLAs.
+
+The final 45-second soak completed **6,610 iterations**, main and P7 SQLite integrity `ok`, 0 pending device requests, 331 P7 events, 465 persisted P7 observations, P7 database size 1,130,496 bytes, and `p7_loaded_observations_in_memory = 0`. Process RSS was 46,886,912 bytes at start, 128,077,824 peak, 128,110,592 end, growth 81,223,680 bytes. This material process-wide RSS retention is not independently attributed to a leak or declared harmless. The P7-specific evidence establishes that historical observation count does not rebuild an unbounded Python ledger; deeper heap attribution remains a separate diagnostic if future evidence warrants it.
+
+Implementation exact-head workflows at `c0498146a0753b24da611e392181970b227a63d4`:
+
+- CI #1140 / `35042584877` — PASS
+- Reliability and Security #273 / `35042584893` — PASS
+- P3 iPhone PWA #225 / `35042584920` — PASS
+- Android Instrumentation #272 / `35042584924` — PASS
+- Package Validation #272 / `35042584939` — PASS
+- iOS Companion #254 / `35042584896` — PASS; simulator evidence only
+
+Implementation gate: **6/6 PASS**. Cumulative implementation/test diff from `0d2203aa78bfe7dc935ea42887c7ba9cf1e94427`: **18 commits, 9 files, +2,387 / -30**. No P6 runtime file, P8/P9/P10 implementation, Railway/production deployment, OAuth/provider credential, signing, or alternate authority was added.
+
+This automated evidence does not establish real camera, microphone, location, wearable, physical multimodal, live-service or production verification. Those evidence classes remain **NO / NOT VERIFIED** until genuine external evidence exists.
+
 ## Frozen authority boundaries
 
-W7 remains the consequential-action/transaction/approval/recovery/Emergency Stop authority. W8 remains the model health/failover/observability authority. Second Brain remains the memory authority. Life Graph remains a read-through/context layer rather than a duplicate memory store. P4 reminders, P5 memory/context and future P7 observations may provide context but do not authorize consequential actions. Deterministic persisted state—not an LLM—decides durable lifecycle/approval/authorization state.
+W7 remains the consequential-action/transaction/approval/recovery/Emergency Stop authority. W8 remains the model health/failover/observability authority. Second Brain remains the memory authority. Life Graph remains a read-through/context layer rather than a duplicate memory store. P4 reminders, P5 memory/context and P7 observations may provide context but do not authorize consequential actions. Deterministic persisted state—not an LLM—decides durable lifecycle/approval/authorization state.
 
-Automated lifecycle and delegation evidence is not live delivery or physical qualification. No physical iPhone push, physical-device reminder, live email/calendar delivery, live consequential action, production durability, signed distribution or physical P3 is claimed by these repository tranches.
+Automated lifecycle, delegation and multimodal evidence is not live delivery or physical qualification. No physical iPhone push, physical sensor observation, live consequential action, production durability, signed distribution or physical P3 is claimed by these repository tranches.
