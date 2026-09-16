@@ -137,7 +137,9 @@ class AdvancedAutonomy:
         for i,item in enumerate(tasks):
             if not isinstance(item,dict): raise ValueError('task must be an object')
             tid=str(item.get('id') or f't{i+1}')[:80]
-            if tid in ids: raise ValueError('duplicate task id'); ids.add(tid)
+            if tid in ids:
+                raise ValueError('duplicate task id')
+            ids.add(tid)
             depth=max(1,int(item.get('depth',1)))
             if depth>self.MAX_DEPTH: raise ValueError('decomposition depth exceeded')
             deps=list(dict.fromkeys(str(x)[:80] for x in item.get('dependencies',[])))[:self.MAX_TASKS]
