@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from devices.continuity_sync import ContinuitySync
 from future_intelligence.gates import TrustGate
 from future_intelligence.everyday import EverydayIntelligence
 from future_intelligence.deep_brain import LifeGraph
@@ -55,9 +56,36 @@ class FutureIntelligenceProgram:
             device_registry=runtime.get('device_registry'),
             audit=getattr(memory, 'audit', None) if memory is not None else None,
         )
-        self.everywhere = PersonalAIEverywhere(gate=self.gate, device_registry=runtime.get('device_registry'), continuity=runtime.get('continuity'))
+        executor = runtime.get('executor')
+        approvals = getattr(executor, 'approvals', None) if executor is not None else None
+        epoch_provider = (
+            approvals.current_security_epoch
+            if approvals is not None and hasattr(approvals, 'current_security_epoch')
+            else (lambda: 0)
+        )
+        self.continuity_sync = ContinuitySync(
+            runtime.get('continuity'),
+            gate=self.gate,
+            device_registry=runtime.get('device_registry'),
+            security_epoch_provider=epoch_provider,
+            operations=self.operations,
+            world=self.world,
+            events=runtime.get('events'),
+        )
+        runtime['continuity_sync'] = self.continuity_sync
+        self.everywhere = PersonalAIEverywhere(
+            gate=self.gate,
+            device_registry=runtime.get('device_registry'),
+            continuity=runtime.get('continuity'),
+            continuity_sync=self.continuity_sync,
+        )
         self.hybrid = HybridIntelligenceRouter(gate=self.gate)
-        self.autonomy = AdvancedAutonomy(gate=self.gate, operations=self.operations, events=runtime.get('events'), path=root / 'autonomy.sqlite3')
+        self.autonomy = AdvancedAutonomy(
+            gate=self.gate,
+            operations=self.operations,
+            events=runtime.get('events'),
+            path=root / 'autonomy.sqlite3',
+        )
 
     def status(self):
         p5_link = self.second_brain_life_graph.status()
