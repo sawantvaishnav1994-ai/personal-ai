@@ -4,7 +4,7 @@ import random
 import threading
 import time
 
-from models.hybrid import HybridPolicy, HybridRequest, PrivacyMode, SafeContext
+from models.hybrid import HybridPolicy, HybridRequest, PrivacyMode, SafeContext, execute_hybrid_chat
 from models.resilience import ModelObservability
 from models.router import (
     InvalidModelResponse, ModelAuthenticationError, ModelCreditsExhausted, ModelError,
@@ -118,25 +118,6 @@ class GovernedModelRouter(ModelRouter):
         self._usage_local.value=self._safe_usage(payload)
         return content.strip()
 
-    def hybrid_chat(self, prompt: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
-        if request is None:
-            try: privacy = PrivacyMode(self.owner_privacy)
-            except ValueError: privacy = PrivacyMode.LOCAL_PREFERRED
-            request = HybridRequest(privacy=privacy, allowed_providers=self.owner_allowed, blocked_providers=tuple(self.disabled))
-        HybridPolicy.validate_request(request)
-        context = context or SafeContext()
-        def call(provider):
-            safe = HybridPolicy.context_for_provider(context, provider)
-            sections=[]
-            if safe.memory: sections.append('Authorized memory context:\n'+'\n'.join(safe.memory))
-            if safe.knowledge: sections.append('Authorized knowledge context:\n'+'\n'.join(safe.knowledge))
-            if safe.world: sections.append('Authorized derived world context:\n'+'\n'.join(safe.world))
-            if safe.references: sections.append('Authorized references:\n'+'\n'.join(safe.references))
-            request_text=('\n\n'.join(sections)+'\n\n' if sections else '')+prompt
-            messages=[{'role':'system','content':system},{'role':'user','content':request_text}]
-            return self._chat_call(provider,messages,.3)
-        return self._run('chat',call,sensitivity=request.sensitivity,hybrid_request=request)
-
     def health_status(self, *, probe: bool = False) -> dict:
         if probe:
             for provider in self.providers.values():
@@ -150,3 +131,6 @@ class GovernedModelRouter(ModelRouter):
 
     def status(self, *, probe: bool = False) -> dict:
         return self.health_status(probe=probe)
+
+    def hybrid_chat(self, prompt: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
+        return execute_hybrid_chat(self, prompt, request=request, context=context, system=system)
