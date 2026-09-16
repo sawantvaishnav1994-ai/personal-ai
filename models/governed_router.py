@@ -132,5 +132,5 @@ class GovernedModelRouter(ModelRouter):
     def status(self, *, probe: bool = False) -> dict:
         return self.health_status(probe=probe)
 
-    def hybrid_chat(self, prompt: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
-        return execute_hybrid_chat(self, prompt, request=request, context=context, system=system)
+    def hybrid_chat(self, text: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
+        return execute_hybrid_chat(self, text, request=request, context=context, system=system)
