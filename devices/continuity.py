@@ -127,9 +127,6 @@ class ContinuityService:
                 'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
                 (device_id,),
             ).fetchone()
-            # The event sequence is global while a device cursor is thread-local in
-            # meaning. Reset when switching threads so an older conversation can
-            # never be hidden behind a newer thread's higher sequence cursor.
             last_event_id = int(current['last_event_id']) if current and current['active_thread_id'] == thread_id else 0
             con.execute(
                 '''INSERT INTO continuity_device_state(device_id,active_thread_id,last_event_id,updated_at)
@@ -143,23 +140,67 @@ class ContinuityService:
         self._emit('continuity.active.changed', device_id=device_id, thread_id=thread_id)
         return {'device_id': device_id, 'thread_id': thread_id}
 
-    def append(self, thread_id: str, *, device_id: str | None, kind: str, payload: dict):
+    def append(
+        self,
+        thread_id: str,
+        *,
+        device_id: str | None,
+        kind: str,
+        payload: dict,
+        event_id: str | None = None,
+    ):
+        """Append an event exactly once when a stable event_id is supplied.
+
+        A retry with the same event_id and identical content returns the existing
+        sequence without re-emitting the event. Reusing an event_id for different
+        content fails closed.
+        """
         thread = self.thread(thread_id)
         if not thread or thread.get('closed_at'):
             raise KeyError('active continuity thread not found')
-        event_id = str(uuid.uuid4())
+        stable_event_id = str(event_id or uuid.uuid4())
+        event_kind = str(kind)
+        payload_json = json.dumps(payload or {}, default=str, sort_keys=True)
         stamp = now()
+        inserted = False
         with self.lock, self._con() as con:
             cur = con.execute(
-                'INSERT INTO continuity_events(event_id,thread_id,device_id,kind,payload_json,created_at) VALUES(?,?,?,?,?,?)',
-                (event_id, thread_id, device_id, str(kind), json.dumps(payload or {}, default=str), stamp),
+                '''INSERT OR IGNORE INTO continuity_events(
+                    event_id,thread_id,device_id,kind,payload_json,created_at
+                ) VALUES(?,?,?,?,?,?)''',
+                (stable_event_id, thread_id, device_id, event_kind, payload_json, stamp),
             )
-            sequence = int(cur.lastrowid)
-            con.execute('UPDATE continuity_threads SET updated_at=? WHERE id=?', (stamp, thread_id))
-        if device_id:
-            self.set_active(device_id, thread_id)
-        self._emit('continuity.event', thread_id=thread_id, device_id=device_id, kind=kind, sequence=sequence)
-        return {'event_id': event_id, 'sequence': sequence, 'thread_id': thread_id}
+            if cur.rowcount == 1:
+                inserted = True
+                sequence = int(cur.lastrowid)
+                con.execute('UPDATE continuity_threads SET updated_at=? WHERE id=?', (stamp, thread_id))
+            else:
+                existing = con.execute(
+                    '''SELECT id,thread_id,device_id,kind,payload_json FROM continuity_events
+                       WHERE event_id=?''',
+                    (stable_event_id,),
+                ).fetchone()
+                if existing is None:
+                    raise RuntimeError('continuity idempotency lookup failed')
+                same = (
+                    str(existing['thread_id']) == str(thread_id)
+                    and (existing['device_id'] or None) == (device_id or None)
+                    and str(existing['kind']) == event_kind
+                    and str(existing['payload_json']) == payload_json
+                )
+                if not same:
+                    raise ValueError('continuity event_id is already bound to different content')
+                sequence = int(existing['id'])
+        if inserted:
+            if device_id:
+                self.set_active(device_id, thread_id)
+            self._emit('continuity.event', thread_id=thread_id, device_id=device_id, kind=event_kind, sequence=sequence)
+        return {
+            'event_id': stable_event_id,
+            'sequence': sequence,
+            'thread_id': thread_id,
+            'duplicate': not inserted,
+        }
 
     def update_context(self, thread_id: str, patch: dict, *, replace: bool = False):
         thread = self.thread(thread_id)
@@ -235,6 +276,28 @@ class ContinuityService:
             data['sequence'] = data.pop('id')
             output.append(data)
         return output
+
+    def conversation_history(self, thread_id: str, *, limit: int = 16):
+        """Return bounded model history from the canonical continuity ledger."""
+        bounded = max(1, min(int(limit), 64))
+        with self.lock, self._con() as con:
+            rows = con.execute(
+                '''SELECT kind,payload_json FROM continuity_events
+                   WHERE thread_id=? AND kind IN ('user_message','assistant_message')
+                   ORDER BY id DESC LIMIT ?''',
+                (thread_id, bounded),
+            ).fetchall()
+        history = []
+        for row in reversed(rows):
+            payload = json.loads(row['payload_json'] or '{}')
+            text = str(payload.get('text') or '').strip()
+            if not text:
+                continue
+            history.append({
+                'role': 'user' if row['kind'] == 'user_message' else 'assistant',
+                'content': text,
+            })
+        return history
 
     def sync(self, device_id: str, *, limit: int = 200):
         thread = self.active_for_device(device_id)

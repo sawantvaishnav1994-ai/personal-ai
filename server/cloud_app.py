@@ -53,7 +53,7 @@ app.add_middleware(PwaSessionMiddleware, sessions=runtime['pwa_sessions'], devic
 app.add_middleware(WorkflowBudgetUiMiddleware)
 app.add_middleware(ConnectorUiMiddleware)
 pwa_runtime = dict(runtime)
-pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'])
+pwa_runtime['executor'] = SessionBoundExecutor(runtime['executor'], continuity=runtime['continuity'], surface='iphone-pwa')
 app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(pwa_security_router(runtime))
 app.include_router(cloud_security_router(runtime))
