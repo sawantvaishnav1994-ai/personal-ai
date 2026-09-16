@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
@@ -58,7 +58,6 @@ class SafeContext:
         return cls(clean(memory), clean(knowledge), clean(world), clean(references))
 
     def external_projection(self) -> 'SafeContext':
-        # External providers receive only explicit safe references/derived world context.
         return SafeContext(world=self.world, references=self.references)
 
 
@@ -105,5 +104,41 @@ class HybridPolicy:
 
     @staticmethod
     def model_output_has_authority(_: object) -> bool:
-        # Deliberately immutable invariant: model output is untrusted computational output.
         return False
+
+
+def execute_hybrid_chat(router, prompt: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
+    """Compose a governed Hybrid-AI chat through the canonical W8 router.
+
+    This adapter owns no routing, health, approval, permission, memory, or execution authority.
+    It only prepares policy-filtered context and invokes the existing governed router.
+    """
+    if request is None:
+        try:
+            privacy = PrivacyMode(router.owner_privacy)
+        except ValueError:
+            privacy = PrivacyMode.LOCAL_PREFERRED
+        request = HybridRequest(
+            privacy=privacy,
+            allowed_providers=router.owner_allowed,
+            blocked_providers=tuple(router.disabled),
+        )
+    HybridPolicy.validate_request(request)
+    context = context or SafeContext()
+
+    def call(provider):
+        safe = HybridPolicy.context_for_provider(context, provider)
+        sections = []
+        if safe.memory:
+            sections.append('Authorized memory context:\n' + '\n'.join(safe.memory))
+        if safe.knowledge:
+            sections.append('Authorized knowledge context:\n' + '\n'.join(safe.knowledge))
+        if safe.world:
+            sections.append('Authorized derived world context:\n' + '\n'.join(safe.world))
+        if safe.references:
+            sections.append('Authorized references:\n' + '\n'.join(safe.references))
+        request_text = ('\n\n'.join(sections) + '\n\n' if sections else '') + prompt
+        messages = [{'role': 'system', 'content': system}, {'role': 'user', 'content': request_text}]
+        return router._chat_call(provider, messages, .3)
+
+    return router._run('chat', call, sensitivity=request.sensitivity, hybrid_request=request)
