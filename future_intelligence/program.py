@@ -10,6 +10,9 @@ from future_intelligence.multimodal import WorldUnderstanding
 from future_intelligence.everywhere import PersonalAIEverywhere
 from future_intelligence.sovereignty import HybridIntelligenceRouter
 from future_intelligence.autonomy import AdvancedAutonomy
+from future_intelligence.autonomy_runtime import install as install_autonomy_runtime
+
+install_autonomy_runtime(AdvancedAutonomy)
 
 
 class FutureIntelligenceProgram:
