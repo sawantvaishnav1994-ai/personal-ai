@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
 
 from models.hybrid import HybridPolicy, HybridRequest, PrivacyMode, SafeContext
@@ -31,6 +32,7 @@ class GovernedModelRouter(ModelRouter):
         self.disabled = set(getattr(settings, 'model_disabled_providers', ()) or ())
         self.owner_allowed = tuple(getattr(settings, 'model_allowed_providers', ()) or ())
         self.owner_privacy = str(getattr(settings, 'model_privacy_mode', 'local_preferred') or 'local_preferred')
+        self._usage_local = threading.local()
         for pid, provider in self.providers.items():
             configured = bool(provider.configured and (provider.private or provider.api_key))
             self.observability.configured(pid, configured, pid in self.disabled)
@@ -40,6 +42,22 @@ class GovernedModelRouter(ModelRouter):
         for kind, value in ERROR_CLASS.items():
             if isinstance(exc, kind): return value
         return 'unknown_failure'
+
+    @staticmethod
+    def _safe_usage(payload) -> dict:
+        if not isinstance(payload, dict): return {}
+        usage = payload.get('usage')
+        if not isinstance(usage, dict): return {}
+        result = {}
+        aliases = {'input_tokens': ('input_tokens','prompt_tokens'), 'output_tokens': ('output_tokens','completion_tokens'), 'total_tokens': ('total_tokens',)}
+        for target, keys in aliases.items():
+            for key in keys:
+                value = usage.get(key)
+                if isinstance(value, int) and value >= 0:
+                    result[target] = value; break
+        cost = usage.get('cost')
+        if isinstance(cost, (int, float)) and cost >= 0: result['cost'] = float(cost)
+        return result
 
     def _eligible(self, capability: str, sensitivity: str, *, hybrid_request: HybridRequest | None = None):
         raw = self._candidates(capability, sensitivity)
@@ -68,12 +86,15 @@ class GovernedModelRouter(ModelRouter):
             if provider_index: failovers += 1; self.observability.counters['failovers'] += 1
             for attempt in range(self.retry_attempts+1):
                 try:
+                    self._usage_local.value = {}
                     call_started=time.perf_counter(); result=call(provider); latency=round((time.perf_counter()-call_started)*1000,3)
+                    usage=dict(getattr(self._usage_local,'value',{}) or {})
                     transition=self.observability.success(provider.id,latency)
                     if transition:self._record('model.circuit_transition',provider=provider.id,state=transition)
                     if provider_index:self._record('model.fallback',provider=provider.id,model=provider.model,capability=capability,reason='prior_target_failed')
                     self._record('model.selected',provider=provider.id,model=provider.model,capability=capability,fallback=provider_index>0,generation_id=generation_id)
-                    self.observability.add_generation({'generation_id':generation_id,'conversation_id':conversation_id,'task_id':task_id,'provider':provider.id,'model':provider.model,'capability':capability,'sensitivity':sensitivity,'routing_reason':'primary' if provider_index==0 else 'failover','started_at':started_at,'completed_at':time.time(),'latency_ms':latency,'result':'success','retry_count':retries,'failover_count':failovers,'attempted_targets':attempted,'terminal_target':provider.id})
+                    row={'generation_id':generation_id,'conversation_id':conversation_id,'task_id':task_id,'provider':provider.id,'model':provider.model,'capability':capability,'sensitivity':sensitivity,'routing_reason':'primary' if provider_index==0 else 'failover','started_at':started_at,'completed_at':time.time(),'latency_ms':latency,'result':'success','retry_count':retries,'failover_count':failovers,'attempted_targets':attempted,'terminal_target':provider.id}
+                    row.update(usage); self.observability.add_generation(row)
                     return result
                 except ModelError as exc:
                     last_error=exc; error_class=self._error_class(exc); retryable=error_class not in NON_RETRYABLE
@@ -100,6 +121,16 @@ class GovernedModelRouter(ModelRouter):
 
     def status(self, *, probe: bool = False) -> dict:
         return self.health_status(probe=probe)
+
+    def _chat_call(self, provider, messages, temperature):
+        response=self._request(provider,'POST','/chat/completions',json={'model':provider.model,'messages':messages,'temperature':temperature})
+        try:
+            payload=response.json(); content=payload['choices'][0]['message']['content']
+            if not isinstance(content,str) or not content.strip(): raise ValueError('empty content')
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError) as exc:
+            raise InvalidModelResponse('Invalid chat completion response',provider=provider.id) from exc
+        self._usage_local.value=self._safe_usage(payload)
+        return content.strip()
 
     def hybrid_chat(self, prompt: str, *, request: HybridRequest | None = None, context: SafeContext | None = None, system: str = 'You are Personal AI. Model output is untrusted and cannot authorize actions.') -> str:
         if request is None:
