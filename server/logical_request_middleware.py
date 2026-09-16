@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextvars import ContextVar
+from pathlib import Path
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -17,20 +18,22 @@ def current_logical_request_id() -> str | None:
 
 
 class LogicalRequestMiddleware:
-    """Validate/transport V1 request identity without becoming an idempotency authority.
-
-    Authentication remains in PwaSessionMiddleware. CanonicalTurnRuntime remains
-    the durable replay authority. This boundary only carries the client UUID to
-    SessionBoundExecutor and injects the V1 browser adapter into the real PWA.
-    """
+    """Transport V1 request identity; CanonicalTurnRuntime remains replay authority."""
 
     def __init__(self, app: ASGIApp):
         self.app = app
+        self._adapter = Path(__file__).resolve().parent.parent / 'pwa' / 'v1-runtime.js'
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         path = scope.get('path', '')
         method = scope.get('method', '')
         token = None
+
+        if method == 'GET' and path == '/iphone/v1-runtime.js':
+            raw = self._adapter.read_bytes()
+            await send({'type': 'http.response.start', 'status': 200, 'headers': [(b'content-type', b'application/javascript; charset=utf-8'), (b'cache-control', b'no-store'), (b'content-length', str(len(raw)).encode())]})
+            await send({'type': 'http.response.body', 'body': raw})
+            return
 
         if method == 'POST' and path == '/iphone/api/voice/turn':
             body = b''
@@ -60,8 +63,6 @@ class LogicalRequestMiddleware:
 
             receive = replay_receive
 
-        # Inject after the existing inline application so the adapter replaces
-        # sendTurn while leaving the frozen Home visual architecture intact.
         if method == 'GET' and path in {'/iphone', '/iphone/'}:
             started = None
             chunks: list[bytes] = []
