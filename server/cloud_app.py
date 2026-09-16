@@ -12,6 +12,7 @@ from server.iphone_pwa import iphone_pwa_router
 from server.owner_product import owner_product_router
 from server.capability_console import capability_console_router
 from server.memory_knowledge_inspection import memory_knowledge_inspection_router
+from server.memory_governance_api import memory_governance_router
 from server.everyday_intelligence_api import everyday_intelligence_router
 from server.personal_operations_api import personal_operations_router
 from server.multimodal_world_api import multimodal_world_router
@@ -93,6 +94,7 @@ app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(pwa_security_router(runtime))
 app.include_router(cloud_security_router(runtime))
 app.include_router(memory_knowledge_inspection_router(runtime))
+app.include_router(memory_governance_router(runtime))
 app.include_router(everyday_intelligence_router(runtime))
 app.include_router(personal_operations_router(runtime))
 app.include_router(multimodal_world_router(runtime))

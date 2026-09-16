@@ -20,6 +20,7 @@ from future_intelligence.program import FutureIntelligenceProgram
 from integrations.plugins import PluginManifestRegistry
 from integrations.runtime import build_integrations
 from knowledge.store import KnowledgeStore
+from memory.governance import GovernedMemory
 from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from memory.vector_store import VectorStore
@@ -46,7 +47,12 @@ def build_runtime():
     memory = MemoryStore(settings.data_dir / 'assistant.sqlite3')
     models = GovernedModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
-    second_brain = SecondBrain(memory, models, vector)
+    memory_engine = SecondBrain(memory, models, vector)
+    second_brain = GovernedMemory(
+        memory_engine,
+        settings.data_dir / 'memory-candidates.sqlite3',
+        events=events,
+    )
     knowledge = KnowledgeStore(
         settings.data_dir / 'knowledge.sqlite3',
         settings.data_dir / 'knowledge' / 'objects',
