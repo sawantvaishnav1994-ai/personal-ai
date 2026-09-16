@@ -72,6 +72,15 @@ class GovernedModelRouter(ModelRouter):
             eligible.append(provider)
         return eligible
 
+    def eligible_providers(self, capability: str, sensitivity: str = 'internal', *, hybrid_request: HybridRequest | None = None):
+        """Public non-executing view of canonical P9/W8 eligibility.
+
+        Compatibility/projection layers may inspect candidate metadata through this
+        method without coupling to private routing internals or duplicating policy.
+        It never returns credentials and never grants execution authority.
+        """
+        return tuple(self._eligible(str(capability), str(sensitivity), hybrid_request=hybrid_request))
+
     def _run(self, capability: str, call, *, sensitivity: str = 'internal', conversation_id=None, task_id=None, hybrid_request: HybridRequest | None = None):
         generation_id=self.observability.generation_id(); started_at=time.time()
         candidates=self._eligible(capability,sensitivity,hybrid_request=hybrid_request)
