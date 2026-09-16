@@ -34,7 +34,8 @@ class FutureIntelligenceProgram:
         epoch_provider=approvals.current_security_epoch if approvals is not None and hasattr(approvals,'current_security_epoch') else (lambda:0)
         self.continuity_sync=ContinuitySync(runtime.get('continuity'),gate=self.gate,device_registry=runtime.get('device_registry'),security_epoch_provider=epoch_provider,operations=self.operations,world=self.world,events=runtime.get('events')); runtime['continuity_sync']=self.continuity_sync
         self.everywhere=PersonalAIEverywhere(gate=self.gate,device_registry=runtime.get('device_registry'),continuity=runtime.get('continuity'),continuity_sync=self.continuity_sync)
-        self.hybrid=HybridIntelligenceRouter(gate=self.gate)
+        # P9 compatibility surface delegates to the canonical P9+W8 router.
+        self.hybrid=HybridIntelligenceRouter(gate=self.gate,canonical_router=runtime.get('models'))
         canonical_stop=runtime.get('emergency_stop_provider')
         if canonical_stop is None and runtime.get('automations') is not None:
             budgets=getattr(runtime.get('automations'),'budgets',None)
@@ -44,4 +45,4 @@ class FutureIntelligenceProgram:
 
     def status(self):
         p5_link=self.second_brain_life_graph.status(); p4_status=self.everyday.safe_status()
-        return {'p4':{'implemented':True,'activation':'safe-now','lifecycle':p4_status},'p5':{'implemented':True,'activation':'safe-now','second_brain_linked':p5_link['linked'],'linked_memory_nodes':p5_link['memory_nodes']},'p6':{'implemented':True,'activation':self.gate.decision('p6').reason,'operations':self.operations.safe_status()},'p7':{'implemented':True,'activation':self.gate.decision('p7').reason},'p8':{'implemented':True,'activation':self.gate.decision('p8').reason},'p9':{'implemented':True,'activation':self.gate.decision('p9').reason},'p10':{'implemented':True,'activation':self.gate.decision('p10').reason,'autonomy':self.autonomy.status()}}
+        return {'p4':{'implemented':True,'activation':'safe-now','lifecycle':p4_status},'p5':{'implemented':True,'activation':'safe-now','second_brain_linked':p5_link['linked'],'linked_memory_nodes':p5_link['memory_nodes']},'p6':{'implemented':True,'activation':self.gate.decision('p6').reason,'operations':self.operations.safe_status()},'p7':{'implemented':True,'activation':self.gate.decision('p7').reason},'p8':{'implemented':True,'activation':self.gate.decision('p8').reason},'p9':{'implemented':True,'activation':self.gate.decision('p9').reason,'canonical_router':self.hybrid.authoritative},'p10':{'implemented':True,'activation':self.gate.decision('p10').reason,'autonomy':self.autonomy.status()}}
