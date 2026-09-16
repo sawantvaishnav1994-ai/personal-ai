@@ -48,157 +48,57 @@ def build_runtime():
     models = GovernedModelRouter(settings, events=events, audit=memory.audit)
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     memory_engine = SecondBrain(memory, models, vector)
-    second_brain = GovernedMemory(
-        memory_engine,
-        settings.data_dir / 'memory-candidates.sqlite3',
-        events=events,
-    )
-    knowledge = KnowledgeStore(
-        settings.data_dir / 'knowledge.sqlite3',
-        settings.data_dir / 'knowledge' / 'objects',
-    )
-
+    second_brain = GovernedMemory(memory_engine, settings.data_dir / 'memory-candidates.sqlite3', events=events)
+    knowledge = KnowledgeStore(settings.data_dir / 'knowledge.sqlite3', settings.data_dir / 'knowledge' / 'objects')
     device_registry = DeviceRegistry(settings.data_dir / 'devices.sqlite3')
     owner_access = OwnerAccessStore(settings.data_dir / 'owner-access.sqlite3')
     device_gateway = DeviceGateway(device_registry, events)
-    continuity = ContinuityService(
-        settings.data_dir / 'continuity.sqlite3',
-        events=events,
-        second_brain=second_brain,
-    )
+    continuity = ContinuityService(settings.data_dir / 'continuity.sqlite3', events=events, second_brain=second_brain)
     primary_thread = continuity.latest_thread()
     if primary_thread is None:
-        primary_thread_id = continuity.create_thread(
-            'Primary Personal AI Context',
-            device_id='desktop',
-            context={'surface': 'desktop', 'topic': 'current work'},
-        )
+        primary_thread_id = continuity.create_thread('Primary Personal AI Context', device_id='desktop', context={'surface': 'desktop', 'topic': 'current work'})
     else:
         primary_thread_id = primary_thread['id']
         continuity.set_active('desktop', primary_thread_id)
-
-    proactive = AttentionRelevanceEngine(
-        settings.data_dir / 'proactive.sqlite3',
-        events=events,
-        second_brain=second_brain,
-        enabled=settings.proactive_enabled,
-        interruptions_per_hour=settings.proactive_interruptions_per_hour,
-        default_cooldown_seconds=settings.proactive_default_cooldown_seconds,
-    )
-
+    proactive = AttentionRelevanceEngine(settings.data_dir / 'proactive.sqlite3', events=events, second_brain=second_brain, enabled=settings.proactive_enabled, interruptions_per_hour=settings.proactive_interruptions_per_hour, default_cooldown_seconds=settings.proactive_default_cooldown_seconds)
     vault = SecretVault(settings.data_dir / 'vault.json', settings.vault_password or None)
     integrations, adapters, oauth, oauth_providers = build_integrations(settings, vault)
     plugins = PluginManifestRegistry(settings.data_dir / 'plugins')
     plugins.load()
     apns = APNsProvider(settings, device_registry, events)
-
     tools = ToolRegistry(settings)
     tools.set_autonomy_mode(str(preferences.get('autonomy_mode', settings.autonomy_mode)))
-    agent_executor = AgentExecutor(
-        models=models,
-        tools=tools,
-        memory=memory,
-        events=events,
-        second_brain=second_brain,
-        knowledge=knowledge,
-        telemetry=telemetry,
-    )
-    # V1 canonical orchestration path. It deliberately delegates intelligence,
-    # permissions, approval, tool execution, verification and recovery to the
-    # existing qualified authorities underneath AgentExecutor.
-    executor = CanonicalTurnRuntime(
-        agent_executor,
-        continuity,
-        settings.data_dir / 'turn-runtime.sqlite3',
-        events=events,
-    )
+    agent_executor = AgentExecutor(models=models, tools=tools, memory=memory, events=events, second_brain=second_brain, knowledge=knowledge, telemetry=telemetry)
+    executor = CanonicalTurnRuntime(agent_executor, continuity, settings.data_dir / 'turn-runtime.sqlite3', events=events)
 
     def context_provider():
         latest = continuity.latest_thread()
-        return {
-            'devices': device_registry.list(),
-            'integrations': integrations.list(),
-            'memory_count': len(second_brain.graph().get('nodes', [])),
-            'continuity': latest or {},
-            'focus_mode': bool(preferences.get('focus_mode', False)),
-        }
+        return {'devices': device_registry.list(), 'integrations': integrations.list(), 'memory_count': len(second_brain.graph().get('nodes', [])), 'continuity': latest or {}, 'focus_mode': bool(preferences.get('focus_mode', False))}
 
-    automations = AutomationEngine(
-        settings.data_dir / 'automations.sqlite3',
-        executor=executor,
-        events=events,
-        context_provider=context_provider,
-        default_timeout_seconds=settings.workflow_default_timeout_seconds,
-        default_retries=settings.workflow_default_retries,
-    )
-    capability_objects = register_builtin_tools(
-        tools,
-        memory,
-        settings,
-        models=models,
-        automation_engine=automations,
-        apns=apns,
-        second_brain=second_brain,
-        events=events,
-        proactive_engine=proactive,
-        continuity_service=continuity,
-        integration_adapters=adapters,
-    )
-
-    # Voice now uses the exact same canonical turn runtime as text/Home/device
-    # surfaces. STT/TTS remain replaceable transport providers, never authority.
+    automations = AutomationEngine(settings.data_dir / 'automations.sqlite3', executor=executor, events=events, context_provider=context_provider, default_timeout_seconds=settings.workflow_default_timeout_seconds, default_retries=settings.workflow_default_retries)
+    capability_objects = register_builtin_tools(tools, memory, settings, models=models, automation_engine=automations, apns=apns, second_brain=second_brain, events=events, proactive_engine=proactive, continuity_service=continuity, integration_adapters=adapters)
     voice = RealtimeVoiceSession(models, executor, events)
-    voice_qualification = VoiceQualificationRecorder(
-        settings.data_dir / 'voice-qualification.sqlite3',
-        events=events,
-    )
-    p3_qualification = P3QualificationProgram(
-        settings.data_dir / 'p3-qualification.sqlite3',
-    )
-    wake_phrase = WakePhraseGate(
-        events,
-        phrases=(str(preferences.get('wake_phrase', 'Hey Personal')),),
-    )
+    voice_qualification = VoiceQualificationRecorder(settings.data_dir / 'voice-qualification.sqlite3', events=events)
+    p3_qualification = P3QualificationProgram(settings.data_dir / 'p3-qualification.sqlite3')
+    wake_phrase = WakePhraseGate(events, phrases=(str(preferences.get('wake_phrase', 'Hey Personal')),))
     events.subscribe('voice.transcript', lambda event: wake_phrase.accept(event.get('text', '')))
     events.subscribe('state', lambda event: telemetry.increment(f"state.{event.get('state', 'unknown')}"))
     events.subscribe('voice.reply', lambda event: telemetry.increment('voice.replies'))
 
     runtime = {
-        'events': events,
-        'memory': memory,
-        'models': models,
-        'second_brain': second_brain,
-        'knowledge': knowledge,
-        'vector_store': vector,
-        'device_registry': device_registry,
-        'owner_access': owner_access,
-        'device_gateway': device_gateway,
-        'continuity': continuity,
-        'proactive': proactive,
-        'tools': tools,
-        'executor': executor,
-        'turn_runtime': executor,
-        'agent_executor': agent_executor,
-        'automations': automations,
-        'integrations': integrations,
-        'integration_adapters': adapters,
-        'oauth': oauth,
-        'oauth_providers': oauth_providers,
-        'plugins': plugins,
-        'vault': vault,
-        'voice': voice,
-        'voice_qualification': voice_qualification,
-        'p3_qualification': p3_qualification,
-        'wake_phrase': wake_phrase,
-        'apns': apns,
-        'telemetry': telemetry,
-        'preferences': preferences,
-        'backups': backups,
-        'computer': capability_objects.get('computer'),
+        'events': events, 'runtime_state': events.runtime_state, 'memory': memory, 'models': models,
+        'second_brain': second_brain, 'knowledge': knowledge, 'vector_store': vector,
+        'device_registry': device_registry, 'owner_access': owner_access, 'device_gateway': device_gateway,
+        'continuity': continuity, 'proactive': proactive, 'tools': tools, 'executor': executor,
+        'turn_runtime': executor, 'agent_executor': agent_executor, 'automations': automations,
+        'integrations': integrations, 'integration_adapters': adapters, 'oauth': oauth,
+        'oauth_providers': oauth_providers, 'plugins': plugins, 'vault': vault, 'voice': voice,
+        'voice_qualification': voice_qualification, 'p3_qualification': p3_qualification,
+        'wake_phrase': wake_phrase, 'apns': apns, 'telemetry': telemetry, 'preferences': preferences,
+        'backups': backups, 'computer': capability_objects.get('computer'),
         'primary_continuity_thread_id': primary_thread_id,
     }
     p3_qualification.runtime = runtime
-
     future = FutureIntelligenceProgram(settings.data_dir / 'future-intelligence', runtime=runtime)
     runtime['future_intelligence'] = future
     runtime['everyday_intelligence'] = future.everyday
@@ -208,13 +108,8 @@ def build_runtime():
     runtime['personal_ai_everywhere'] = future.everywhere
     runtime['hybrid_intelligence'] = future.hybrid
     runtime['advanced_autonomy'] = future.autonomy
-
     benchmark = CapabilityBenchmark(settings.data_dir / 'capability-benchmark.sqlite3', runtime=runtime)
-    model_evaluation = ModelDialogueEvaluation(
-        settings.data_dir / 'model-dialogue-evaluation.sqlite3',
-        models,
-        audit=memory.audit,
-    )
+    model_evaluation = ModelDialogueEvaluation(settings.data_dir / 'model-dialogue-evaluation.sqlite3', models, audit=memory.audit)
     scenarios = CompetitiveScenarioSuite(runtime, benchmark)
     runtime['benchmark'] = benchmark
     runtime['model_evaluation'] = model_evaluation
@@ -222,98 +117,23 @@ def build_runtime():
     benchmark_tools.register(tools, benchmark, scenarios)
 
     def append_continuity(kind, text, device_id=None, conversation_id=None):
-        if not text:
-            return
-        # CanonicalTurnRuntime supplies conversation_id and persists its selected
-        # thread directly. This bridge remains only for legacy internal emitters
-        # that have not originated from a user-facing V1 turn.
-        if conversation_id:
+        if not text or conversation_id:
             return
         source_device = str(device_id or 'desktop')
         try:
             thread = continuity.active_for_device(source_device)
             if thread is None:
-                bundle = continuity.resume(source_device)
-                thread = bundle['thread']
-            continuity.append(
-                thread['id'],
-                device_id=source_device,
-                kind=kind,
-                payload={'text': str(text)},
-            )
+                thread = continuity.resume(source_device)['thread']
+            continuity.append(thread['id'], device_id=source_device, kind=kind, payload={'text': str(text)})
         except Exception:
             pass
 
-    events.subscribe(
-        'conversation.user',
-        lambda event: append_continuity(
-            'user_message',
-            event.get('text'),
-            event.get('device_id'),
-            event.get('conversation_id'),
-        ),
-    )
-    events.subscribe(
-        'conversation.assistant',
-        lambda event: append_continuity(
-            'assistant_message',
-            event.get('text'),
-            event.get('device_id'),
-            event.get('conversation_id'),
-        ),
-    )
-
-    events.subscribe(
-        'proactive.ingest',
-        lambda event: proactive.consider(
-            str(event.get('source', 'unknown')),
-            dict(event.get('payload') or {}),
-            context={**context_provider(), **dict(event.get('context') or {})},
-        ),
-    )
-    events.subscribe(
-        'automation.failed',
-        lambda event: proactive.consider(
-            'automation',
-            {
-                'kind': 'failure',
-                'id': event.get('automation_id'),
-                'failed': True,
-                'importance': 0.7,
-                'message': f"An automation failed: {event.get('error', 'unknown error')}",
-            },
-            context=context_provider(),
-        ),
-    )
-    events.subscribe(
-        'workflow.failed',
-        lambda event: proactive.consider(
-            'workflow',
-            {
-                'kind': 'failure',
-                'id': event.get('run_id'),
-                'failed': True,
-                'importance': 0.75,
-                'message': f"A workflow needs attention: {event.get('error', 'workflow failed')}",
-            },
-            context=context_provider(),
-        ),
-    )
-    events.subscribe(
-        'workflow.approval_required',
-        lambda event: proactive.consider(
-            'workflow',
-            {
-                'kind': 'approval',
-                'id': event.get('run_id'),
-                'needs_approval': True,
-                'urgency': 0.7,
-                'importance': 0.8,
-                'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}.",
-            },
-            context=context_provider(),
-        ),
-    )
+    events.subscribe('conversation.user', lambda event: append_continuity('user_message', event.get('text'), event.get('device_id'), event.get('conversation_id')))
+    events.subscribe('conversation.assistant', lambda event: append_continuity('assistant_message', event.get('text'), event.get('device_id'), event.get('conversation_id')))
+    events.subscribe('proactive.ingest', lambda event: proactive.consider(str(event.get('source', 'unknown')), dict(event.get('payload') or {}), context={**context_provider(), **dict(event.get('context') or {})}))
+    events.subscribe('automation.failed', lambda event: proactive.consider('automation', {'kind': 'failure', 'id': event.get('automation_id'), 'failed': True, 'importance': 0.7, 'message': f"An automation failed: {event.get('error', 'unknown error')}"}, context=context_provider()))
+    events.subscribe('workflow.failed', lambda event: proactive.consider('workflow', {'kind': 'failure', 'id': event.get('run_id'), 'failed': True, 'importance': 0.75, 'message': f"A workflow needs attention: {event.get('error', 'workflow failed')}"}, context=context_provider()))
+    events.subscribe('workflow.approval_required', lambda event: proactive.consider('workflow', {'kind': 'approval', 'id': event.get('run_id'), 'needs_approval': True, 'urgency': 0.7, 'importance': 0.8, 'message': f"A workflow is waiting for your approval to use {event.get('tool', 'a tool')}."}, context=context_provider()))
     return runtime
 
 
@@ -322,26 +142,13 @@ def start_server(runtime):
         return
     from server.api import create_app
     import uvicorn
-
-    app = create_app(
-        runtime['executor'],
-        settings,
-        device_registry=runtime['device_registry'],
-        device_gateway=runtime['device_gateway'],
-        second_brain=runtime['second_brain'],
-        automations=runtime['automations'],
-        runtime=runtime,
-    )
-    uvicorn.run(
-        app,
-        host=settings.control_server_host,
-        port=settings.control_server_port,
-        log_level='warning',
-    )
+    app = create_app(runtime['executor'], settings, device_registry=runtime['device_registry'], device_gateway=runtime['device_gateway'], second_brain=runtime['second_brain'], automations=runtime['automations'], runtime=runtime)
+    uvicorn.run(app, host=settings.control_server_host, port=settings.control_server_port, log_level='warning')
 
 
 def main():
     from PyQt6.QtWidgets import QApplication
+    from desktop.floating_presence import FloatingPresence
     from ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
@@ -350,16 +157,18 @@ def main():
     runtime['automations'].start()
     if settings.control_server_enabled:
         threading.Thread(target=start_server, args=(runtime,), daemon=True).start()
-    window = MainWindow(
-        events=runtime['events'],
-        executor=runtime['executor'],
-        memory=runtime['memory'],
-        runtime=runtime,
-    )
+    window = MainWindow(events=runtime['events'], executor=runtime['executor'], memory=runtime['memory'], runtime=runtime)
     window.show()
+    # Floating Presence is a subordinate surface over this exact runtime. Keeping
+    # the instance in runtime makes its shared EventBus/turn/voice authorities
+    # explicit and prevents a second assistant runtime from being constructed.
+    floating_presence = FloatingPresence(runtime=runtime)
+    runtime['floating_presence'] = floating_presence
+    floating_presence.show()
     if runtime['preferences'].get('launch_voice_on_start'):
         window.toggle_voice()
     code = app.exec()
+    floating_presence.close()
     runtime['voice'].stop()
     runtime['automations'].stop()
     runtime['telemetry'].persist()
