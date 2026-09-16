@@ -52,6 +52,14 @@ class CanonicalTurnRuntime:
     def _existing(self,request_id):
         with self._con() as con:row=con.execute('SELECT * FROM canonical_turns WHERE request_id=?',(request_id,)).fetchone()
         return dict(row) if row else None
+    def turn(self, request_id: str):
+        """Return the canonical durable logical-turn record, never executor state."""
+        row=self._existing(str(request_id))
+        if row is None:return None
+        # The table stores approval identity only; approval credentials/tokens are
+        # never stored here. Keep the projection explicit so future DB columns do
+        # not become API surface accidentally.
+        return {key:row.get(key) for key in ('request_id','owner_id','conversation_id','device_id','session_id','surface','input_modality','privacy_level','risk_level','user_text','status','assistant_text','approval_id','error_code','p10_goal_id','p10_plan_id','created_at','updated_at')}
     def _turn_by_approval(self,approval_id):
         with self._con() as con:row=con.execute('SELECT * FROM canonical_turns WHERE approval_id=?',(approval_id,)).fetchone()
         return dict(row) if row else None
