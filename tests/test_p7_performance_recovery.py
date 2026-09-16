@@ -12,6 +12,7 @@ from future_intelligence.multimodal import SimulatedObservationAdapter, WorldUnd
 from recovery.backup import BACKUP_MAGIC, BackupService
 
 
+# P7 qualification measurements are emitted by the dedicated reliability performance step.
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
 
 
