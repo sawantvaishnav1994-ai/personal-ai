@@ -90,6 +90,12 @@ class CanonicalTurnRuntime:
             con.execute("""INSERT INTO canonical_turns(request_id,owner_id,conversation_id,device_id,session_id,surface,input_modality,privacy_level,risk_level,user_text,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,'started',?,?)""", (values['request_id'],values['owner_id'],values['conversation_id'] or None,values['device_id'],values['session_id'],values['surface'],values['input_modality'],values['privacy_level'],values['risk_level'],values['user_text'],stamp,stamp))
         return True, None
 
+    def _insert_started(self, **values):
+        """Compatibility seeding helper backed by the durable atomic claim path."""
+        claimed, _ = self._claim_started(**values)
+        if not claimed:
+            raise sqlite3.IntegrityError('UNIQUE constraint failed: canonical_turns.request_id')
+
     def _update(self, request_id, status, *, assistant_text=None, approval_id=None, error_code=None, p10_goal_id=None, p10_plan_id=None):
         with self._con() as con:
             con.execute('BEGIN IMMEDIATE')
