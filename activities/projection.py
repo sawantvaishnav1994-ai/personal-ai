@@ -8,7 +8,8 @@ from copy import deepcopy
 
 _SECRET_KEYS = re.compile(
     r'(api[_-]?key|authorization|cookie|session[_-]?(token|secret)|access[_-]?token|refresh[_-]?token|'
-    r'approval[_-]?token|recovery[_-]?(credential|secret|token)|password|private[_-]?key|client[_-]?secret)',
+    r'approval[_-]?token|recovery[_-]?(credential|secret|token)|credential|password|private[_-]?key|'
+    r'client[_-]?secret|(^|[_-])secret($|[_-])|secret[_-]?env)',
     re.IGNORECASE,
 )
 _SENSITIVE_CONTEXT_KEYS = re.compile(
@@ -23,10 +24,10 @@ class ActivitiesProjection:
     Audit remains the evidence authority. This class never mutates or replaces
     audit data; it returns a recursively sanitized, bounded owner-facing view.
     Pagination is a bounded snapshot over the canonical newest 1,000 Audit rows:
-    a cursor binds the first row visible on page one plus the last emitted row.
-    Newer Audit writes are excluded on later pages. If the upstream 1,000-row
-    window can no longer reconstruct that snapshot, pagination fails closed as
-    stale instead of silently duplicating or skipping records.
+    a cursor binds the query, the first row visible on page one, and the last
+    emitted row. Newer Audit writes are excluded on later pages. If the upstream
+    1,000-row window can no longer reconstruct that snapshot, pagination fails
+    closed as stale instead of silently duplicating or skipping records.
     """
 
     CATEGORY_LABELS = {
@@ -97,36 +98,48 @@ class ActivitiesProjection:
         return 'recorded'
 
     @staticmethod
-    def _encode_cursor(*, snapshot_id: str, after_id: str) -> str:
+    def _query_binding(category: str | None, status: str | None) -> dict:
+        return {
+            'category': str(category) if category is not None else None,
+            'status': str(status) if status is not None else None,
+        }
+
+    @staticmethod
+    def _encode_cursor(*, snapshot_id: str, after_id: str, query: dict) -> str:
         raw = json.dumps(
-            {'v': 1, 'snapshot': str(snapshot_id), 'after': str(after_id)},
+            {'v': 2, 'snapshot': str(snapshot_id), 'after': str(after_id), 'query': query},
             separators=(',', ':'), sort_keys=True,
         ).encode()
         return base64.urlsafe_b64encode(raw).decode().rstrip('=')
 
     @staticmethod
-    def _decode_cursor(cursor: str | None) -> tuple[str, str] | None:
+    def _decode_cursor(cursor: str | None) -> tuple[str, str, dict] | None:
         if not cursor:
             return None
-        if len(cursor) > 512:
+        if len(cursor) > 768:
             raise ValueError('invalid activity cursor')
         try:
             padded = cursor + '=' * (-len(cursor) % 4)
             data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
-            if data.get('v') != 1 or set(data) != {'v', 'snapshot', 'after'}:
+            if data.get('v') != 2 or set(data) != {'v', 'snapshot', 'after', 'query'}:
                 raise ValueError
             snapshot = str(data.get('snapshot') or '')
             after = str(data.get('after') or '')
+            query = data.get('query')
+            if not isinstance(query, dict) or set(query) != {'category', 'status'}:
+                raise ValueError
+            if any(value is not None and not isinstance(value, str) for value in query.values()):
+                raise ValueError
             if not snapshot or not after or len(snapshot) > 200 or len(after) > 200:
                 raise ValueError
-            return snapshot, after
+            if any(value is not None and len(value) > 200 for value in query.values()):
+                raise ValueError
+            return snapshot, after, query
         except Exception as exc:
             raise ValueError('invalid activity cursor') from exc
 
     def _rows(self, *, category: str | None = None) -> list[dict]:
         rows = list(self.audit_store.audit_entries(category=category, limit=self.MAX_SCAN))
-        # Canonical store is newest-first. Equal timestamps need a stable tie-break
-        # so repeated reads cannot reorder a page boundary nondeterministically.
         rows.sort(
             key=lambda row: (str(row.get('created_at') or ''), str(row.get('id') or '')),
             reverse=True,
@@ -138,7 +151,10 @@ class ActivitiesProjection:
         status: str | None = None, cursor: str | None = None,
     ) -> dict:
         bounded = max(1, min(int(limit), self.MAX_PAGE))
+        binding = self._query_binding(category, status)
         decoded = self._decode_cursor(cursor)
+        if decoded and decoded[2] != binding:
+            raise ValueError('activity cursor does not match query')
         projected = [self.project_entry(row) for row in self._rows(category=category)]
         if status:
             projected = [row for row in projected if row['status'] == str(status)]
@@ -148,7 +164,7 @@ class ActivitiesProjection:
             return {'activities': [], 'next_cursor': None, 'has_more': False}
 
         if decoded:
-            snapshot_id, after_id = decoded
+            snapshot_id, after_id, _ = decoded
             snapshot_positions = [i for i, row in enumerate(projected) if row['id'] == snapshot_id]
             if not snapshot_positions:
                 raise ValueError('stale activity cursor')
@@ -164,8 +180,9 @@ class ActivitiesProjection:
         has_more = len(projected) > bounded
         return {
             'activities': items,
-            'next_cursor': self._encode_cursor(snapshot_id=snapshot_id, after_id=items[-1]['id'])
-            if has_more and items else None,
+            'next_cursor': self._encode_cursor(
+                snapshot_id=snapshot_id, after_id=items[-1]['id'], query=binding,
+            ) if has_more and items else None,
             'has_more': has_more,
         }
 
