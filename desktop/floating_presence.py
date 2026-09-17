@@ -4,18 +4,21 @@ import json
 from pathlib import Path
 from threading import RLock
 
-from core.runtime_state import RuntimeState, normalize_runtime_state
+from core.runtime_presentation import presentation_for
+from core.runtime_state import RuntimeState
 
 
 class PresenceController:
-    """State/position controller for the desktop Floating Presence surface."""
+    """Sequence-aware projection controller for desktop Floating Presence."""
 
     def __init__(self, events, path: Path):
         self.events = events
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
-        self._state = RuntimeState.IDLE
+        snapshot = events.runtime_state.snapshot()
+        self._state = snapshot.state
+        self._sequence = snapshot.sequence
         self._position = self._load_position()
         self._unsubscribe = events.subscribe('runtime.state', self._on_runtime_state)
 
@@ -25,13 +28,29 @@ class PresenceController:
             return self._state
 
     @property
+    def sequence(self) -> int:
+        with self._lock:
+            return self._sequence
+
+    @property
     def position(self) -> tuple[int, int] | None:
         with self._lock:
             return self._position
 
     def _on_runtime_state(self, event):
+        presentation = presentation_for(event.get('state'))
+        try:
+            sequence = int(event.get('sequence'))
+        except (TypeError, ValueError):
+            return
+        if presentation is None:
+            self.events.emit('presence.state.unknown_ignored', sequence=sequence)
+            return
         with self._lock:
-            self._state = normalize_runtime_state(event.get('state'))
+            if sequence <= self._sequence:
+                return
+            self._state = presentation.state
+            self._sequence = sequence
 
     @staticmethod
     def clamp_position(x: int, y: int, *, left: int, top: int, right: int, bottom: int, width: int, height: int):
@@ -67,10 +86,7 @@ except ImportError:  # package/static qualification can still import the control
 
 
 class FloatingPresence(QWidget):
-    """Minimal always-on-top surface over the canonical Personal AI runtime.
-
-    The widget never infers AI state. It renders only `runtime.state` events.
-    """
+    """Minimal always-on-top projection over the canonical Personal AI runtime."""
 
     CORE_SIZE = 118
     PANEL_WIDTH = 330
@@ -86,154 +102,107 @@ class FloatingPresence(QWidget):
         self.controller = PresenceController(self.events, data_dir / 'floating-presence.json')
         self._drag_offset = None
         self._expanded = False
+        self._rendered_sequence = -1
         self._build()
         self._unsubscribe = self.events.subscribe('runtime.state', self._render_state)
+        self._render_snapshot()
         self._restore_position()
 
     def _build(self):
         self.setWindowTitle('Personal AI Floating Presence')
         self.setAccessibleName('Personal AI Floating Presence')
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.resize(self.CORE_SIZE, self.CORE_SIZE)
-
         self.shell = QFrame(self)
         self.shell.setObjectName('presenceShell')
-        self.shell.setStyleSheet(
-            'QFrame#presenceShell{background:rgba(3,4,5,224);border:1px solid rgba(85,125,140,95);border-radius:22px;}'
-            'QLineEdit{background:#070a0d;border:1px solid #17252d;border-radius:12px;padding:8px;color:#edf3f6;}'
-            'QPushButton{background:#090d10;border:1px solid #17252d;border-radius:10px;padding:7px;color:#aab9c0;}'
-            'QLabel{color:#dbe6ea;}'
-        )
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(self.shell)
-        layout = QVBoxLayout(self.shell)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
-
-        self.core = PulseWidget()
-        self.core.setAccessibleName('Personal AI core state')
-        self.core.setFixedSize(self.CORE_SIZE - 16, self.CORE_SIZE - 16)
-        self.core.mouseDoubleClickEvent = lambda event: self.toggle_panel()
-        layout.addWidget(self.core, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.panel = QWidget()
-        panel = QVBoxLayout(self.panel)
-        panel.setContentsMargins(2, 2, 2, 2)
-        self.status = QLabel('Idle')
-        self.status.setAccessibleName('Current Personal AI state')
-        panel.addWidget(self.status)
-        self.input = QLineEdit()
-        self.input.setAccessibleName('Quick message to Personal AI')
-        self.input.setPlaceholderText('Speak or type…')
-        self.input.returnPressed.connect(self.submit)
-        panel.addWidget(self.input)
+        self.shell.setStyleSheet('QFrame#presenceShell{background:rgba(3,4,5,224);border:1px solid rgba(85,125,140,95);border-radius:22px;}QLineEdit{background:#070a0d;border:1px solid #17252d;border-radius:12px;padding:8px;color:#edf3f6;}QPushButton{background:#090d10;border:1px solid #17252d;border-radius:10px;padding:7px;color:#aab9c0;}QLabel{color:#dbe6ea;}')
+        outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.addWidget(self.shell)
+        layout = QVBoxLayout(self.shell); layout.setContentsMargins(8, 8, 8, 8); layout.setSpacing(6)
+        self.core = PulseWidget(); self.core.setAccessibleName('Personal AI core state'); self.core.setFixedSize(self.CORE_SIZE - 16, self.CORE_SIZE - 16)
+        self.core.mouseDoubleClickEvent = lambda event: self.toggle_panel(); layout.addWidget(self.core, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.panel = QWidget(); panel = QVBoxLayout(self.panel); panel.setContentsMargins(2, 2, 2, 2)
+        self.status = QLabel('Connecting'); self.status.setAccessibleName('Current Personal AI state'); panel.addWidget(self.status)
+        self.input = QLineEdit(); self.input.setAccessibleName('Quick message to Personal AI'); self.input.setPlaceholderText('Speak or type…'); self.input.returnPressed.connect(self.submit); panel.addWidget(self.input)
         actions = QHBoxLayout()
-        self.voice = QPushButton('Voice')
-        self.voice.setAccessibleName('Toggle voice')
-        self.voice.clicked.connect(self.toggle_voice)
-        actions.addWidget(self.voice)
-        self.cancel = QPushButton('Cancel')
-        self.cancel.setAccessibleName('Cancel current work')
-        self.cancel.clicked.connect(self.cancel_work)
-        actions.addWidget(self.cancel)
-        self.collapse = QPushButton('Collapse')
-        self.collapse.clicked.connect(self.toggle_panel)
-        actions.addWidget(self.collapse)
-        panel.addLayout(actions)
-        self.panel.setVisible(False)
-        layout.addWidget(self.panel)
+        self.voice = QPushButton('Voice'); self.voice.setAccessibleName('Toggle voice'); self.voice.clicked.connect(self.toggle_voice); actions.addWidget(self.voice)
+        self.cancel = QPushButton('Cancel'); self.cancel.setAccessibleName('Cancel current work'); self.cancel.clicked.connect(self.cancel_work); actions.addWidget(self.cancel)
+        self.collapse = QPushButton('Collapse'); self.collapse.clicked.connect(self.toggle_panel); actions.addWidget(self.collapse)
+        panel.addLayout(actions); self.panel.setVisible(False); layout.addWidget(self.panel)
+
+    def _render_snapshot(self):
+        snapshot = self.events.runtime_state.snapshot()
+        self._apply_projection(snapshot.state.value, snapshot.sequence)
 
     def _render_state(self, event):
-        state = normalize_runtime_state(event.get('state'))
-        self.core.set_state(state.value)
-        self.status.setText(state.value.replace('_', ' ').title())
+        self._apply_projection(event.get('state'), event.get('sequence'))
+
+    def _apply_projection(self, state_value, sequence):
+        presentation = presentation_for(state_value)
+        try:
+            sequence = int(sequence)
+        except (TypeError, ValueError):
+            return
+        if presentation is None or sequence <= self._rendered_sequence:
+            return
+        self._rendered_sequence = sequence
+        self.core.set_state(presentation.visual)
+        self.core.setAccessibleDescription(presentation.label)
+        self.status.setText(presentation.label)
 
     def toggle_panel(self):
         self._expanded = not self._expanded
         self.panel.setVisible(self._expanded)
         self.resize(self.PANEL_WIDTH if self._expanded else self.CORE_SIZE, 230 if self._expanded else self.CORE_SIZE)
         self._clamp_to_screen()
-        if self._expanded:
-            self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        if self._expanded: self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def submit(self):
         text = self.input.text().strip()
-        if not text:
-            return
+        if not text: return
         self.input.clear()
-        # Desktop quick interaction uses the same canonical turn runtime.
-        # The full Home surface owns rich streaming; Presence stays intentionally compact.
         import threading
-        threading.Thread(
-            target=lambda: self.executor.chat(text, surface='floating-presence', device_id='desktop'),
-            daemon=True,
-        ).start()
+        threading.Thread(target=lambda: self.executor.chat(text, surface='floating-presence', device_id='desktop'), daemon=True).start()
 
     def toggle_voice(self):
         voice = self.runtime.get('voice')
-        if not voice:
-            return
-        if getattr(voice, 'running', False):
-            voice.stop()
-        else:
-            voice.start()
+        if not voice: return
+        voice.stop() if getattr(voice, 'running', False) else voice.start()
 
     def cancel_work(self):
         voice = self.runtime.get('voice')
-        if voice and hasattr(voice, 'barge_in'):
-            voice.barge_in()
+        if voice and hasattr(voice, 'barge_in'): voice.barge_in()
         self.events.emit('presence.cancel.requested', source='floating-presence')
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self._expanded:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-        else:
-            super().mousePressEvent(event)
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft(); event.accept()
+        else: super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
+            self.move(event.globalPosition().toPoint() - self._drag_offset); event.accept()
+        else: super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self._drag_offset is not None:
-            self._drag_offset = None
-            self._clamp_to_screen()
-            self.controller.save_position(self.x(), self.y())
+            self._drag_offset = None; self._clamp_to_screen(); self.controller.save_position(self.x(), self.y())
         super().mouseReleaseEvent(event)
 
     def _screen_geometry(self):
-        screen = self.screen()
-        return screen.availableGeometry() if screen else None
+        screen = self.screen(); return screen.availableGeometry() if screen else None
 
     def _clamp_to_screen(self):
         geometry = self._screen_geometry()
-        if geometry is None:
-            return
-        x, y = self.controller.clamp_position(
-            self.x(), self.y(), left=geometry.left(), top=geometry.top(), right=geometry.right() + 1,
-            bottom=geometry.bottom() + 1, width=self.width(), height=self.height(),
-        )
+        if geometry is None: return
+        x, y = self.controller.clamp_position(self.x(), self.y(), left=geometry.left(), top=geometry.top(), right=geometry.right() + 1, bottom=geometry.bottom() + 1, width=self.width(), height=self.height())
         self.move(x, y)
 
     def _restore_position(self):
         saved = self.controller.position
-        if saved:
-            self.move(QPoint(*saved))
+        if saved: self.move(QPoint(*saved))
         self._clamp_to_screen()
 
     def closeEvent(self, event):
-        self.controller.save_position(self.x(), self.y())
-        self._unsubscribe()
-        self.controller.close()
-        super().closeEvent(event)
+        self.controller.save_position(self.x(), self.y()); self._unsubscribe(); self.controller.close(); super().closeEvent(event)
