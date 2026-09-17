@@ -9,8 +9,8 @@ from capabilities.benchmark import CapabilityBenchmark
 from capabilities.dialogue_evaluation import ModelDialogueEvaluation
 from capabilities.scenarios import CompetitiveScenarioSuite
 from core.config import settings
+from core.durable_approval_runtime import DurableApprovalTurnRuntime
 from core.events import EventBus
-from core.personal_ai_runtime import CanonicalTurnRuntime
 from core.preferences import Preferences
 from core.telemetry import Telemetry
 from devices.continuity import ContinuityService
@@ -69,7 +69,7 @@ def build_runtime():
     tools = ToolRegistry(settings)
     tools.set_autonomy_mode(str(preferences.get('autonomy_mode', settings.autonomy_mode)))
     agent_executor = DurableAgentExecutor(models=models,tools=tools,memory=memory,events=events,second_brain=second_brain,knowledge=knowledge,telemetry=telemetry)
-    executor = CanonicalTurnRuntime(agent_executor, continuity, settings.data_dir/'turn-runtime.sqlite3', events=events)
+    executor = DurableApprovalTurnRuntime(agent_executor, continuity, settings.data_dir/'turn-runtime.sqlite3', events=events)
     def context_provider():
         latest=continuity.latest_thread()
         return {'devices':device_registry.list(),'integrations':integrations.list(),'memory_count':len(second_brain.graph().get('nodes',[])),'continuity':latest or {},'focus_mode':bool(preferences.get('focus_mode',False))}
