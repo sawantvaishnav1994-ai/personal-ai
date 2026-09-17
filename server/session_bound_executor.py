@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from agent.executor import ReauthenticationRequired
+from core.personal_ai_runtime import TurnReplayBlocked
 from models.router import ModelError
 from security.request_context import current_trusted_request
 from server.logical_request_middleware import current_logical_request_id
@@ -12,13 +13,14 @@ class OwnerReauthenticationRequired(ModelError):
     user_message = 'This critical action requires a recent owner verification. Verify your owner password or passkey and try again.'
 
 
-class SessionBoundExecutor:
-    """Bind an authenticated browser session to the canonical Personal AI runtime.
+class CanonicalTurnInProgress(ModelError):
+    code = 'turn_in_progress'
+    status_code = 409
+    user_message = 'This request is already in progress or waiting for its governed continuation.'
 
-    Authentication/device trust remain authoritative in the PWA security layer.
-    Turn/conversation orchestration is delegated to CanonicalTurnRuntime so every
-    interaction surface uses the same conversation and replay-safety path.
-    """
+
+class SessionBoundExecutor:
+    """Bind an authenticated browser session to the canonical Personal AI runtime."""
 
     def __init__(self, executor, *, continuity=None, surface: str = 'pwa'):
         self._executor = executor
@@ -69,7 +71,26 @@ class SessionBoundExecutor:
             if explicit is not None and str(explicit) != logical_request_id:
                 raise PermissionError('logical request identity mismatch')
             call_kwargs['request_id'] = logical_request_id
-        return self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs))
+        try:
+            return self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs))
+        except TurnReplayBlocked as exc:
+            raise CanonicalTurnInProgress(str(exc)) from exc
+
+    def cancel_turn(self, request_id: str | None = None):
+        context = self._context()
+        logical_request_id = current_logical_request_id()
+        request_id = str(request_id or logical_request_id or '').strip()
+        if not request_id:
+            return None
+        cancel = getattr(self._executor, 'cancel_turn', None)
+        if not callable(cancel):
+            return None
+        return cancel(
+            request_id,
+            owner_id='owner',
+            device_id=context.device_id,
+            session_id=context.session_id,
+        )
 
     def approve(self, approval_id: str, **kwargs):
         context = self._context()
