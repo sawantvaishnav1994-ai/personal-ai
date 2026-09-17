@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from threading import RLock
 
 from memory.policy import is_never_store
 from memory.second_brain import MemoryCandidate
@@ -14,11 +14,9 @@ from memory.second_brain import MemoryCandidate
 class GovernedMemory:
     """Owner-control gate around the canonical SecondBrain.
 
-    Unverified model/agent/proactive suggestions are candidates, not durable
-    Personal Memory. Only explicitly verified/owner-supported candidates are
-    allowed to enter the canonical memory store. Normal unverified suggestions
-    are quarantined for owner review; sensitive/never-store suggestions are not
-    persisted as candidates at all.
+    This is governance, not a second memory authority. SecondBrain/MemoryStore
+    remains canonical memory truth. This layer owns candidate lifecycle,
+    owner-scoping, retry identity and promotion recovery.
     """
 
     CANONICAL_OWNER = 'owner'
@@ -32,7 +30,6 @@ class GovernedMemory:
         self.events = events
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.lock = RLock()
         with self._con() as con:
             con.executescript(
                 '''
@@ -49,6 +46,13 @@ class GovernedMemory:
                     ON memory_candidates(status,created_at);
                 '''
             )
+            self._ensure_column(con, 'memory_candidates', 'owner_id', "TEXT NOT NULL DEFAULT 'owner'")
+            self._ensure_column(con, 'memory_candidates', 'request_id', 'TEXT')
+            self._ensure_column(con, 'memory_candidates', 'fingerprint', 'TEXT')
+            self._ensure_column(con, 'memory_candidates', 'memory_id', 'TEXT')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_memory_candidates_owner_status ON memory_candidates(owner_id,status,created_at)')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_memory_candidates_request ON memory_candidates(owner_id,request_id)')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_memory_candidates_fingerprint ON memory_candidates(owner_id,fingerprint,status)')
         try:
             self._brain.store.second_brain = self
         except Exception:
@@ -57,10 +61,24 @@ class GovernedMemory:
     def __getattr__(self, name):
         return getattr(self._brain, name)
 
+    @staticmethod
+    def _ensure_column(con, table: str, name: str, definition: str):
+        columns = {row['name'] for row in con.execute(f'PRAGMA table_info({table})')}
+        if name not in columns:
+            con.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+
     def _con(self):
         con = sqlite3.connect(self.path, timeout=30)
         con.row_factory = sqlite3.Row
+        con.execute('PRAGMA busy_timeout=30000')
         return con
+
+    @classmethod
+    def _require_owner(cls, owner_id: str | None) -> str:
+        owner = str(owner_id or '').strip()
+        if owner != cls.CANONICAL_OWNER:
+            raise PermissionError('Personal Memory is scoped to the canonical owner')
+        return owner
 
     def _emit(self, name: str, **payload):
         if self.events:
@@ -84,6 +102,17 @@ class GovernedMemory:
             'relationships': list(candidate.relationships or []),
         }
 
+    @staticmethod
+    def _fingerprint(data: dict) -> str:
+        stable = {
+            'type': str(data.get('type') or '').strip().lower(),
+            'subject': str(data.get('subject') or '').strip().lower(),
+            'content': str(data.get('content') or '').strip(),
+            'source': str(data.get('source') or '').strip().lower(),
+            'sensitivity': str(data.get('sensitivity') or 'normal').strip().lower(),
+        }
+        return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
     @classmethod
     def _authoritative(cls, data: dict) -> bool:
         source = str(data.get('source') or '').strip().lower()
@@ -93,7 +122,23 @@ class GovernedMemory:
             or source.startswith('owner-import:')
         )
 
-    def remember(self, candidate: MemoryCandidate) -> str | None:
+    @staticmethod
+    def _candidate(data: dict, *, confirmed: bool = False) -> MemoryCandidate:
+        source = str(data.get('source') or 'candidate')
+        if confirmed:
+            source = f'owner-confirmed:{source}'
+        return MemoryCandidate(
+            type=data['type'], subject=data['subject'], content=data['content'],
+            confidence=float(data.get('confidence', 1.0)), source=source,
+            verified=True if confirmed else bool(data.get('verified')),
+            tags=list(data.get('tags') or []), importance=float(data.get('importance', 0.5)),
+            sensitivity=str(data.get('sensitivity') or 'normal'), occurred_at=data.get('occurred_at'),
+            evidence=list(data.get('evidence') or []), metadata=dict(data.get('metadata') or {}),
+            relationships=list(data.get('relationships') or []),
+        )
+
+    def remember(self, candidate: MemoryCandidate, *, owner_id: str = CANONICAL_OWNER, request_id: str | None = None) -> str | None:
+        owner = self._require_owner(owner_id)
         data = self._normalize(candidate)
         sensitivity = data['sensitivity']
         if is_never_store(sensitivity=sensitivity, metadata=data.get('metadata')):
@@ -106,24 +151,41 @@ class GovernedMemory:
         if sensitivity != 'normal':
             self._emit('memory.candidate.blocked', reason='sensitive_requires_explicit_owner_write', source=data['source'])
             return None
-        candidate_id = str(uuid.uuid4())
+
+        fingerprint = self._fingerprint(data)
         stamp = time.time()
-        with self.lock, self._con() as con:
+        candidate_id = str(uuid.uuid4())
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            if request_id:
+                existing = con.execute(
+                    "SELECT * FROM memory_candidates WHERE owner_id=? AND request_id=? AND fingerprint=? ORDER BY created_at DESC LIMIT 1",
+                    (owner, str(request_id), fingerprint),
+                ).fetchone()
+            else:
+                existing = con.execute(
+                    "SELECT * FROM memory_candidates WHERE owner_id=? AND fingerprint=? AND status IN ('pending','promoting','approved') ORDER BY created_at DESC LIMIT 1",
+                    (owner, fingerprint),
+                ).fetchone()
+            if existing:
+                return existing['memory_id'] if existing['status'] == 'approved' and existing['memory_id'] else existing['id']
             con.execute(
-                '''INSERT INTO memory_candidates(id,candidate_json,source,status,reason,created_at,updated_at)
-                   VALUES(?,?,?,'pending','owner_confirmation_required',?,?)''',
-                (candidate_id, json.dumps(data, sort_keys=True, default=str), data['source'], stamp, stamp),
+                '''INSERT INTO memory_candidates(
+                    id,candidate_json,source,status,reason,created_at,updated_at,owner_id,request_id,fingerprint,memory_id)
+                   VALUES(?,?,?,'pending','owner_confirmation_required',?,?,?,?,?,NULL)''',
+                (candidate_id, json.dumps(data, sort_keys=True, default=str), data['source'], stamp, stamp, owner, str(request_id) if request_id else None, fingerprint),
             )
         self._emit('memory.candidate.pending', candidate_id=candidate_id, source=data['source'])
         return candidate_id
 
-    def candidates(self, *, status: str = 'pending', limit: int = 100) -> list[dict]:
+    def candidates(self, *, status: str = 'pending', limit: int = 100, owner_id: str = CANONICAL_OWNER) -> list[dict]:
+        owner = self._require_owner(owner_id)
         bounded = max(1, min(int(limit), 500))
         with self._con() as con:
             rows = con.execute(
-                '''SELECT id,candidate_json,source,status,reason,created_at,updated_at
-                   FROM memory_candidates WHERE status=? ORDER BY created_at DESC LIMIT ?''',
-                (str(status), bounded),
+                '''SELECT id,candidate_json,source,status,reason,created_at,updated_at,owner_id,request_id,fingerprint,memory_id
+                   FROM memory_candidates WHERE owner_id=? AND status=? ORDER BY created_at DESC,id DESC LIMIT ?''',
+                (owner, str(status), bounded),
             ).fetchall()
         output = []
         for row in rows:
@@ -132,55 +194,58 @@ class GovernedMemory:
             output.append({**item, 'candidate': candidate})
         return output
 
+    def candidate(self, candidate_id: str, *, owner_id: str = CANONICAL_OWNER) -> dict | None:
+        owner = self._require_owner(owner_id)
+        with self._con() as con:
+            row = con.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_id=?', (str(candidate_id), owner)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item['candidate'] = json.loads(item.pop('candidate_json'))
+        return item
+
     def approve_candidate(self, candidate_id: str, *, owner_id: str = CANONICAL_OWNER) -> str:
-        if str(owner_id) != self.CANONICAL_OWNER:
-            raise PermissionError('only the canonical owner may confirm Personal Memory')
-        with self.lock, self._con() as con:
-            row = con.execute(
-                "SELECT * FROM memory_candidates WHERE id=? AND status='pending'",
-                (str(candidate_id),),
-            ).fetchone()
+        owner = self._require_owner(owner_id)
+        candidate_id = str(candidate_id)
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_id=?', (candidate_id, owner)).fetchone()
             if row is None:
-                raise KeyError('pending memory candidate not found')
+                raise KeyError('memory candidate not found')
+            if row['status'] == 'approved' and row['memory_id']:
+                return row['memory_id']
+            if row['status'] == 'rejected':
+                raise KeyError('memory candidate was rejected')
+            if row['status'] not in {'pending', 'promoting'}:
+                raise KeyError('memory candidate is not approvable')
             data = json.loads(row['candidate_json'])
+            if is_never_store(sensitivity=data.get('sensitivity'), metadata=data.get('metadata')):
+                con.execute("UPDATE memory_candidates SET status='rejected',reason='never_store',updated_at=? WHERE id=?", (time.time(), candidate_id))
+                raise PermissionError('NEVER_STORE content cannot become canonical Memory')
+            con.execute("UPDATE memory_candidates SET status='promoting',updated_at=? WHERE id=?", (time.time(), candidate_id))
+
+        memory_id = self._brain.remember(self._candidate(data, confirmed=True))
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
             con.execute(
-                "UPDATE memory_candidates SET status='promoting',updated_at=? WHERE id=?",
-                (time.time(), str(candidate_id)),
+                "UPDATE memory_candidates SET status='approved',reason='owner_confirmed',memory_id=?,updated_at=? WHERE id=? AND owner_id=?",
+                (memory_id, time.time(), candidate_id, owner),
             )
-        candidate = MemoryCandidate(
-            type=data['type'],
-            subject=data['subject'],
-            content=data['content'],
-            confidence=float(data.get('confidence', 1.0)),
-            source=f"owner-confirmed:{data.get('source') or 'candidate'}",
-            verified=True,
-            tags=list(data.get('tags') or []),
-            importance=float(data.get('importance', 0.5)),
-            sensitivity=str(data.get('sensitivity') or 'normal'),
-            occurred_at=data.get('occurred_at'),
-            evidence=list(data.get('evidence') or []),
-            metadata=dict(data.get('metadata') or {}),
-            relationships=list(data.get('relationships') or []),
-        )
-        try:
-            memory_id = self._brain.remember(candidate)
-        except Exception:
-            with self.lock, self._con() as con:
-                con.execute(
-                    "UPDATE memory_candidates SET status='pending',updated_at=? WHERE id=?",
-                    (time.time(), str(candidate_id)),
-                )
-            raise
-        with self.lock, self._con() as con:
-            con.execute('DELETE FROM memory_candidates WHERE id=?', (str(candidate_id),))
-        self._emit('memory.candidate.approved', candidate_id=str(candidate_id), memory_id=memory_id)
+        self._emit('memory.candidate.approved', candidate_id=candidate_id, memory_id=memory_id)
         return memory_id
 
     def reject_candidate(self, candidate_id: str, *, owner_id: str = CANONICAL_OWNER) -> bool:
-        if str(owner_id) != self.CANONICAL_OWNER:
-            raise PermissionError('only the canonical owner may reject Personal Memory candidates')
-        with self.lock, self._con() as con:
-            cur = con.execute('DELETE FROM memory_candidates WHERE id=?', (str(candidate_id),))
-        if cur.rowcount:
-            self._emit('memory.candidate.rejected', candidate_id=str(candidate_id))
-        return cur.rowcount == 1
+        owner = self._require_owner(owner_id)
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT status FROM memory_candidates WHERE id=? AND owner_id=?', (str(candidate_id), owner)).fetchone()
+            if not row:
+                return False
+            if row['status'] == 'approved':
+                return False
+            con.execute(
+                "UPDATE memory_candidates SET status='rejected',reason='owner_rejected',updated_at=? WHERE id=? AND owner_id=?",
+                (time.time(), str(candidate_id), owner),
+            )
+        self._emit('memory.candidate.rejected', candidate_id=str(candidate_id))
+        return True

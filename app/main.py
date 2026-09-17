@@ -19,6 +19,7 @@ from devices.registry import DeviceRegistry
 from future_intelligence.program import FutureIntelligenceProgram
 from integrations.plugins import PluginManifestRegistry
 from integrations.runtime import build_integrations
+from knowledge.governance import KnowledgeAuthority
 from knowledge.store import KnowledgeStore
 from memory.governance import GovernedMemory
 from memory.second_brain import SecondBrain
@@ -49,7 +50,8 @@ def build_runtime():
     vector = VectorStore(settings.data_dir / 'vectors.sqlite3', models.embed)
     memory_engine = SecondBrain(memory, models, vector)
     second_brain = GovernedMemory(memory_engine, settings.data_dir / 'memory-candidates.sqlite3', events=events)
-    knowledge = KnowledgeStore(settings.data_dir / 'knowledge.sqlite3', settings.data_dir / 'knowledge' / 'objects')
+    knowledge_store = KnowledgeStore(settings.data_dir / 'knowledge.sqlite3', settings.data_dir / 'knowledge' / 'objects')
+    knowledge = KnowledgeAuthority(knowledge_store, events=events)
     device_registry = DeviceRegistry(settings.data_dir / 'devices.sqlite3')
     owner_access = OwnerAccessStore(settings.data_dir / 'owner-access.sqlite3')
     device_gateway = DeviceGateway(device_registry, events)
@@ -82,7 +84,7 @@ def build_runtime():
     events.subscribe('voice.transcript',lambda event:wake_phrase.accept(event.get('text','')))
     events.subscribe('state',lambda event:telemetry.increment(f"state.{event.get('state','unknown')}"))
     events.subscribe('voice.reply',lambda event:telemetry.increment('voice.replies'))
-    runtime={'events':events,'runtime_state':events.runtime_state,'memory':memory,'models':models,'second_brain':second_brain,'knowledge':knowledge,'vector_store':vector,'device_registry':device_registry,'owner_access':owner_access,'device_gateway':device_gateway,'continuity':continuity,'proactive':proactive,'tools':tools,'executor':executor,'turn_runtime':executor,'agent_executor':agent_executor,'automations':automations,'integrations':integrations,'integration_adapters':adapters,'oauth':oauth,'oauth_providers':oauth_providers,'plugins':plugins,'vault':vault,'voice':voice,'voice_qualification':voice_qualification,'p3_qualification':p3_qualification,'wake_phrase':wake_phrase,'apns':apns,'telemetry':telemetry,'preferences':preferences,'backups':backups,'computer':capability_objects.get('computer'),'primary_continuity_thread_id':primary_thread_id}
+    runtime={'events':events,'runtime_state':events.runtime_state,'memory':memory,'models':models,'second_brain':second_brain,'knowledge':knowledge,'knowledge_store':knowledge_store,'vector_store':vector,'device_registry':device_registry,'owner_access':owner_access,'device_gateway':device_gateway,'continuity':continuity,'proactive':proactive,'tools':tools,'executor':executor,'turn_runtime':executor,'agent_executor':agent_executor,'automations':automations,'integrations':integrations,'integration_adapters':adapters,'oauth':oauth,'oauth_providers':oauth_providers,'plugins':plugins,'vault':vault,'voice':voice,'voice_qualification':voice_qualification,'p3_qualification':p3_qualification,'wake_phrase':wake_phrase,'apns':apns,'telemetry':telemetry,'preferences':preferences,'backups':backups,'computer':capability_objects.get('computer'),'primary_continuity_thread_id':primary_thread_id}
     p3_qualification.runtime=runtime
     future=FutureIntelligenceProgram(settings.data_dir/'future-intelligence',runtime=runtime)
     runtime.update({'future_intelligence':future,'everyday_intelligence':future.everyday,'life_graph':future.life_graph,'personal_operations':future.operations,'world_understanding':future.world,'personal_ai_everywhere':future.everywhere,'hybrid_intelligence':future.hybrid,'advanced_autonomy':future.autonomy})
