@@ -4,6 +4,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
+from agent.durable_executor import ApprovalDispatchInProgress, ApprovalRecoveryRequired
 from agent.executor import ConfirmationRequired, ReauthenticationRequired
 from cloud_runtime.security import CloudSessionStore, OwnerAuthenticator
 
@@ -133,7 +134,6 @@ class SecureCloudRelay:
                 'execution_id': exc.execution_id,
                 'tool': exc.tool_name,
                 'description': exc.description,
-                'parameters': exc.parameters,
                 'expires_at': exc.expires_at,
             }
             self.memory.audit('cloud', 'approval_required', {
@@ -204,8 +204,29 @@ class SecureCloudRelay:
                 'decision': decision,
             })
             return RelayResult(200, {'reply': reply, 'decision': decision})
+        except ConfirmationRequired as exc:
+            self.memory.audit('cloud', 'approval_continued_to_approval', {
+                'device_id': session.device_id,
+                'session_id': session.id,
+                'prior_approval_id': approval_id,
+                'approval_id': exc.approval_id,
+                'tool': exc.tool_name,
+            })
+            return RelayResult(202, {
+                'approval_required': True,
+                'approval_id': exc.approval_id,
+                'execution_id': exc.execution_id,
+                'tool': exc.tool_name,
+                'description': exc.description,
+                'expires_at': exc.expires_at,
+                'prior_approval_id': approval_id,
+            })
         except ReauthenticationRequired:
             return RelayResult(401, {'error': 'reauthentication_required'})
+        except ApprovalDispatchInProgress:
+            return RelayResult(409, {'error': 'approval_in_progress'})
+        except ApprovalRecoveryRequired:
+            return RelayResult(409, {'error': 'approval_recovery_required'})
         except PermissionError:
             return RelayResult(410, {'error': 'approval_unavailable'})
 
