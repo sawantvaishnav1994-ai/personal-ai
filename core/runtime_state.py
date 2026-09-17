@@ -26,19 +26,19 @@ def normalize_runtime_state(value):
     except KeyError:return LEGACY_STATE_ALIASES.get(key,RuntimeState.IDLE)
 
 LEGAL_TRANSITIONS={
-RuntimeState.IDLE:{RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.BACKGROUND,RuntimeState.ERROR},
-RuntimeState.ACTIVE:{RuntimeState.IDLE,RuntimeState.LISTENING,RuntimeState.UNDERSTANDING,RuntimeState.BACKGROUND,RuntimeState.ERROR},
-RuntimeState.LISTENING:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR},
-RuntimeState.UNDERSTANDING:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.MEMORY_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.KNOWLEDGE_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.THINKING:{RuntimeState.IDLE,RuntimeState.NEEDS_APPROVAL,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.BACKGROUND,RuntimeState.ERROR},
-RuntimeState.NEEDS_APPROVAL:{RuntimeState.TOOL_ACTION,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR},
+RuntimeState.IDLE:{RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.ACTIVE:{RuntimeState.IDLE,RuntimeState.LISTENING,RuntimeState.UNDERSTANDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.LISTENING:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.UNDERSTANDING:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.MEMORY_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.KNOWLEDGE_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.THINKING:{RuntimeState.IDLE,RuntimeState.NEEDS_APPROVAL,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.NEEDS_APPROVAL:{RuntimeState.TOOL_ACTION,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
 RuntimeState.TOOL_ACTION:{RuntimeState.SUCCESS,RuntimeState.WARNING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.SUCCESS:{RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.BACKGROUND},
-RuntimeState.WARNING:{RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR},
-RuntimeState.RESPONDING:{RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.ERROR},
-RuntimeState.BACKGROUND:{RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.THINKING,RuntimeState.ERROR},
+RuntimeState.SUCCESS:{RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.BACKGROUND,RuntimeState.LISTENING},
+RuntimeState.WARNING:{RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.LISTENING},
+RuntimeState.RESPONDING:{RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.BACKGROUND:{RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.THINKING,RuntimeState.ERROR,RuntimeState.WARNING},
 RuntimeState.ERROR:{RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING}}
 
 @dataclass(frozen=True)
@@ -92,7 +92,16 @@ class RuntimeStateAuthority:
         'automation.started':(RuntimeState.BACKGROUND,'background_started',False),
         'workflow.started':(RuntimeState.BACKGROUND,'background_started',False),
         'emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
-        'p10.emergency_stop':(RuntimeState.ERROR,'emergency_stop',False)}
+        'p10.emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
+        # Stage 3 voice events are factual transport/lifecycle observations. They
+        # project through this single authority instead of generic client timers.
+        'voice.listening.started':(RuntimeState.LISTENING,'voice_listening',False),
+        'voice.tts.started':(RuntimeState.RESPONDING,'voice_tts_started',False),
+        'voice.tts.completed':(RuntimeState.ACTIVE,'voice_tts_completed',False),
+        'voice.tts.failed':(RuntimeState.WARNING,'voice_tts_failed',False),
+        'voice.stt.failed':(RuntimeState.WARNING,'voice_stt_failed',False),
+        'voice.approval.required':(RuntimeState.NEEDS_APPROVAL,'voice_approval_required',False),
+        'voice.session.stopped':(RuntimeState.IDLE,'voice_session_stopped',False)}
         for name,(target,reason,activate) in mapping.items():
             self._subscriptions.append(self.events.subscribe(name,lambda event,t=target,r=reason,a=activate:self._safe_transition(t,r,event,activate_request=a)))
     def close(self):
