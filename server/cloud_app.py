@@ -10,6 +10,7 @@ from server.api import create_app
 from server.activities_api import activities_router
 from server.apps_tools_api import apps_tools_router
 from server.approval_api import approval_router
+from server.approvals_center_api import approvals_center_router
 from server.cloud_security import cloud_security_router
 from server import iphone_pwa as iphone_pwa_module
 from server.owner_product import owner_product_router
@@ -63,19 +64,11 @@ app.add_middleware(LogicalRequestMiddleware)
 app.add_middleware(PwaSessionMiddleware,sessions=runtime['pwa_sessions'],device_registry=runtime['device_registry'],cookie_max_age=60*60*24*max(1,min(int(getattr(settings,'iphone_device_cookie_days',365)),3650)))
 app.add_middleware(WorkflowBudgetUiMiddleware);app.add_middleware(ConnectorUiMiddleware)
 pwa_runtime=dict(runtime);pwa_runtime['executor']=SessionBoundExecutor(runtime['executor'],continuity=runtime['continuity'],surface='iphone-pwa');pwa_runtime['continuity']=CanonicalConversationProjection(runtime['continuity'])
-# Stage 2: register the durable approval transport before the legacy PWA router.
-# Any router-local pending_approvals metadata in iphone_pwa is therefore compatibility-only
-# and cannot decide approval existence, approval outcome, or governed dispatch.
+# Stage 2 durable ApprovalManager remains the sole approval authority.
 app.include_router(approval_router(runtime,pwa_runtime['executor']))
-# Stage 3: canonical conversation/voice transport is registered before the legacy
-# compatibility router. These routes write no conversation messages themselves:
-# CanonicalTurnRuntime + ContinuityService own U1/A1, Stage 2 owns approvals, and
-# RuntimeStateAuthority owns semantic state. The legacy duplicate voice endpoints
-# remain source-compatible but are unreachable in this production composition.
+app.include_router(approvals_center_router(runtime))
+# Stage 3 canonical conversation/voice transport remains authoritative.
 app.include_router(conversation_voice_router(runtime,pwa_runtime['executor']))
-# The router cancellation helper remains transport-only. During production router
-# construction, make it request-aware so duplicate R1 transports share one
-# cooperative token; CanonicalTurnRuntime/SQLite remains the durable authority.
 _original_pwa_state=iphone_pwa_module.IphonePwaState
 iphone_pwa_module.IphonePwaState=lambda:RequestAwareIphonePwaState(cancel_turn=pwa_runtime['executor'].cancel_turn)
 try:app.include_router(iphone_pwa_module.iphone_pwa_router(pwa_runtime,settings))
