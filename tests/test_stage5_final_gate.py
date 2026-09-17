@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from collections import deque
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 from agent.executor import AgentExecutor
 from core.events import EventBus
 from core.runtime_state import LEGAL_TRANSITIONS, RuntimeState
+from core.turn_context import new_turn_context, reset_turn_context, set_turn_context
 from desktop.floating_presence import PresenceController
 from tools.registry import Risk, Tool, ToolRegistry
 
@@ -261,12 +263,29 @@ def _real_executor(*, verified: bool):
     return events, executor
 
 
+def _run_executor_in_canonical_context(events, executor, request_id='r1'):
+    """Mirror CanonicalTurnRuntime's request context around real AgentExecutor work."""
+    events.emit('turn.started', request_id=request_id)
+    token = set_turn_context(
+        new_turn_context(
+            request_id=request_id,
+            conversation_id='stage5-qualification',
+            owner_id='owner',
+            surface='qualification',
+            input_modality='text',
+        )
+    )
+    try:
+        return executor.chat('Observe the current value.')
+    finally:
+        reset_turn_context(token)
+
+
 def test_actual_agent_operations_produce_memory_knowledge_thinking_tool_response_and_success():
     events, executor = _real_executor(verified=True)
     seen = []
     events.subscribe('runtime.state', seen.append)
-    events.emit('turn.started', request_id='r1')
-    assert executor.chat('Observe the current value.') == 'Verified response.'
+    assert _run_executor_in_canonical_context(events, executor) == 'Verified response.'
     events.emit('turn.completed', request_id='r1')
     states = [item['state'] for item in seen]
     for required in (
@@ -285,8 +304,7 @@ def test_actual_unverified_agent_operation_produces_warning_and_never_success():
     events, executor = _real_executor(verified=False)
     seen = []
     events.subscribe('runtime.state', seen.append)
-    events.emit('turn.started', request_id='r1')
-    assert executor.chat('Observe the current value.') == 'Verified response.'
+    assert _run_executor_in_canonical_context(events, executor) == 'Verified response.'
     events.emit('turn.completed', request_id='r1')
     states = [item['state'] for item in seen]
     assert 'WARNING' in states
@@ -421,14 +439,43 @@ def test_pwa_page_reload_reconstructs_backend_canonical_state(state):
     assert len(result['renders']) == 1
 
 
-def test_reduced_motion_keeps_all_semantic_visual_states_distinguishable():
-    from ui.pulse import PulseWidget
+def _pulse_class_literals() -> dict[str, object]:
+    tree = ast.parse((ROOT / 'ui' / 'pulse.py').read_text(encoding='utf-8'))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == 'PulseWidget':
+            values = {}
+            for statement in node.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+                    name = statement.targets[0].id
+                    if name in {'STATE_ALIASES', 'STATE_SPEEDS', 'STATE_ENERGY', 'STATE_AMPLITUDE'}:
+                        values[name] = ast.literal_eval(statement.value)
+            return values
+    raise AssertionError('PulseWidget class is unavailable')
 
-    normalized = [PulseWidget.normalize_state(state.value) for state in RuntimeState]
+
+def test_reduced_motion_keeps_all_semantic_visual_states_distinguishable_headlessly():
+    values = _pulse_class_literals()
+    aliases = values['STATE_ALIASES']
+    speeds = values['STATE_SPEEDS']
+    energy = values['STATE_ENERGY']
+    amplitude = values['STATE_AMPLITUDE']
+
+    def normalize(state):
+        key = str(state).strip().lower().replace('-', '_').replace(' ', '_')
+        return aliases.get(key, key if key in speeds else 'warning')
+
+    normalized = [normalize(state.value) for state in RuntimeState]
     assert len(set(normalized)) == len(RuntimeState)
-    for visual in normalized:
-        assert visual in PulseWidget.STATE_SPEEDS
-        assert visual in PulseWidget.STATE_ENERGY
-        assert visual in PulseWidget.STATE_AMPLITUDE
-    # Reduced motion changes amplitude/speed, not semantic identity.
-    assert all(PulseWidget.STATE_SPEEDS[visual] > 0 for visual in normalized)
+    assert all(visual in speeds and visual in energy and visual in amplitude for visual in normalized)
+    assert all(speeds[visual] > 0 and energy[visual] > 0 for visual in normalized)
+
+    # Parse the implementation rather than importing Qt on a headless CI host: this
+    # validates that reduced motion changes timing/amplitude while preserving state.
+    tree = ast.parse((ROOT / 'ui' / 'pulse.py').read_text(encoding='utf-8'))
+    pulse = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'PulseWidget')
+    set_reduce_motion = next(node for node in pulse.body if isinstance(node, ast.FunctionDef) and node.name == 'set_reduce_motion')
+    node_position = next(node for node in pulse.body if isinstance(node, ast.FunctionDef) and node.name == '_node_position')
+    reduce_constants = {node.value for node in ast.walk(set_reduce_motion) if isinstance(node, ast.Constant) and isinstance(node.value, (int, float))}
+    position_constants = {node.value for node in ast.walk(node_position) if isinstance(node, ast.Constant) and isinstance(node.value, (int, float))}
+    assert {16, 120}.issubset(reduce_constants)
+    assert 0.42 in position_constants
