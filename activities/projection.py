@@ -22,7 +22,11 @@ class ActivitiesProjection:
 
     Audit remains the evidence authority. This class never mutates or replaces
     audit data; it returns a recursively sanitized, bounded owner-facing view.
-    Cursor identity is projection-only and is derived from immutable audit IDs.
+    Pagination is a bounded snapshot over the canonical newest 1,000 Audit rows:
+    a cursor binds the first row visible on page one plus the last emitted row.
+    Newer Audit writes are excluded on later pages. If the upstream 1,000-row
+    window can no longer reconstruct that snapshot, pagination fails closed as
+    stale instead of silently duplicating or skipping records.
     """
 
     CATEGORY_LABELS = {
@@ -93,12 +97,15 @@ class ActivitiesProjection:
         return 'recorded'
 
     @staticmethod
-    def _encode_cursor(audit_id: str) -> str:
-        raw = json.dumps({'after': str(audit_id)}, separators=(',', ':')).encode()
+    def _encode_cursor(*, snapshot_id: str, after_id: str) -> str:
+        raw = json.dumps(
+            {'v': 1, 'snapshot': str(snapshot_id), 'after': str(after_id)},
+            separators=(',', ':'), sort_keys=True,
+        ).encode()
         return base64.urlsafe_b64encode(raw).decode().rstrip('=')
 
     @staticmethod
-    def _decode_cursor(cursor: str | None) -> str | None:
+    def _decode_cursor(cursor: str | None) -> tuple[str, str] | None:
         if not cursor:
             return None
         if len(cursor) > 512:
@@ -106,35 +113,59 @@ class ActivitiesProjection:
         try:
             padded = cursor + '=' * (-len(cursor) % 4)
             data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
-            value = str(data.get('after') or '')
-            if not value or len(value) > 200:
+            if data.get('v') != 1 or set(data) != {'v', 'snapshot', 'after'}:
                 raise ValueError
-            return value
+            snapshot = str(data.get('snapshot') or '')
+            after = str(data.get('after') or '')
+            if not snapshot or not after or len(snapshot) > 200 or len(after) > 200:
+                raise ValueError
+            return snapshot, after
         except Exception as exc:
             raise ValueError('invalid activity cursor') from exc
 
     def _rows(self, *, category: str | None = None) -> list[dict]:
-        return list(self.audit_store.audit_entries(category=category, limit=self.MAX_SCAN))
+        rows = list(self.audit_store.audit_entries(category=category, limit=self.MAX_SCAN))
+        # Canonical store is newest-first. Equal timestamps need a stable tie-break
+        # so repeated reads cannot reorder a page boundary nondeterministically.
+        rows.sort(
+            key=lambda row: (str(row.get('created_at') or ''), str(row.get('id') or '')),
+            reverse=True,
+        )
+        return rows
 
     def page(
         self, *, limit: int = 50, category: str | None = None,
         status: str | None = None, cursor: str | None = None,
     ) -> dict:
         bounded = max(1, min(int(limit), self.MAX_PAGE))
-        after = self._decode_cursor(cursor)
+        decoded = self._decode_cursor(cursor)
         projected = [self.project_entry(row) for row in self._rows(category=category)]
         if status:
             projected = [row for row in projected if row['status'] == str(status)]
-        if after:
-            positions = [i for i, row in enumerate(projected) if row['id'] == after]
-            if not positions:
+        if not projected:
+            if decoded:
+                raise ValueError('stale activity cursor')
+            return {'activities': [], 'next_cursor': None, 'has_more': False}
+
+        if decoded:
+            snapshot_id, after_id = decoded
+            snapshot_positions = [i for i, row in enumerate(projected) if row['id'] == snapshot_id]
+            if not snapshot_positions:
+                raise ValueError('stale activity cursor')
+            projected = projected[snapshot_positions[0]:]
+            after_positions = [i for i, row in enumerate(projected) if row['id'] == after_id]
+            if not after_positions:
                 raise ValueError('stale or invalid activity cursor')
-            projected = projected[positions[0] + 1:]
+            projected = projected[after_positions[0] + 1:]
+        else:
+            snapshot_id = projected[0]['id']
+
         items = projected[:bounded]
         has_more = len(projected) > bounded
         return {
             'activities': items,
-            'next_cursor': self._encode_cursor(items[-1]['id']) if has_more and items else None,
+            'next_cursor': self._encode_cursor(snapshot_id=snapshot_id, after_id=items[-1]['id'])
+            if has_more and items else None,
             'has_more': has_more,
         }
 
@@ -151,7 +182,10 @@ class ActivitiesProjection:
             return None
         projected = self.project_entry(match)
         payload = projected['details'] if isinstance(projected['details'], dict) else {}
-        correlation_keys = ('request_id', 'turn_id', 'workflow_id', 'execution_id', 'operation_id', 'approval_id')
+        correlation_keys = (
+            'request_id', 'turn_id', 'conversation_id', 'plan_id', 'workflow_id',
+            'execution_id', 'operation_id', 'approval_id', 'tool_id', 'parent_activity_id',
+        )
         correlations = {key: str(payload[key]) for key in correlation_keys if payload.get(key) is not None}
         timeline = []
         for row in rows:
