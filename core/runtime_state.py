@@ -3,87 +3,237 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import RLock
 
-class RuntimeState(StrEnum):
-    IDLE='IDLE'; ACTIVE='ACTIVE'; LISTENING='LISTENING'; UNDERSTANDING='UNDERSTANDING'; THINKING='THINKING'
-    MEMORY_RETRIEVAL='MEMORY_RETRIEVAL'; KNOWLEDGE_RETRIEVAL='KNOWLEDGE_RETRIEVAL'; TOOL_ACTION='TOOL_ACTION'
-    RESPONDING='RESPONDING'; NEEDS_APPROVAL='NEEDS_APPROVAL'; BACKGROUND='BACKGROUND'; SUCCESS='SUCCESS'; WARNING='WARNING'; ERROR='ERROR'
 
-LEGACY_STATE_ALIASES={
-'idle':RuntimeState.IDLE,'ready':RuntimeState.ACTIVE,'active':RuntimeState.ACTIVE,'listening':RuntimeState.LISTENING,
-'understanding':RuntimeState.UNDERSTANDING,'thinking':RuntimeState.THINKING,'memory':RuntimeState.MEMORY_RETRIEVAL,
-'memory_retrieval':RuntimeState.MEMORY_RETRIEVAL,'retrieving_memory':RuntimeState.MEMORY_RETRIEVAL,
-'knowledge':RuntimeState.KNOWLEDGE_RETRIEVAL,'knowledge_retrieval':RuntimeState.KNOWLEDGE_RETRIEVAL,
-'retrieving_knowledge':RuntimeState.KNOWLEDGE_RETRIEVAL,'acting':RuntimeState.TOOL_ACTION,'action':RuntimeState.TOOL_ACTION,
-'tool':RuntimeState.TOOL_ACTION,'tool_action':RuntimeState.TOOL_ACTION,'speaking':RuntimeState.RESPONDING,
-'responding':RuntimeState.RESPONDING,'response':RuntimeState.RESPONDING,'approval':RuntimeState.NEEDS_APPROVAL,
-'needs_approval':RuntimeState.NEEDS_APPROVAL,'waiting_approval':RuntimeState.NEEDS_APPROVAL,'background':RuntimeState.BACKGROUND,
-'success':RuntimeState.SUCCESS,'warning':RuntimeState.WARNING,'error':RuntimeState.ERROR}
+class RuntimeState(StrEnum):
+    IDLE = 'IDLE'
+    ACTIVE = 'ACTIVE'
+    LISTENING = 'LISTENING'
+    UNDERSTANDING = 'UNDERSTANDING'
+    THINKING = 'THINKING'
+    MEMORY_RETRIEVAL = 'MEMORY_RETRIEVAL'
+    KNOWLEDGE_RETRIEVAL = 'KNOWLEDGE_RETRIEVAL'
+    TOOL_ACTION = 'TOOL_ACTION'
+    RESPONDING = 'RESPONDING'
+    NEEDS_APPROVAL = 'NEEDS_APPROVAL'
+    BACKGROUND = 'BACKGROUND'
+    SUCCESS = 'SUCCESS'
+    WARNING = 'WARNING'
+    ERROR = 'ERROR'
+
+
+LEGACY_STATE_ALIASES = {
+    'idle': RuntimeState.IDLE,
+    'ready': RuntimeState.ACTIVE,
+    'active': RuntimeState.ACTIVE,
+    'listening': RuntimeState.LISTENING,
+    'understanding': RuntimeState.UNDERSTANDING,
+    'thinking': RuntimeState.THINKING,
+    'memory': RuntimeState.MEMORY_RETRIEVAL,
+    'memory_retrieval': RuntimeState.MEMORY_RETRIEVAL,
+    'retrieving_memory': RuntimeState.MEMORY_RETRIEVAL,
+    'knowledge': RuntimeState.KNOWLEDGE_RETRIEVAL,
+    'knowledge_retrieval': RuntimeState.KNOWLEDGE_RETRIEVAL,
+    'retrieving_knowledge': RuntimeState.KNOWLEDGE_RETRIEVAL,
+    'acting': RuntimeState.TOOL_ACTION,
+    'action': RuntimeState.TOOL_ACTION,
+    'tool': RuntimeState.TOOL_ACTION,
+    'tool_action': RuntimeState.TOOL_ACTION,
+    'speaking': RuntimeState.RESPONDING,
+    'responding': RuntimeState.RESPONDING,
+    'response': RuntimeState.RESPONDING,
+    'approval': RuntimeState.NEEDS_APPROVAL,
+    'needs_approval': RuntimeState.NEEDS_APPROVAL,
+    'waiting_approval': RuntimeState.NEEDS_APPROVAL,
+    'background': RuntimeState.BACKGROUND,
+    'success': RuntimeState.SUCCESS,
+    'warning': RuntimeState.WARNING,
+    'error': RuntimeState.ERROR,
+}
+
 
 def _known_runtime_state(value):
-    if isinstance(value,RuntimeState): return value
-    key=str(value or '').strip().lower().replace('-','_').replace(' ','_')
-    if not key:return None
-    try:return RuntimeState[key.upper()]
-    except KeyError:return LEGACY_STATE_ALIASES.get(key)
+    if isinstance(value, RuntimeState):
+        return value
+    key = str(value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if not key:
+        return None
+    try:
+        return RuntimeState[key.upper()]
+    except KeyError:
+        return LEGACY_STATE_ALIASES.get(key)
+
 
 def normalize_runtime_state(value):
     """Legacy-compatible normalizer. Canonical authority uses strict recognition."""
     return _known_runtime_state(value) or RuntimeState.IDLE
 
-LEGAL_TRANSITIONS={
-RuntimeState.IDLE:{RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.ACTIVE:{RuntimeState.IDLE,RuntimeState.LISTENING,RuntimeState.UNDERSTANDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.LISTENING:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.UNDERSTANDING:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.MEMORY_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.KNOWLEDGE_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.THINKING:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.NEEDS_APPROVAL,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.NEEDS_APPROVAL:{RuntimeState.UNDERSTANDING,RuntimeState.TOOL_ACTION,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.TOOL_ACTION:{RuntimeState.UNDERSTANDING,RuntimeState.SUCCESS,RuntimeState.WARNING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.SUCCESS:{RuntimeState.UNDERSTANDING,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.BACKGROUND,RuntimeState.LISTENING},
-RuntimeState.WARNING:{RuntimeState.UNDERSTANDING,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.LISTENING},
-RuntimeState.RESPONDING:{RuntimeState.UNDERSTANDING,RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.BACKGROUND:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.THINKING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.ERROR:{RuntimeState.UNDERSTANDING,RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING}}
+
+LEGAL_TRANSITIONS = {
+    RuntimeState.IDLE: {
+        RuntimeState.ACTIVE, RuntimeState.LISTENING, RuntimeState.BACKGROUND,
+        RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.ACTIVE: {
+        RuntimeState.IDLE, RuntimeState.LISTENING, RuntimeState.UNDERSTANDING,
+        RuntimeState.BACKGROUND, RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.LISTENING: {
+        RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE, RuntimeState.IDLE,
+        RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.UNDERSTANDING: {
+        RuntimeState.IDLE, RuntimeState.MEMORY_RETRIEVAL,
+        RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING,
+        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.MEMORY_RETRIEVAL: {
+        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
+        RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING,
+        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.KNOWLEDGE_RETRIEVAL: {
+        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
+        RuntimeState.MEMORY_RETRIEVAL, RuntimeState.THINKING,
+        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.THINKING: {
+        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
+        RuntimeState.NEEDS_APPROVAL, RuntimeState.TOOL_ACTION,
+        RuntimeState.RESPONDING, RuntimeState.BACKGROUND,
+        RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.NEEDS_APPROVAL: {
+        RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION,
+        RuntimeState.ACTIVE, RuntimeState.IDLE,
+        RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.TOOL_ACTION: {
+        RuntimeState.UNDERSTANDING, RuntimeState.SUCCESS,
+        RuntimeState.WARNING, RuntimeState.RESPONDING, RuntimeState.ERROR,
+    },
+    RuntimeState.SUCCESS: {
+        RuntimeState.UNDERSTANDING, RuntimeState.RESPONDING,
+        RuntimeState.ACTIVE, RuntimeState.IDLE,
+        RuntimeState.BACKGROUND, RuntimeState.LISTENING,
+    },
+    RuntimeState.WARNING: {
+        RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION,
+        RuntimeState.RESPONDING, RuntimeState.ACTIVE,
+        RuntimeState.IDLE, RuntimeState.ERROR, RuntimeState.LISTENING,
+    },
+    RuntimeState.RESPONDING: {
+        RuntimeState.UNDERSTANDING, RuntimeState.IDLE,
+        RuntimeState.ACTIVE, RuntimeState.LISTENING,
+        RuntimeState.ERROR, RuntimeState.WARNING, RuntimeState.SUCCESS,
+    },
+    RuntimeState.BACKGROUND: {
+        RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE,
+        RuntimeState.IDLE, RuntimeState.THINKING,
+        RuntimeState.ERROR, RuntimeState.WARNING,
+    },
+    RuntimeState.ERROR: {
+        RuntimeState.UNDERSTANDING, RuntimeState.IDLE,
+        RuntimeState.ACTIVE, RuntimeState.LISTENING,
+    },
+}
+
 
 @dataclass(frozen=True)
 class StateSnapshot:
-    state:RuntimeState; sequence:int; reason:str; request_id:str|None=None
+    state: RuntimeState
+    sequence: int
+    reason: str
+    request_id: str | None = None
+
 
 class RuntimeStateAuthority:
     """Canonical V1 user-facing state projection over factual runtime events."""
-    def __init__(self,events,*,initial=RuntimeState.IDLE):
-        self.events=events; self._state=initial; self._sequence=0; self._request_id=None; self._lock=RLock(); self._subscriptions=[]; self._bind_compatibility_events()
+
+    def __init__(self, events, *, initial=RuntimeState.IDLE):
+        self.events = events
+        self._state = initial
+        self._sequence = 0
+        self._request_id = None
+        self._lock = RLock()
+        self._subscriptions = []
+        # Requests that reached a real degraded/unverified execution outcome must
+        # never be projected as SUCCESS merely because the turn later returned text.
+        self._degraded_requests: set[str] = set()
+        self._bind_compatibility_events()
+
     @property
     def state(self):
-        with self._lock:return self._state
-    def snapshot(self):
-        with self._lock:return StateSnapshot(self._state,self._sequence,'current',self._request_id)
-    def transition(self,target,*,reason,force=False,request_id=None,activate_request=False,**context):
-        normalized=_known_runtime_state(target); scoped=str(request_id or '').strip() or None; stale=False
-        if normalized is None:
-            snapshot=self.snapshot()
-            self.events.emit('runtime.state.unknown_ignored',state=str(target),sequence=snapshot.sequence,request_id=snapshot.request_id)
-            return StateSnapshot(snapshot.state,snapshot.sequence,'unknown_state_ignored',snapshot.request_id)
         with self._lock:
-            current=self._state; previous_request=self._request_id
-            if scoped and self._request_id and scoped!=self._request_id and not activate_request:
-                stale=True; current_request=self._request_id; snapshot=StateSnapshot(current,self._sequence,'stale_request_ignored',current_request)
+            return self._state
+
+    def snapshot(self):
+        with self._lock:
+            return StateSnapshot(self._state, self._sequence, 'current', self._request_id)
+
+    def transition(self, target, *, reason, force=False, request_id=None, activate_request=False, **context):
+        normalized = _known_runtime_state(target)
+        scoped = str(request_id or '').strip() or None
+        stale = False
+        if normalized is None:
+            snapshot = self.snapshot()
+            self.events.emit(
+                'runtime.state.unknown_ignored',
+                state=str(target),
+                sequence=snapshot.sequence,
+                request_id=snapshot.request_id,
+            )
+            return StateSnapshot(snapshot.state, snapshot.sequence, 'unknown_state_ignored', snapshot.request_id)
+
+        with self._lock:
+            current = self._state
+            previous_request = self._request_id
+            if scoped and self._request_id and scoped != self._request_id and not activate_request:
+                stale = True
+                current_request = self._request_id
+                snapshot = StateSnapshot(current, self._sequence, 'stale_request_ignored', current_request)
             else:
-                changed_request=bool(activate_request and scoped and scoped!=previous_request)
-                if normalized==current and not changed_request:return StateSnapshot(current,self._sequence,reason,self._request_id)
-                if not force and normalized!=current and normalized not in LEGAL_TRANSITIONS[current]:
+                changed_request = bool(activate_request and scoped and scoped != previous_request)
+                if normalized == current and not changed_request:
+                    return StateSnapshot(current, self._sequence, reason, self._request_id)
+                if not force and normalized != current and normalized not in LEGAL_TRANSITIONS[current]:
                     raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
                 # Ownership changes are committed only after transition validation so a
                 # rejected semantic transition can never leave a partial request takeover.
-                if activate_request and scoped:self._request_id=scoped
-                elif scoped and self._request_id is None:self._request_id=scoped
-                self._sequence+=1; self._state=normalized; snapshot=StateSnapshot(normalized,self._sequence,reason,self._request_id)
+                if activate_request and scoped:
+                    self._request_id = scoped
+                elif scoped and self._request_id is None:
+                    self._request_id = scoped
+                self._sequence += 1
+                self._state = normalized
+                snapshot = StateSnapshot(normalized, self._sequence, reason, self._request_id)
+
         if stale:
-            self.events.emit('runtime.state.stale_ignored',request_id=scoped,current_request_id=current_request); return snapshot
-        self.events.emit('runtime.state',state=normalized.value,previous_state=current.value,sequence=snapshot.sequence,reason=str(reason),request_id=snapshot.request_id,**context)
+            self.events.emit(
+                'runtime.state.stale_ignored',
+                request_id=scoped,
+                current_request_id=current_request,
+            )
+            return snapshot
+
+        self.events.emit(
+            'runtime.state',
+            state=normalized.value,
+            previous_state=current.value,
+            sequence=snapshot.sequence,
+            reason=str(reason),
+            request_id=snapshot.request_id,
+            **context,
+        )
         return snapshot
-    def activate_foreground_request(self,request_id,*,reason='turn_started',target=RuntimeState.UNDERSTANDING,**context):
+
+    def activate_foreground_request(
+        self,
+        request_id,
+        *,
+        reason='turn_started',
+        target=RuntimeState.UNDERSTANDING,
+        **context,
+    ):
         """Atomically transfer foreground ownership through the legal lifecycle.
 
         A fresh foreground turn is semantically UNDERSTANDING. IDLE cannot jump
@@ -91,75 +241,195 @@ class RuntimeStateAuthority:
         holding the authority lock. Observers can never snapshot the new request in
         the old IDLE state, and no force transition is used.
         """
-        scoped=str(request_id or '').strip() or None
-        normalized=_known_runtime_state(target)
-        if not scoped: raise ValueError('foreground request activation requires request_id')
-        if normalized is None: raise ValueError(f'unknown runtime state: {target}')
-        records=[]
+        scoped = str(request_id or '').strip() or None
+        normalized = _known_runtime_state(target)
+        if not scoped:
+            raise ValueError('foreground request activation requires request_id')
+        if normalized is None:
+            raise ValueError(f'unknown runtime state: {target}')
+
+        records = []
         with self._lock:
-            current=self._state; previous_request=self._request_id
-            if scoped==previous_request and normalized==current:
-                return StateSnapshot(current,self._sequence,reason,self._request_id)
-            path=[]
-            if normalized==RuntimeState.UNDERSTANDING and current==RuntimeState.IDLE:
-                path=[RuntimeState.ACTIVE,RuntimeState.UNDERSTANDING]
-            elif normalized==current:
-                path=[normalized]
+            current = self._state
+            previous_request = self._request_id
+            if scoped == previous_request and normalized == current:
+                return StateSnapshot(current, self._sequence, reason, self._request_id)
+
+            if normalized == RuntimeState.UNDERSTANDING and current == RuntimeState.IDLE:
+                path = [RuntimeState.ACTIVE, RuntimeState.UNDERSTANDING]
+            elif normalized == current:
+                path = [normalized]
             elif normalized in LEGAL_TRANSITIONS[current]:
-                path=[normalized]
+                path = [normalized]
             else:
                 raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
+
             # Validate the complete route before changing ownership or state.
-            probe=current
+            probe = current
             for step in path:
-                if step!=probe and step not in LEGAL_TRANSITIONS[probe]:
+                if step != probe and step not in LEGAL_TRANSITIONS[probe]:
                     raise ValueError(f'illegal runtime state transition: {probe.value} -> {step.value}')
-                probe=step
-            self._request_id=scoped
-            previous=current
+                probe = step
+
+            if scoped != previous_request:
+                self._degraded_requests.discard(scoped)
+            self._request_id = scoped
+            previous = current
             for step in path:
-                self._sequence+=1; self._state=step
-                snapshot=StateSnapshot(step,self._sequence,reason,self._request_id)
-                records.append((step,previous,snapshot))
-                previous=step
-            final=StateSnapshot(self._state,self._sequence,reason,self._request_id)
-        for step,previous,snapshot in records:
-            self.events.emit('runtime.state',state=step.value,previous_state=previous.value,sequence=snapshot.sequence,reason=str(reason),request_id=snapshot.request_id,**context)
+                self._sequence += 1
+                self._state = step
+                snapshot = StateSnapshot(step, self._sequence, reason, self._request_id)
+                records.append((step, previous, snapshot))
+                previous = step
+            final = StateSnapshot(self._state, self._sequence, reason, self._request_id)
+
+        for step, previous, snapshot in records:
+            self.events.emit(
+                'runtime.state',
+                state=step.value,
+                previous_state=previous.value,
+                sequence=snapshot.sequence,
+                reason=str(reason),
+                request_id=snapshot.request_id,
+                **context,
+            )
         return final
-    def _compat(self,event):
-        try:self.transition(event.get('state'),reason=f"legacy:{event.get('event','state')}",request_id=event.get('request_id'))
-        except ValueError:return
-    def _safe_transition(self,target,reason,event,*,activate_request=False):
+
+    def complete_foreground_request(self, request_id, *, degraded=False, reason='turn_completed'):
+        """Project a factual terminal turn outcome without inventing success.
+
+        Successful foreground turns pass through RESPONDING and only then SUCCESS.
+        A request that produced an unverified tool outcome terminates as WARNING.
+        A stale request is rejected by the same request-scoped authority checks used
+        by every other semantic transition.
+        """
+        scoped = str(request_id or '').strip() or None
+        if not scoped:
+            raise ValueError('foreground request completion requires request_id')
+
+        with self._lock:
+            current = self._state
+            current_request = self._request_id
+        if current_request and scoped != current_request:
+            return self.transition(
+                RuntimeState.SUCCESS,
+                reason=reason,
+                request_id=scoped,
+            )
+
+        if degraded:
+            return self.transition(
+                RuntimeState.WARNING,
+                reason='completed_with_unverified_outcome',
+                request_id=scoped,
+            )
+
+        if current == RuntimeState.SUCCESS:
+            return self.snapshot()
+        if current != RuntimeState.RESPONDING:
+            self.transition(
+                RuntimeState.RESPONDING,
+                reason='terminal_response_ready',
+                request_id=scoped,
+            )
+        return self.transition(
+            RuntimeState.SUCCESS,
+            reason=reason,
+            request_id=scoped,
+        )
+
+    def _compat(self, event):
+        try:
+            self.transition(
+                event.get('state'),
+                reason=f"legacy:{event.get('event', 'state')}",
+                request_id=event.get('request_id'),
+            )
+        except ValueError:
+            return
+
+    def _safe_transition(self, target, reason, event, *, activate_request=False):
         try:
             if activate_request:
-                self.activate_foreground_request(event.get('request_id'),reason=reason,target=target)
+                self.activate_foreground_request(
+                    event.get('request_id'),
+                    reason=reason,
+                    target=target,
+                )
             else:
-                self.transition(target,reason=reason,request_id=event.get('request_id'))
-        except ValueError:return
+                self.transition(
+                    target,
+                    reason=reason,
+                    request_id=event.get('request_id'),
+                )
+        except ValueError:
+            return
+        finally:
+            if reason in {'owner_cancelled', 'turn_failed'}:
+                scoped = str(event.get('request_id') or '').strip()
+                if scoped:
+                    with self._lock:
+                        self._degraded_requests.discard(scoped)
+
+    def _on_tool_unverified(self, event):
+        scoped = str(event.get('request_id') or '').strip() or None
+        if scoped:
+            with self._lock:
+                if self._request_id in {None, scoped}:
+                    self._degraded_requests.add(scoped)
+        self._safe_transition(RuntimeState.WARNING, 'verification_warning', event)
+
+    def _on_turn_completed(self, event):
+        scoped = str(event.get('request_id') or '').strip() or None
+        if not scoped:
+            return
+        with self._lock:
+            degraded = scoped in self._degraded_requests
+        try:
+            self.complete_foreground_request(scoped, degraded=degraded)
+        except ValueError:
+            # An impossible completion path fails closed instead of weakening the graph.
+            return
+        finally:
+            with self._lock:
+                self._degraded_requests.discard(scoped)
+
     def _bind_compatibility_events(self):
-        self._subscriptions.append(self.events.subscribe('state',self._compat))
-        mapping={
-        'turn.started':(RuntimeState.UNDERSTANDING,'turn_started',True),
-        'turn.needs_approval':(RuntimeState.NEEDS_APPROVAL,'approval_required',False),
-        'turn.completed':(RuntimeState.RESPONDING,'turn_completed',False),
-        'turn.cancelled':(RuntimeState.IDLE,'owner_cancelled',False),
-        'turn.failed':(RuntimeState.ERROR,'turn_failed',False),
-        'approval.required':(RuntimeState.NEEDS_APPROVAL,'approval_required',False),
-        'approval.approved':(RuntimeState.TOOL_ACTION,'approval_approved',False),
-        'tool.unverified':(RuntimeState.WARNING,'verification_warning',False),
-        'automation.started':(RuntimeState.BACKGROUND,'background_started',False),
-        'workflow.started':(RuntimeState.BACKGROUND,'background_started',False),
-        'emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
-        'p10.emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
-        'voice.listening.started':(RuntimeState.LISTENING,'voice_listening',False),
-        'voice.tts.started':(RuntimeState.RESPONDING,'voice_tts_started',False),
-        'voice.tts.completed':(RuntimeState.ACTIVE,'voice_tts_completed',False),
-        'voice.tts.failed':(RuntimeState.WARNING,'voice_tts_failed',False),
-        'voice.stt.failed':(RuntimeState.WARNING,'voice_stt_failed',False),
-        'voice.approval.required':(RuntimeState.NEEDS_APPROVAL,'voice_approval_required',False),
-        'voice.session.stopped':(RuntimeState.IDLE,'voice_session_stopped',False)}
-        for name,(target,reason,activate) in mapping.items():
-            self._subscriptions.append(self.events.subscribe(name,lambda event,t=target,r=reason,a=activate:self._safe_transition(t,r,event,activate_request=a)))
+        self._subscriptions.append(self.events.subscribe('state', self._compat))
+        mapping = {
+            'turn.started': (RuntimeState.UNDERSTANDING, 'turn_started', True),
+            'turn.needs_approval': (RuntimeState.NEEDS_APPROVAL, 'approval_required', False),
+            'turn.cancelled': (RuntimeState.IDLE, 'owner_cancelled', False),
+            'turn.failed': (RuntimeState.ERROR, 'turn_failed', False),
+            'approval.required': (RuntimeState.NEEDS_APPROVAL, 'approval_required', False),
+            'approval.approved': (RuntimeState.TOOL_ACTION, 'approval_approved', False),
+            'automation.started': (RuntimeState.BACKGROUND, 'background_started', False),
+            'workflow.started': (RuntimeState.BACKGROUND, 'background_started', False),
+            'emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
+            'p10.emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
+            'voice.listening.started': (RuntimeState.LISTENING, 'voice_listening', False),
+            'voice.tts.started': (RuntimeState.RESPONDING, 'voice_tts_started', False),
+            'voice.tts.completed': (RuntimeState.ACTIVE, 'voice_tts_completed', False),
+            'voice.tts.failed': (RuntimeState.WARNING, 'voice_tts_failed', False),
+            'voice.stt.failed': (RuntimeState.WARNING, 'voice_stt_failed', False),
+            'voice.approval.required': (RuntimeState.NEEDS_APPROVAL, 'voice_approval_required', False),
+            'voice.session.stopped': (RuntimeState.IDLE, 'voice_session_stopped', False),
+        }
+        for name, (target, reason, activate) in mapping.items():
+            self._subscriptions.append(
+                self.events.subscribe(
+                    name,
+                    lambda event, t=target, r=reason, a=activate: self._safe_transition(
+                        t, r, event, activate_request=a
+                    ),
+                )
+            )
+        self._subscriptions.append(self.events.subscribe('tool.unverified', self._on_tool_unverified))
+        self._subscriptions.append(self.events.subscribe('turn.completed', self._on_turn_completed))
+
     def close(self):
-        for unsubscribe in self._subscriptions:unsubscribe()
+        for unsubscribe in self._subscriptions:
+            unsubscribe()
         self._subscriptions.clear()
+        with self._lock:
+            self._degraded_requests.clear()
