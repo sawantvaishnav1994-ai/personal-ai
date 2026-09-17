@@ -21,6 +21,13 @@ class RuntimeState(StrEnum):
     ERROR = 'ERROR'
 
 
+TERMINAL_REQUEST_STATES = frozenset({
+    RuntimeState.SUCCESS,
+    RuntimeState.WARNING,
+    RuntimeState.ERROR,
+})
+
+
 LEGACY_STATE_ALIASES = {
     'idle': RuntimeState.IDLE,
     'ready': RuntimeState.ACTIVE,
@@ -268,9 +275,10 @@ class RuntimeStateAuthority:
 
         A request-scoped detach follows the existing legal graph. An unscoped
         background start may take the Core only when no active foreground lifecycle
-        owns it. SUCCESS may retain request provenance for history, but that request
-        is terminal: yielding to background atomically retires it and clears active
-        ownership. The retired id remains stale thereafter and cannot resurrect.
+        owns it. Terminal states retain request provenance for history, but their
+        foreground lifecycle has ended: yielding to independent background work
+        atomically retires the old request and clears active ownership. This is an
+        ownership operation, not a normalization of terminal semantic transitions.
         """
         scoped = str(event.get('request_id') or '').strip() or None
         if scoped:
@@ -278,10 +286,11 @@ class RuntimeStateAuthority:
         with self._lock:
             current = self._state
             current_request = self._request_id
-            terminal_provenance = current == RuntimeState.SUCCESS and current_request is not None
+            terminal_provenance = current in TERMINAL_REQUEST_STATES and current_request is not None
             if current == RuntimeState.BACKGROUND and current_request is None:
                 return StateSnapshot(current, self._sequence, 'background_started', None)
-            if (current_request is not None and not terminal_provenance) or current not in {RuntimeState.IDLE, RuntimeState.ACTIVE, RuntimeState.SUCCESS}:
+            eligible_without_active_owner = current in {RuntimeState.IDLE, RuntimeState.ACTIVE} or current in TERMINAL_REQUEST_STATES
+            if (current_request is not None and not terminal_provenance) or not eligible_without_active_owner:
                 ignored = StateSnapshot(current, self._sequence, 'background_ignored_for_foreground', current_request)
                 should_ignore = True
             else:
