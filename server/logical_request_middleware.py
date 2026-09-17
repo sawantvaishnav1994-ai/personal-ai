@@ -11,6 +11,7 @@ from server.logical_request import LogicalTurnBody
 
 
 _logical_request_id: ContextVar[str | None] = ContextVar('personal_ai_logical_request_id', default=None)
+MAX_LOGICAL_TURN_BODY = 16 * 1024
 
 
 def current_logical_request_id() -> str | None:
@@ -35,6 +36,8 @@ class LogicalRequestMiddleware:
             await send({'type': 'http.response.body', 'body': raw})
             return
 
+        # Only logical AI-turn endpoints participate. Approval, CRUD, auth and
+        # device/control endpoints retain their existing identity semantics.
         if method == 'POST' and path == '/iphone/api/voice/turn':
             body = b''
             more = True
@@ -42,7 +45,12 @@ class LogicalRequestMiddleware:
                 message = await receive()
                 if message['type'] != 'http.request':
                     continue
-                body += message.get('body', b'')
+                chunk = message.get('body', b'')
+                if len(body) + len(chunk) > MAX_LOGICAL_TURN_BODY:
+                    await send({'type': 'http.response.start', 'status': 413, 'headers': [(b'content-type', b'application/json')]})
+                    await send({'type': 'http.response.body', 'body': b'{"detail":{"code":"request_too_large","message":"Logical turn request body exceeds the V1 limit."}}'})
+                    return
+                body += chunk
                 more = bool(message.get('more_body', False))
             try:
                 payload = json.loads(body or b'{}')
