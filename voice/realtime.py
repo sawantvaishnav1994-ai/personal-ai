@@ -4,11 +4,18 @@ from dataclasses import replace
 
 from voice.full_duplex import FullDuplexVoiceSession
 from voice.intelligence import AudioDeviceManager
-from voice.openai_realtime import OpenAIRealtimeVoiceSession
 
 
 class RealtimeVoiceSession:
-    """Select provider-native realtime when configured; keep a hardened fallback."""
+    """Canonical Stage 3 voice facade.
+
+    Provider-native speech-to-speech can be useful transport technology, but it
+    must not become a second assistant, tool, approval, or conversation authority.
+    The production facade therefore always uses the provider-agnostic
+    STT -> CanonicalTurnRuntime -> canonical answer -> TTS path. Provider-specific
+    realtime classes remain compatibility/qualification code only and are not
+    selected by the Personal AI runtime.
+    """
 
     def __init__(self, models, executor, events=None):
         self.models = models
@@ -19,16 +26,13 @@ class RealtimeVoiceSession:
         self._refresh_mode()
 
     def _make_backend(self, settings):
-        native = OpenAIRealtimeVoiceSession(settings, self.events, executor=self.executor)
-        if native.enabled:
-            return native
-        fallback = FullDuplexVoiceSession(self.models, self.executor, self.events)
-        fallback.input_device_name = getattr(settings, 'voice_input_device', '')
-        fallback.output_device_name = getattr(settings, 'voice_output_device', '')
-        return fallback
+        backend = FullDuplexVoiceSession(self.models, self.executor, self.events)
+        backend.input_device_name = getattr(settings, 'voice_input_device', '')
+        backend.output_device_name = getattr(settings, 'voice_output_device', '')
+        return backend
 
     def _refresh_mode(self):
-        self.mode = 'openai-realtime' if isinstance(self.backend, OpenAIRealtimeVoiceSession) else 'stt-llm-tts-fallback'
+        self.mode = 'canonical-stt-runtime-tts'
 
     @property
     def thread(self):
@@ -36,7 +40,7 @@ class RealtimeVoiceSession:
 
     @property
     def connected(self):
-        return getattr(self.backend, 'connected', False)
+        return getattr(self.backend, 'connected', bool(self.thread and self.thread.is_alive()))
 
     def start(self):
         return self.backend.start()
@@ -48,11 +52,7 @@ class RealtimeVoiceSession:
         return self.devices.list()
 
     def select_audio_devices(self, *, input_name: str | None = None, output_name: str | None = None, restart: bool = True):
-        """Select microphone/speaker by name, optionally restarting an active session.
-
-        The setting is runtime-scoped; persistent preferences can store the selected
-        names separately and apply them at the next application start.
-        """
+        """Select microphone/speaker by name, optionally restarting an active session."""
         was_running = bool(self.thread and self.thread.is_alive())
         if was_running:
             self.stop()
