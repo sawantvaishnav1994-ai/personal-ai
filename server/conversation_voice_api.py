@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -16,10 +16,11 @@ from server.request_aware_pwa_state import RequestAwareIphonePwaState
 
 
 class CanonicalVoiceTurnBody(BaseModel):
+    # Keep the Stage 1 qualified logical-turn body contract exactly intact.
+    # Modality is non-authoritative transport metadata and is read from a header.
     request_id: str = Field(min_length=36, max_length=64)
     transcript: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = Field(default=None, max_length=80)
-    input_modality: Literal['text', 'voice'] = 'text'
 
     @field_validator('request_id')
     @classmethod
@@ -93,6 +94,13 @@ def conversation_voice_router(runtime, executor):
             raise HTTPException(403, 'This device is not permitted to use conversation or voice')
         return context
 
+    @staticmethod
+    def input_modality(request: Request) -> str:
+        # This header never conveys identity/authorization. It is safe metadata
+        # used only to describe how the already-authenticated owner supplied text.
+        value = str(request.headers.get('x-personal-ai-input-modality') or 'text').strip().lower()
+        return value if value in {'text', 'voice'} else 'text'
+
     def turn_snapshot(request_id: str) -> dict:
         lookup = getattr(executor, 'turn', None)
         turn = lookup(request_id) if callable(lookup) else None
@@ -118,7 +126,7 @@ def conversation_voice_router(runtime, executor):
         return bool(current and str(current) != str(request_id))
 
     @router.post('/voice/turn')
-    async def voice_turn(body: CanonicalVoiceTurnBody):
+    async def voice_turn(body: CanonicalVoiceTurnBody, request: Request):
         context = require_owner()
         logical_request_id = current_logical_request_id()
         if not logical_request_id or logical_request_id != body.request_id:
@@ -127,13 +135,14 @@ def conversation_voice_router(runtime, executor):
                 'message': 'Voice transport request identity does not match the canonical logical request.',
             })
         transcript = body.transcript.strip()
+        modality = input_modality(request)
         cancel_event = transport_state.begin_turn(context.device_id)
         emit(
             'voice.transcript',
             request_id=body.request_id,
             device_id=context.device_id,
             source='iphone-pwa',
-            input_modality=body.input_modality,
+            input_modality=modality,
             text=transcript,
             final=True,
         )
@@ -143,7 +152,7 @@ def conversation_voice_router(runtime, executor):
                 transcript,
                 cancel_event=cancel_event,
                 conversation_id=body.conversation_id,
-                input_modality=body.input_modality,
+                input_modality=modality,
             )
         except ExecutionCancelled:
             emit('voice.turn.cancelled', request_id=body.request_id, device_id=context.device_id, source='iphone-pwa')
