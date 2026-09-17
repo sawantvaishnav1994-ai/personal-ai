@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from agent.durable_executor import ApprovalDispatchInProgress, ApprovalRecoveryRequired
-from agent.executor import ReauthenticationRequired
+from agent.executor import ConfirmationRequired, ReauthenticationRequired
 from core.personal_ai_runtime import TurnReplayBlocked
 from security.request_context import current_trusted_request
 
@@ -74,6 +75,18 @@ def approval_router(runtime, executor):
             raise HTTPException(409, {'code': 'approval_session_mismatch', 'message': 'This approval belongs to a different trusted session.'})
         try:
             reply = executor.approve(approval_id)
+        except ConfirmationRequired as exc:
+            return JSONResponse(status_code=202, content={
+                'status': 'approval_required',
+                'reply': f'The previous approved step completed, and the next governed action needs approval for {exc.tool_name}.',
+                'prior_approval_id': approval_id,
+                'approval': {
+                    'id': exc.approval_id,
+                    'tool': exc.tool_name,
+                    'description': exc.description or f'Use {exc.tool_name}',
+                    'expires_at': exc.expires_at,
+                },
+            })
         except ReauthenticationRequired as exc:
             raise HTTPException(401, {'code': 'reauthentication_required', 'message': str(exc)})
         except ApprovalRecoveryRequired:
