@@ -4,14 +4,15 @@ import io
 import queue
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 
-from agent.executor import ExecutionCancelled
+from agent.executor import ConfirmationRequired, ExecutionCancelled
 from voice.intelligence import AdaptiveVoiceActivity, AudioDeviceManager, SemanticEndpointDetector, VoiceProfile, resample_for_rate
 
 
 class FullDuplexVoiceSession:
-    """Provider-agnostic continuous voice fallback with adaptive VAD and barge-in."""
+    """Provider-agnostic continuous voice adapter over the canonical runtime."""
 
     def __init__(self, models, executor, events=None, samplerate=16000, chunk_ms=60, voice_threshold=None, utterance_end_ms=None):
         self.models = models
@@ -37,6 +38,7 @@ class FullDuplexVoiceSession:
         self._stop = threading.Event()
         self._barge = threading.Event()
         self._turn_cancel: threading.Event | None = None
+        self._current_request_id: str | None = None
         self._q = queue.Queue(maxsize=256)
         self.thread = None
         self._play_thread = None
@@ -58,6 +60,17 @@ class FullDuplexVoiceSession:
         except queue.Empty:
             pass
 
+    def _emit(self, name, *, request_id=None, **kw):
+        if self.events:
+            payload = dict(kw)
+            if request_id:
+                payload['request_id'] = request_id
+            self.events.emit(name, **payload)
+
+    def _is_current(self, request_id: str) -> bool:
+        with self._lifecycle_lock:
+            return self._current_request_id == request_id
+
     def start(self):
         with self._lifecycle_lock:
             if self.thread and self.thread.is_alive():
@@ -65,6 +78,7 @@ class FullDuplexVoiceSession:
             self._drain(self._q)
             self._barge.clear()
             self._turn_cancel = None
+            self._current_request_id = None
             self._stop.clear()
             self.thread = threading.Thread(target=self._run, daemon=True, name='personal-ai-full-duplex')
             self.thread.start()
@@ -82,28 +96,34 @@ class FullDuplexVoiceSession:
         self._drain(self._q)
         with self._lifecycle_lock:
             self._turn_cancel = None
+            self._current_request_id = None
             if self._response_thread and not self._response_thread.is_alive():
                 self._response_thread = None
             if self._play_thread and not self._play_thread.is_alive():
                 self._play_thread = None
             if self.thread and not self.thread.is_alive():
                 self.thread = None
-        self._emit('state', state='idle')
-
-    def _emit(self, name, **kw):
-        if self.events:
-            self.events.emit(name, **kw)
+        self._emit('voice.session.stopped')
 
     def _barge_in(self):
+        with self._lifecycle_lock:
+            request_id = self._current_request_id
+            cancel_event = self._turn_cancel
         self._barge.set()
-        if self._turn_cancel:
-            self._turn_cancel.set()
+        # If R1 is still thinking, cooperative cancellation uses the canonical
+        # request path. If R1 is already complete and only TTS is playing,
+        # _turn_cancel is normally cleared and barge-in stops playback only.
+        if cancel_event:
+            cancel_event.set()
         self.metrics['barge_ins'] += 1
-        self._emit('voice.barge_in', metrics=dict(self.metrics))
-        self._emit('state', state='listening')
+        self._emit('voice.barge_in', request_id=request_id, metrics=dict(self.metrics))
 
-    def _play(self, wav: bytes):
+    def _play(self, wav: bytes, request_id: str):
+        completed = False
         try:
+            if not self._is_current(request_id):
+                self._emit('voice.output.stale_ignored', request_id=request_id, output_event='tts_before_play')
+                return
             import numpy as np
             import sounddevice as sd
             import soundfile as sf
@@ -115,44 +135,79 @@ class FullDuplexVoiceSession:
             channels = 1 if getattr(audio, 'ndim', 1) == 1 else audio.shape[1]
             stream = sd.OutputStream(samplerate=sr, channels=channels, dtype='float32', device=output_device)
             stream.start()
+            self._emit('voice.tts.started', request_id=request_id)
             step = max(256, int(sr * 0.035))
             try:
                 for index in range(0, len(audio), step):
-                    if self._barge.is_set() or self._stop.is_set():
+                    if self._barge.is_set() or self._stop.is_set() or not self._is_current(request_id):
                         break
                     stream.write(np.asarray(audio[index:index + step], dtype='float32'))
+                else:
+                    completed = True
             finally:
                 stream.stop()
                 stream.close()
         except Exception as exc:
-            self._emit('voice.error', error=str(exc))
+            self._emit('voice.tts.failed', request_id=request_id, error_type=type(exc).__name__)
         finally:
-            if not self._stop.is_set() and not self._barge.is_set():
-                self._emit('state', state='listening')
+            if completed and self._is_current(request_id):
+                self._emit('voice.tts.completed', request_id=request_id)
+            elif not self._stop.is_set() and self._barge.is_set():
+                self._emit('voice.playback.interrupted', request_id=request_id)
+            if not self._stop.is_set() and self._is_current(request_id):
+                self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
 
-    def _respond(self, text, cancel_event):
+    def _respond(self, text, cancel_event, request_id):
         try:
-            self._emit('state', state='understanding')
-            answer = self.executor.chat(text, cancel_event=cancel_event)
-            if cancel_event.is_set() or self._stop.is_set():
+            answer = self.executor.chat(
+                text,
+                request_id=request_id,
+                device_id='desktop',
+                surface='desktop-voice',
+                input_modality='voice',
+                cancel_event=cancel_event,
+            )
+            if cancel_event.is_set() or self._stop.is_set() or not self._is_current(request_id):
+                self._emit('voice.output.stale_ignored', request_id=request_id, output_event='canonical_reply')
                 return
-            self._emit('voice.reply', text=answer)
-            self._emit('state', state='speaking')
-            wav = self.models.synthesize(answer)
-            if cancel_event.is_set() or self._stop.is_set():
+            self._emit('voice.reply', request_id=request_id, text=answer, source='desktop-voice')
+            try:
+                wav = self.models.synthesize(answer)
+            except Exception as exc:
+                # The canonical turn is already complete. TTS failure is an
+                # output failure only and must never rerun/fail the AI turn.
+                self._emit('voice.tts.failed', request_id=request_id, error_type=type(exc).__name__)
+                if not self._stop.is_set() and self._is_current(request_id):
+                    self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
                 return
-            play_thread = threading.Thread(target=self._play, args=(wav,), daemon=True, name='personal-ai-tts')
+            if cancel_event.is_set() or self._stop.is_set() or not self._is_current(request_id):
+                self._emit('voice.output.stale_ignored', request_id=request_id, output_event='tts_after_synthesis')
+                return
+            play_thread = threading.Thread(
+                target=self._play,
+                args=(wav, request_id),
+                daemon=True,
+                name='personal-ai-tts',
+            )
             with self._lifecycle_lock:
                 self._play_thread = play_thread
             play_thread.start()
+        except ConfirmationRequired as exc:
+            self._emit(
+                'voice.approval.required',
+                request_id=request_id,
+                approval_id=exc.approval_id,
+                tool=exc.tool_name,
+                source='desktop-voice',
+            )
         except ExecutionCancelled:
-            self._emit('voice.turn.cancelled')
-            if not self._stop.is_set():
-                self._emit('state', state='listening')
+            self._emit('voice.turn.cancelled', request_id=request_id, source='desktop-voice')
+            if not self._stop.is_set() and self._is_current(request_id):
+                self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
         except Exception as exc:
-            self._emit('voice.error', error=str(exc))
-            if not self._stop.is_set():
-                self._emit('state', state='listening')
+            self._emit('voice.turn.error', request_id=request_id, error_type=type(exc).__name__, source='desktop-voice')
+            if not self._stop.is_set() and self._is_current(request_id):
+                self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
         finally:
             with self._lifecycle_lock:
                 if self._turn_cancel is cancel_event:
@@ -164,7 +219,7 @@ class FullDuplexVoiceSession:
             import sounddevice as sd
             import soundfile as sf
         except Exception as exc:
-            self._emit('voice.error', error=str(exc))
+            self._emit('voice.session.error', error_type=type(exc).__name__)
             return
 
         speech = []
@@ -175,7 +230,7 @@ class FullDuplexVoiceSession:
             if self.input_device_name:
                 input_device = self.devices.resolve(self.input_device_name, kind='input')
         except Exception as exc:
-            self._emit('voice.error', error=str(exc))
+            self._emit('voice.session.error', error_type=type(exc).__name__)
             return
 
         def cb(indata, frames, time_info, status):
@@ -194,7 +249,7 @@ class FullDuplexVoiceSession:
             callback=cb,
             device=input_device,
         ):
-            self._emit('state', state='listening')
+            self._emit('voice.listening.started', source='desktop-voice')
             while not self._stop.is_set():
                 try:
                     block = self._q.get(timeout=.15)
@@ -225,32 +280,46 @@ class FullDuplexVoiceSession:
                         self.endpoint.reset()
                         if len(audio) < self.samplerate * .22:
                             continue
-                        self._emit('state', state='understanding')
+                        self._emit('voice.transcription.started', source='desktop-voice')
                         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as file:
                             path = Path(file.name)
                         sf.write(path, audio, self.samplerate)
                         try:
                             text = self.models.transcribe(path)
+                        except Exception as exc:
+                            self._emit('voice.stt.failed', error_type=type(exc).__name__, source='desktop-voice')
+                            self._emit('voice.listening.started', source='desktop-voice')
+                            continue
                         finally:
                             path.unlink(missing_ok=True)
                         if not text.strip():
-                            self._emit('state', state='listening')
+                            self._emit('voice.stt.empty', source='desktop-voice')
+                            self._emit('voice.listening.started', source='desktop-voice')
                             continue
+                        request_id = str(uuid.uuid4())
                         self.metrics['utterances'] += 1
-                        self._emit('voice.transcript', text=text, metrics=dict(self.metrics))
+                        self._emit(
+                            'voice.transcript',
+                            request_id=request_id,
+                            text=text,
+                            final=True,
+                            source='desktop-voice',
+                            metrics=dict(self.metrics),
+                        )
                         cancel_event = threading.Event()
                         with self._lifecycle_lock:
                             previous = self._turn_cancel
                             if previous:
                                 previous.set()
                             self._turn_cancel = cancel_event
+                            self._current_request_id = request_id
                         response_thread = threading.Thread(
                             target=self._respond,
-                            args=(text, cancel_event),
+                            args=(text, cancel_event, request_id),
                             daemon=True,
                             name='personal-ai-voice-turn',
                         )
                         with self._lifecycle_lock:
                             self._response_thread = response_thread
                         response_thread.start()
-        self._emit('state', state='idle')
+        self._emit('voice.session.stopped')
