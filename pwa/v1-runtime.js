@@ -12,6 +12,7 @@
   let currentPlaybackRequestId=null;
   let playbackGeneration=0;
   let lastApprovalRequestId=null;
+  let approvalReturnFocus=null;
 
   const uuid=()=>{
     const c=globalThis.crypto;
@@ -35,6 +36,17 @@
     }catch{}
   };
 
+  const configureStage5Accessibility=()=>{
+    try{
+      const panel=$('approvalPanel');
+      if(panel){panel.setAttribute('role','alertdialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-labelledby','approvalTitle');panel.setAttribute('aria-describedby','approvalDescription')}
+      const stateLabel=$('stateLabel');if(stateLabel)stateLabel.setAttribute('aria-label','Personal AI semantic state: Idle');
+      const core=typeof document!=='undefined'&&typeof document.querySelector==='function'?document.querySelector('.core-stage'):null;
+      if(core){core.removeAttribute('aria-hidden');core.setAttribute('role','img');core.setAttribute('aria-label','Personal AI living core. The current semantic state is announced below.');const canvas=typeof core.querySelector==='function'?core.querySelector('canvas'):null;if(canvas)canvas.setAttribute('aria-hidden','true')}
+    }catch{}
+  };
+  configureStage5Accessibility();
+
   const semanticRenderer=globalThis.setState;
   if(typeof semanticRenderer==='function'){
     globalThis.setState=function stage5StateRenderer(name,detail){
@@ -54,7 +66,11 @@
       applyingCanonicalState=true;
       try{setState(canonicalName.toLowerCase().replaceAll('_','-'),String(snapshot.label||''))}finally{applyingCanonicalState=false}
     }
-    try{document.documentElement.dataset.aiState=canonicalName.toLowerCase();document.documentElement.dataset.aiSequence=String(sequence)}catch{}
+    try{
+      const safeLabel=String(snapshot.label||canonicalName.replaceAll('_',' '));
+      const stateLabel=$('stateLabel');if(stateLabel){stateLabel.textContent=safeLabel;stateLabel.setAttribute('aria-label',`Personal AI semantic state: ${safeLabel}`)}
+      document.documentElement.dataset.aiState=canonicalName.toLowerCase();document.documentElement.dataset.aiSequence=String(sequence);
+    }catch{}
     return true;
   };
   const scheduleCanonicalRefresh=(delay=STATE_POLL_MS)=>{
@@ -102,7 +118,24 @@
     const play=()=>{if(stale()||finished)return;attempt++;let started=false;const utterance=makeUtterance(text,{start:()=>{if(stale())return;started=true;speaking=true;renderVoiceControls();voiceClientEvent('tts_started',rid)},end:finish,error:event=>{if(stale()||finished)return;if(event&&event.error==='interrupted'){finish();return}if(attempt<2)setTimeout(play,80);else fail(event&&event.error)}});currentUtterance=utterance;globalThis.speechSynthesis.cancel();globalThis.speechSynthesis.resume();globalThis.speechSynthesis.speak(utterance);globalThis.speechSynthesis.resume();setTimeout(()=>{if(!started&&!finished&&!stale()){if(attempt<2)play();else fail('start_timeout')}},1600)};play();
   }
   globalThis.speakReply=canonicalSpeakReply;
-  const legacyShowApproval=globalThis.showApproval;if(typeof legacyShowApproval==='function'){globalThis.showApproval=function stage3ShowApproval(approval){lastApprovalRequestId=(approval&&approval.request_id)||currentUiRequestId||null;return legacyShowApproval(approval)}};
+  const legacyShowApproval=globalThis.showApproval;
+  if(typeof legacyShowApproval==='function'){
+    globalThis.showApproval=function stage3ShowApproval(approval){
+      lastApprovalRequestId=(approval&&approval.request_id)||currentUiRequestId||null;
+      try{approvalReturnFocus=document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null}catch{approvalReturnFocus=null}
+      const result=legacyShowApproval(approval);
+      try{const cancel=$('rejectApproval');if(cancel&&typeof cancel.focus==='function')setTimeout(()=>cancel.focus(),0)}catch{}
+      return result;
+    };
+  }
+  const legacyClearApproval=globalThis.clearApproval;
+  if(typeof legacyClearApproval==='function'){
+    globalThis.clearApproval=function stage5ClearApproval(){
+      const result=legacyClearApproval();const target=approvalReturnFocus;approvalReturnFocus=null;
+      try{if(target&&typeof target.focus==='function')setTimeout(()=>target.focus(),0)}catch{}
+      return result;
+    };
+  }
   globalThis.interruptAndListen=async function stage3InterruptAndListen(){const requestId=currentPlaybackRequestId;const wasSpeaking=Boolean(speaking||(globalThis.speechSynthesis&&globalThis.speechSynthesis.speaking));stopPlayback(false);handsFree=true;renderVoiceControls();try{await api('/voice/barge',{method:'POST',body:JSON.stringify({speaking:wasSpeaking,request_id:requestId})})}catch{}scheduleListening(100)};
 
   const mic=$('micButton');if(mic){mic.onclick=async()=>{if(speaking||(globalThis.speechSynthesis&&globalThis.speechSynthesis.speaking)){await globalThis.interruptAndListen();return}if(turnInFlight&&currentUiRequestId){try{await api('/voice/operation/cancel',{method:'POST',body:JSON.stringify({request_id:currentUiRequestId})});$('voiceAlert').textContent='Cancelling the current operation safely…';handsFree=true;renderVoiceControls()}catch(error){$('voiceAlert').textContent=error.message}return}if(handsFree){handsFree=false;stopRecognition();renderVoiceControls();return}handsFree=true;renderVoiceControls();try{await primeVoice();startListening()}catch(error){handsFree=false;renderVoiceControls();$('voiceAlert').textContent=error.message}}}
