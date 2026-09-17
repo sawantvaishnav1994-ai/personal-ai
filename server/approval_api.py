@@ -14,6 +14,7 @@ def approval_router(runtime, executor):
     router = APIRouter(prefix='/iphone/api', tags=['approvals'])
     registry = runtime['device_registry']
     agent = runtime['agent_executor']
+    turn_runtime = runtime.get('turn_runtime') or runtime.get('executor')
 
     def require_owner():
         context = current_trusted_request()
@@ -25,10 +26,21 @@ def approval_router(runtime, executor):
             raise HTTPException(403, 'This device is not permitted to approve governed actions')
         return context
 
+    def request_id_for_approval(approval_id: str):
+        # Read-only correlation to the Stage 1 canonical turn. Approval authority
+        # remains the Stage 2 durable ApprovalManager/continuation runtime.
+        lookup = getattr(turn_runtime, '_turn_by_approval', None)
+        try:
+            turn = lookup(approval_id) if callable(lookup) else None
+        except Exception:
+            turn = None
+        return str(turn.get('request_id')) if turn and turn.get('request_id') else None
+
     def terminal_result(approval_id: str):
         item = agent.approval_result(approval_id)
         if not item:
             return None
+        request_id = request_id_for_approval(approval_id)
         status = item['status']
         if status == 'completed':
             outcome = item.get('outcome') or {}
@@ -36,6 +48,7 @@ def approval_router(runtime, executor):
                 'status': 'approved',
                 'reply': str(outcome.get('reply') or 'Approved action already completed.'),
                 'approval_id': approval_id,
+                'request_id': request_id,
                 'canonical_status': 'completed',
                 'replayed': True,
             }
@@ -44,6 +57,7 @@ def approval_router(runtime, executor):
                 'status': 'rejected',
                 'reply': 'Action cancelled.',
                 'approval_id': approval_id,
+                'request_id': request_id,
                 'canonical_status': 'rejected',
                 'replayed': True,
             }
@@ -73,6 +87,7 @@ def approval_router(runtime, executor):
             raise HTTPException(404, {'code': 'approval_not_found', 'message': 'This approval does not belong to this trusted device.'})
         if item.get('session_id') not in (None, context.session_id):
             raise HTTPException(409, {'code': 'approval_session_mismatch', 'message': 'This approval belongs to a different trusted session.'})
+        request_id = request_id_for_approval(approval_id)
         try:
             reply = executor.approve(approval_id)
         except ConfirmationRequired as exc:
@@ -80,8 +95,10 @@ def approval_router(runtime, executor):
                 'status': 'approval_required',
                 'reply': f'The previous approved step completed, and the next governed action needs approval for {exc.tool_name}.',
                 'prior_approval_id': approval_id,
+                'request_id': request_id,
                 'approval': {
                     'id': exc.approval_id,
+                    'request_id': request_id,
                     'tool': exc.tool_name,
                     'description': exc.description or f'Use {exc.tool_name}',
                     'expires_at': exc.expires_at,
@@ -119,6 +136,7 @@ def approval_router(runtime, executor):
             'status': 'approved',
             'reply': str(reply),
             'approval_id': approval_id,
+            'request_id': request_id,
             'canonical_status': 'completed',
             'replayed': False,
         }
@@ -136,6 +154,7 @@ def approval_router(runtime, executor):
             raise HTTPException(404, {'code': 'approval_not_found', 'message': 'This approval does not belong to this trusted device.'})
         if item.get('session_id') not in (None, context.session_id):
             raise HTTPException(409, {'code': 'approval_session_mismatch', 'message': 'This approval belongs to a different trusted session.'})
+        request_id = request_id_for_approval(approval_id)
         try:
             reply = executor.reject(approval_id)
         except TurnReplayBlocked:
@@ -152,6 +171,7 @@ def approval_router(runtime, executor):
             'status': 'rejected',
             'reply': str(reply),
             'approval_id': approval_id,
+            'request_id': request_id,
             'canonical_status': 'rejected',
             'replayed': False,
         }
