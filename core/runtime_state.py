@@ -19,27 +19,32 @@ LEGACY_STATE_ALIASES={
 'needs_approval':RuntimeState.NEEDS_APPROVAL,'waiting_approval':RuntimeState.NEEDS_APPROVAL,'background':RuntimeState.BACKGROUND,
 'success':RuntimeState.SUCCESS,'warning':RuntimeState.WARNING,'error':RuntimeState.ERROR}
 
-def normalize_runtime_state(value):
+def _known_runtime_state(value):
     if isinstance(value,RuntimeState): return value
-    key=str(value or 'idle').strip().lower().replace('-','_').replace(' ','_')
+    key=str(value or '').strip().lower().replace('-','_').replace(' ','_')
+    if not key:return None
     try:return RuntimeState[key.upper()]
-    except KeyError:return LEGACY_STATE_ALIASES.get(key,RuntimeState.IDLE)
+    except KeyError:return LEGACY_STATE_ALIASES.get(key)
+
+def normalize_runtime_state(value):
+    """Legacy-compatible normalizer. Canonical authority uses strict recognition."""
+    return _known_runtime_state(value) or RuntimeState.IDLE
 
 LEGAL_TRANSITIONS={
 RuntimeState.IDLE:{RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
 RuntimeState.ACTIVE:{RuntimeState.IDLE,RuntimeState.LISTENING,RuntimeState.UNDERSTANDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
 RuntimeState.LISTENING:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
 RuntimeState.UNDERSTANDING:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.MEMORY_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.KNOWLEDGE_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.THINKING:{RuntimeState.IDLE,RuntimeState.NEEDS_APPROVAL,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.NEEDS_APPROVAL:{RuntimeState.TOOL_ACTION,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.TOOL_ACTION:{RuntimeState.SUCCESS,RuntimeState.WARNING,RuntimeState.RESPONDING,RuntimeState.ERROR},
-RuntimeState.SUCCESS:{RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.BACKGROUND,RuntimeState.LISTENING},
-RuntimeState.WARNING:{RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.LISTENING},
-RuntimeState.RESPONDING:{RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.BACKGROUND:{RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.THINKING,RuntimeState.ERROR,RuntimeState.WARNING},
-RuntimeState.ERROR:{RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING}}
+RuntimeState.MEMORY_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.KNOWLEDGE_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.KNOWLEDGE_RETRIEVAL:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.MEMORY_RETRIEVAL,RuntimeState.THINKING,RuntimeState.RESPONDING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.THINKING:{RuntimeState.IDLE,RuntimeState.UNDERSTANDING,RuntimeState.NEEDS_APPROVAL,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.BACKGROUND,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.NEEDS_APPROVAL:{RuntimeState.UNDERSTANDING,RuntimeState.TOOL_ACTION,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.TOOL_ACTION:{RuntimeState.UNDERSTANDING,RuntimeState.SUCCESS,RuntimeState.WARNING,RuntimeState.RESPONDING,RuntimeState.ERROR},
+RuntimeState.SUCCESS:{RuntimeState.UNDERSTANDING,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.BACKGROUND,RuntimeState.LISTENING},
+RuntimeState.WARNING:{RuntimeState.UNDERSTANDING,RuntimeState.TOOL_ACTION,RuntimeState.RESPONDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.ERROR,RuntimeState.LISTENING},
+RuntimeState.RESPONDING:{RuntimeState.UNDERSTANDING,RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.BACKGROUND:{RuntimeState.UNDERSTANDING,RuntimeState.ACTIVE,RuntimeState.IDLE,RuntimeState.THINKING,RuntimeState.ERROR,RuntimeState.WARNING},
+RuntimeState.ERROR:{RuntimeState.UNDERSTANDING,RuntimeState.IDLE,RuntimeState.ACTIVE,RuntimeState.LISTENING}}
 
 @dataclass(frozen=True)
 class StateSnapshot:
@@ -55,7 +60,11 @@ class RuntimeStateAuthority:
     def snapshot(self):
         with self._lock:return StateSnapshot(self._state,self._sequence,'current',self._request_id)
     def transition(self,target,*,reason,force=False,request_id=None,activate_request=False,**context):
-        normalized=normalize_runtime_state(target); scoped=str(request_id or '').strip() or None; stale=False
+        normalized=_known_runtime_state(target); scoped=str(request_id or '').strip() or None; stale=False
+        if normalized is None:
+            snapshot=self.snapshot()
+            self.events.emit('runtime.state.unknown_ignored',state=str(target),sequence=snapshot.sequence,request_id=snapshot.request_id)
+            return StateSnapshot(snapshot.state,snapshot.sequence,'unknown_state_ignored',snapshot.request_id)
         with self._lock:
             current=self._state; previous_request=self._request_id
             if scoped and self._request_id and scoped!=self._request_id and not activate_request:
@@ -73,10 +82,10 @@ class RuntimeStateAuthority:
         self.events.emit('runtime.state',state=normalized.value,previous_state=current.value,sequence=snapshot.sequence,reason=str(reason),request_id=snapshot.request_id,**context)
         return snapshot
     def _compat(self,event):
-        try:self.transition(normalize_runtime_state(event.get('state')),reason=f"legacy:{event.get('event','state')}",request_id=event.get('request_id'))
+        try:self.transition(event.get('state'),reason=f"legacy:{event.get('event','state')}",request_id=event.get('request_id'))
         except ValueError:return
     def _safe_transition(self,target,reason,event,*,activate_request=False):
-        try:self.transition(target,reason=reason,request_id=event.get('request_id'),activate_request=activate_request,force=activate_request)
+        try:self.transition(target,reason=reason,request_id=event.get('request_id'),activate_request=activate_request)
         except ValueError:return
     def _bind_compatibility_events(self):
         self._subscriptions.append(self.events.subscribe('state',self._compat))
