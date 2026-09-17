@@ -69,72 +69,20 @@ def normalize_runtime_state(value):
 
 
 LEGAL_TRANSITIONS = {
-    RuntimeState.IDLE: {
-        RuntimeState.ACTIVE, RuntimeState.LISTENING, RuntimeState.BACKGROUND,
-        RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.ACTIVE: {
-        RuntimeState.IDLE, RuntimeState.LISTENING, RuntimeState.UNDERSTANDING,
-        RuntimeState.BACKGROUND, RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.LISTENING: {
-        RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE, RuntimeState.IDLE,
-        RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.UNDERSTANDING: {
-        RuntimeState.IDLE, RuntimeState.MEMORY_RETRIEVAL,
-        RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING,
-        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.MEMORY_RETRIEVAL: {
-        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
-        RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING,
-        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.KNOWLEDGE_RETRIEVAL: {
-        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
-        RuntimeState.MEMORY_RETRIEVAL, RuntimeState.THINKING,
-        RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.THINKING: {
-        RuntimeState.IDLE, RuntimeState.UNDERSTANDING,
-        RuntimeState.NEEDS_APPROVAL, RuntimeState.TOOL_ACTION,
-        RuntimeState.RESPONDING, RuntimeState.BACKGROUND,
-        RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.NEEDS_APPROVAL: {
-        RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION,
-        RuntimeState.ACTIVE, RuntimeState.IDLE,
-        RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.TOOL_ACTION: {
-        RuntimeState.UNDERSTANDING, RuntimeState.SUCCESS,
-        RuntimeState.WARNING, RuntimeState.RESPONDING, RuntimeState.ERROR,
-    },
-    RuntimeState.SUCCESS: {
-        RuntimeState.UNDERSTANDING, RuntimeState.RESPONDING,
-        RuntimeState.ACTIVE, RuntimeState.IDLE,
-        RuntimeState.BACKGROUND, RuntimeState.LISTENING,
-    },
-    RuntimeState.WARNING: {
-        RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION,
-        RuntimeState.RESPONDING, RuntimeState.ACTIVE,
-        RuntimeState.IDLE, RuntimeState.ERROR, RuntimeState.LISTENING,
-    },
-    RuntimeState.RESPONDING: {
-        RuntimeState.UNDERSTANDING, RuntimeState.IDLE,
-        RuntimeState.ACTIVE, RuntimeState.LISTENING,
-        RuntimeState.ERROR, RuntimeState.WARNING, RuntimeState.SUCCESS,
-    },
-    RuntimeState.BACKGROUND: {
-        RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE,
-        RuntimeState.IDLE, RuntimeState.THINKING,
-        RuntimeState.ERROR, RuntimeState.WARNING,
-    },
-    RuntimeState.ERROR: {
-        RuntimeState.UNDERSTANDING, RuntimeState.IDLE,
-        RuntimeState.ACTIVE, RuntimeState.LISTENING,
-    },
+    RuntimeState.IDLE: {RuntimeState.ACTIVE, RuntimeState.LISTENING, RuntimeState.BACKGROUND, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.ACTIVE: {RuntimeState.IDLE, RuntimeState.LISTENING, RuntimeState.UNDERSTANDING, RuntimeState.BACKGROUND, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.LISTENING: {RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE, RuntimeState.IDLE, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.UNDERSTANDING: {RuntimeState.IDLE, RuntimeState.MEMORY_RETRIEVAL, RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING, RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.MEMORY_RETRIEVAL: {RuntimeState.IDLE, RuntimeState.UNDERSTANDING, RuntimeState.KNOWLEDGE_RETRIEVAL, RuntimeState.THINKING, RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.KNOWLEDGE_RETRIEVAL: {RuntimeState.IDLE, RuntimeState.UNDERSTANDING, RuntimeState.MEMORY_RETRIEVAL, RuntimeState.THINKING, RuntimeState.RESPONDING, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.THINKING: {RuntimeState.IDLE, RuntimeState.UNDERSTANDING, RuntimeState.NEEDS_APPROVAL, RuntimeState.TOOL_ACTION, RuntimeState.RESPONDING, RuntimeState.BACKGROUND, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.NEEDS_APPROVAL: {RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION, RuntimeState.ACTIVE, RuntimeState.IDLE, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.TOOL_ACTION: {RuntimeState.UNDERSTANDING, RuntimeState.SUCCESS, RuntimeState.WARNING, RuntimeState.RESPONDING, RuntimeState.ERROR},
+    RuntimeState.SUCCESS: {RuntimeState.UNDERSTANDING, RuntimeState.RESPONDING, RuntimeState.ACTIVE, RuntimeState.IDLE, RuntimeState.BACKGROUND, RuntimeState.LISTENING},
+    RuntimeState.WARNING: {RuntimeState.UNDERSTANDING, RuntimeState.TOOL_ACTION, RuntimeState.RESPONDING, RuntimeState.ACTIVE, RuntimeState.IDLE, RuntimeState.ERROR, RuntimeState.LISTENING},
+    RuntimeState.RESPONDING: {RuntimeState.UNDERSTANDING, RuntimeState.IDLE, RuntimeState.ACTIVE, RuntimeState.LISTENING, RuntimeState.ERROR, RuntimeState.WARNING, RuntimeState.SUCCESS},
+    RuntimeState.BACKGROUND: {RuntimeState.UNDERSTANDING, RuntimeState.ACTIVE, RuntimeState.IDLE, RuntimeState.THINKING, RuntimeState.ERROR, RuntimeState.WARNING},
+    RuntimeState.ERROR: {RuntimeState.UNDERSTANDING, RuntimeState.IDLE, RuntimeState.ACTIVE, RuntimeState.LISTENING},
 }
 
 
@@ -158,11 +106,7 @@ class RuntimeStateAuthority:
         self._request_id = None
         self._lock = RLock()
         self._subscriptions = []
-        # Requests that reached a real degraded/unverified execution outcome must
-        # never be projected as SUCCESS merely because the turn later returned text.
         self._degraded_requests: set[str] = set()
-        # A bounded retired-owner set prevents late/duplicate events from old turns
-        # from retaking foreground authority after ownership has moved or yielded.
         self._retired_request_ids: list[str] = []
         self._bind_compatibility_events()
 
@@ -189,21 +133,13 @@ class RuntimeStateAuthority:
         stale = False
         if normalized is None:
             snapshot = self.snapshot()
-            self.events.emit(
-                'runtime.state.unknown_ignored',
-                state=str(target),
-                sequence=snapshot.sequence,
-                request_id=snapshot.request_id,
-            )
+            self.events.emit('runtime.state.unknown_ignored', state=str(target), sequence=snapshot.sequence, request_id=snapshot.request_id)
             return StateSnapshot(snapshot.state, snapshot.sequence, 'unknown_state_ignored', snapshot.request_id)
-
         with self._lock:
             current = self._state
             previous_request = self._request_id
             retired = bool(scoped and scoped in self._retired_request_ids)
-            if scoped and not activate_request and (
-                retired or (self._request_id and scoped != self._request_id)
-            ):
+            if scoped and not activate_request and (retired or (self._request_id and scoped != self._request_id)):
                 stale = True
                 current_request = self._request_id
                 snapshot = StateSnapshot(current, self._sequence, 'stale_request_ignored', current_request)
@@ -213,8 +149,6 @@ class RuntimeStateAuthority:
                     return StateSnapshot(current, self._sequence, reason, self._request_id)
                 if not force and normalized != current and normalized not in LEGAL_TRANSITIONS[current]:
                     raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
-                # Ownership changes are committed only after transition validation so a
-                # rejected semantic transition can never leave a partial request takeover.
                 if activate_request and scoped:
                     if previous_request and previous_request != scoped:
                         self._retire_request_locked(previous_request)
@@ -224,75 +158,35 @@ class RuntimeStateAuthority:
                 self._sequence += 1
                 self._state = normalized
                 snapshot = StateSnapshot(normalized, self._sequence, reason, self._request_id)
-
         if stale:
-            self.events.emit(
-                'runtime.state.stale_ignored',
-                request_id=scoped,
-                current_request_id=current_request,
-            )
+            self.events.emit('runtime.state.stale_ignored', request_id=scoped, current_request_id=current_request)
             return snapshot
-
-        self.events.emit(
-            'runtime.state',
-            state=normalized.value,
-            previous_state=current.value,
-            sequence=snapshot.sequence,
-            reason=str(reason),
-            request_id=snapshot.request_id,
-            **context,
-        )
+        self.events.emit('runtime.state', state=normalized.value, previous_state=current.value, sequence=snapshot.sequence, reason=str(reason), request_id=snapshot.request_id, **context)
         return snapshot
 
-    def activate_foreground_request(
-        self,
-        request_id,
-        *,
-        reason='turn_started',
-        target=RuntimeState.UNDERSTANDING,
-        **context,
-    ):
-        """Atomically transfer foreground ownership through the legal lifecycle.
-
-        A fresh foreground turn is semantically UNDERSTANDING. IDLE cannot jump
-        directly there, so activation follows IDLE -> ACTIVE -> UNDERSTANDING while
-        holding the authority lock. Observers can never snapshot the new request in
-        the old IDLE state, and no force transition is used.
-        """
+    def activate_foreground_request(self, request_id, *, reason='turn_started', target=RuntimeState.UNDERSTANDING, **context):
         scoped = str(request_id or '').strip() or None
         normalized = _known_runtime_state(target)
         if not scoped:
             raise ValueError('foreground request activation requires request_id')
         if normalized is None:
             raise ValueError(f'unknown runtime state: {target}')
-
         with self._lock:
             if scoped in self._retired_request_ids and scoped != self._request_id:
-                stale_snapshot = StateSnapshot(
-                    self._state,
-                    self._sequence,
-                    'stale_request_ignored',
-                    self._request_id,
-                )
+                stale_snapshot = StateSnapshot(self._state, self._sequence, 'stale_request_ignored', self._request_id)
                 stale_current_request = self._request_id
             else:
                 stale_snapshot = None
                 stale_current_request = None
         if stale_snapshot is not None:
-            self.events.emit(
-                'runtime.state.stale_ignored',
-                request_id=scoped,
-                current_request_id=stale_current_request,
-            )
+            self.events.emit('runtime.state.stale_ignored', request_id=scoped, current_request_id=stale_current_request)
             return stale_snapshot
-
         records = []
         with self._lock:
             current = self._state
             previous_request = self._request_id
             if scoped == previous_request and normalized == current:
                 return StateSnapshot(current, self._sequence, reason, self._request_id)
-
             if normalized == RuntimeState.UNDERSTANDING and current == RuntimeState.IDLE:
                 path = [RuntimeState.ACTIVE, RuntimeState.UNDERSTANDING]
             elif normalized == current:
@@ -301,14 +195,11 @@ class RuntimeStateAuthority:
                 path = [normalized]
             else:
                 raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
-
-            # Validate the complete route before changing ownership or state.
             probe = current
             for step in path:
                 if step != probe and step not in LEGAL_TRANSITIONS[probe]:
                     raise ValueError(f'illegal runtime state transition: {probe.value} -> {step.value}')
                 probe = step
-
             if previous_request and previous_request != scoped:
                 self._retire_request_locked(previous_request)
             if scoped != previous_request:
@@ -322,61 +213,26 @@ class RuntimeStateAuthority:
                 records.append((step, previous, snapshot))
                 previous = step
             final = StateSnapshot(self._state, self._sequence, reason, self._request_id)
-
         for step, previous, snapshot in records:
-            self.events.emit(
-                'runtime.state',
-                state=step.value,
-                previous_state=previous.value,
-                sequence=snapshot.sequence,
-                reason=str(reason),
-                request_id=snapshot.request_id,
-                **context,
-            )
+            self.events.emit('runtime.state', state=step.value, previous_state=previous.value, sequence=snapshot.sequence, reason=str(reason), request_id=snapshot.request_id, **context)
         return final
 
     def complete_foreground_request(self, request_id, *, degraded=False, reason='turn_completed'):
-        """Project a factual terminal turn outcome without inventing success.
-
-        Successful foreground turns pass through RESPONDING and only then SUCCESS.
-        A request that produced an unverified tool outcome terminates as WARNING.
-        A stale request is rejected by the same request-scoped authority checks used
-        by every other semantic transition.
-        """
         scoped = str(request_id or '').strip() or None
         if not scoped:
             raise ValueError('foreground request completion requires request_id')
-
         with self._lock:
             current = self._state
             current_request = self._request_id
         if current_request and scoped != current_request:
-            return self.transition(
-                RuntimeState.SUCCESS,
-                reason=reason,
-                request_id=scoped,
-            )
-
+            return self.transition(RuntimeState.SUCCESS, reason=reason, request_id=scoped)
         if degraded:
-            return self.transition(
-                RuntimeState.WARNING,
-                reason='completed_with_unverified_outcome',
-                request_id=scoped,
-            )
-
+            return self.transition(RuntimeState.WARNING, reason='completed_with_unverified_outcome', request_id=scoped)
         if current == RuntimeState.SUCCESS:
             return self.snapshot()
         if current != RuntimeState.RESPONDING:
-            self.transition(
-                RuntimeState.RESPONDING,
-                reason='terminal_response_ready',
-                request_id=scoped,
-            )
-        return self.transition(
-            RuntimeState.SUCCESS,
-            reason=reason,
-            request_id=scoped,
-        )
+            self.transition(RuntimeState.RESPONDING, reason='terminal_response_ready', request_id=scoped)
+        return self.transition(RuntimeState.SUCCESS, reason=reason, request_id=scoped)
 
     def _compat(self, event):
         scoped = str(event.get('request_id') or '').strip() or None
@@ -384,45 +240,20 @@ class RuntimeStateAuthority:
             with self._lock:
                 current_request = self._request_id
                 current_state = self._state
-                snapshot = StateSnapshot(
-                    current_state,
-                    self._sequence,
-                    'unscoped_compat_ignored',
-                    current_request,
-                )
-            # Foreground work must always be request-scoped. Unscoped legacy state
-            # emissions belong to background/legacy producers and may not mutate an
-            # active foreground owner or escape a BACKGROUND projection.
+                snapshot = StateSnapshot(current_state, self._sequence, 'unscoped_compat_ignored', current_request)
             if current_request is not None or current_state == RuntimeState.BACKGROUND:
-                self.events.emit(
-                    'runtime.state.unscoped_compat_ignored',
-                    attempted_state=str(event.get('state') or ''),
-                    current_state=current_state.value,
-                    current_request_id=current_request,
-                )
+                self.events.emit('runtime.state.unscoped_compat_ignored', attempted_state=str(event.get('state') or ''), current_state=current_state.value, current_request_id=current_request)
                 return snapshot
         try:
-            return self.transition(
-                event.get('state'),
-                reason=f"legacy:{event.get('event', 'state')}",
-                request_id=scoped,
-            )
+            return self.transition(event.get('state'), reason=f"legacy:{event.get('event', 'state')}", request_id=scoped)
         except ValueError:
             return self.snapshot()
 
     def _safe_transition(self, target, reason, event, *, activate_request=False):
         try:
             if activate_request:
-                return self.activate_foreground_request(
-                    event.get('request_id'),
-                    reason=reason,
-                    target=target,
-                )
-            return self.transition(
-                target,
-                reason=reason,
-                request_id=event.get('request_id'),
-            )
+                return self.activate_foreground_request(event.get('request_id'), reason=reason, target=target)
+            return self.transition(target, reason=reason, request_id=event.get('request_id'))
         except ValueError:
             return self.snapshot()
         finally:
@@ -433,65 +264,38 @@ class RuntimeStateAuthority:
                         self._degraded_requests.discard(scoped)
 
     def _on_background_started(self, event):
-        """Project only legitimate background ownership without stealing foreground.
+        """Project legitimate background work without allowing foreground takeover.
 
-        Request-scoped backgrounding uses the normal legal graph. Unscoped scheduled
-        workflow/automation work may produce BACKGROUND only from a quiescent state;
-        it never interrupts an active foreground request and its later unscoped
-        AgentExecutor state events remain backend/Activities truth, not Home truth.
+        A request-scoped detach follows the existing legal graph. An unscoped
+        background start may take the Core only when no active foreground lifecycle
+        owns it. SUCCESS may retain request provenance for history, but that request
+        is terminal: yielding to background atomically retires it and clears active
+        ownership. The retired id remains stale thereafter and cannot resurrect.
         """
         scoped = str(event.get('request_id') or '').strip() or None
         if scoped:
             return self._safe_transition(RuntimeState.BACKGROUND, 'background_started', event)
-
         with self._lock:
             current = self._state
             current_request = self._request_id
-            if current_request is not None or current not in {
-                RuntimeState.IDLE,
-                RuntimeState.ACTIVE,
-                RuntimeState.SUCCESS,
-                RuntimeState.BACKGROUND,
-            }:
-                ignored = StateSnapshot(
-                    current,
-                    self._sequence,
-                    'background_ignored_for_foreground',
-                    current_request,
-                )
-                should_ignore = True
-            elif current == RuntimeState.BACKGROUND:
+            terminal_provenance = current == RuntimeState.SUCCESS and current_request is not None
+            if current == RuntimeState.BACKGROUND and current_request is None:
                 return StateSnapshot(current, self._sequence, 'background_started', None)
+            if (current_request is not None and not terminal_provenance) or current not in {RuntimeState.IDLE, RuntimeState.ACTIVE, RuntimeState.SUCCESS}:
+                ignored = StateSnapshot(current, self._sequence, 'background_ignored_for_foreground', current_request)
+                should_ignore = True
             else:
                 should_ignore = False
-                if current_request:
+                if terminal_provenance:
                     self._retire_request_locked(current_request)
                 self._request_id = None
                 self._sequence += 1
                 self._state = RuntimeState.BACKGROUND
-                snapshot = StateSnapshot(
-                    RuntimeState.BACKGROUND,
-                    self._sequence,
-                    'background_started',
-                    None,
-                )
-
+                snapshot = StateSnapshot(RuntimeState.BACKGROUND, self._sequence, 'background_started', None)
         if should_ignore:
-            self.events.emit(
-                'runtime.state.background_ignored',
-                current_state=current.value,
-                current_request_id=current_request,
-            )
+            self.events.emit('runtime.state.background_ignored', current_state=current.value, current_request_id=current_request)
             return ignored
-
-        self.events.emit(
-            'runtime.state',
-            state=RuntimeState.BACKGROUND.value,
-            previous_state=current.value,
-            sequence=snapshot.sequence,
-            reason='background_started',
-            request_id=None,
-        )
+        self.events.emit('runtime.state', state=RuntimeState.BACKGROUND.value, previous_state=current.value, sequence=snapshot.sequence, reason='background_started', request_id=None)
         return snapshot
 
     def _on_tool_unverified(self, event):
@@ -500,18 +304,9 @@ class RuntimeStateAuthority:
             with self._lock:
                 current_request = self._request_id
                 current_state = self._state
-                snapshot = StateSnapshot(
-                    current_state,
-                    self._sequence,
-                    'unscoped_tool_unverified_ignored',
-                    current_request,
-                )
+                snapshot = StateSnapshot(current_state, self._sequence, 'unscoped_tool_unverified_ignored', current_request)
             if current_request is not None or current_state == RuntimeState.BACKGROUND:
-                self.events.emit(
-                    'runtime.state.unscoped_tool_ignored',
-                    current_state=current_state.value,
-                    current_request_id=current_request,
-                )
+                self.events.emit('runtime.state.unscoped_tool_ignored', current_state=current_state.value, current_request_id=current_request)
                 return snapshot
         if scoped:
             with self._lock:
@@ -528,7 +323,6 @@ class RuntimeStateAuthority:
         try:
             return self.complete_foreground_request(scoped, degraded=degraded)
         except ValueError:
-            # An impossible completion path fails closed instead of weakening the graph.
             return self.snapshot()
         finally:
             with self._lock:
@@ -554,14 +348,7 @@ class RuntimeStateAuthority:
             'voice.session.stopped': (RuntimeState.IDLE, 'voice_session_stopped', False),
         }
         for name, (target, reason, activate) in mapping.items():
-            self._subscriptions.append(
-                self.events.subscribe(
-                    name,
-                    lambda event, t=target, r=reason, a=activate: self._safe_transition(
-                        t, r, event, activate_request=a
-                    ),
-                )
-            )
+            self._subscriptions.append(self.events.subscribe(name, lambda event, t=target, r=reason, a=activate: self._safe_transition(t, r, event, activate_request=a)))
         self._subscriptions.append(self.events.subscribe('automation.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('workflow.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('tool.unverified', self._on_tool_unverified))
