@@ -63,31 +63,32 @@ def test_unscoped_background_start_cannot_take_over_active_r2_thinking():
 ])
 def test_unscoped_background_cannot_steal_any_active_foreground_state(active_state):
     events = EventBus()
-    events.emit('turn.started', request_id='r2')
     authority = events.runtime_state
     if active_state is RuntimeState.ACTIVE:
-        authority.transition(RuntimeState.ACTIVE, reason='active', request_id='r2')
+        authority.activate_foreground_request('r2', reason='active-test', target=RuntimeState.ACTIVE)
     elif active_state is RuntimeState.LISTENING:
-        authority.transition(RuntimeState.ACTIVE, reason='active', request_id='r2')
-        authority.transition(RuntimeState.LISTENING, reason='listening', request_id='r2')
-    elif active_state is RuntimeState.UNDERSTANDING:
-        pass
-    elif active_state is RuntimeState.THINKING:
-        authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
-    elif active_state is RuntimeState.MEMORY_RETRIEVAL:
-        authority.transition(RuntimeState.MEMORY_RETRIEVAL, reason='memory', request_id='r2')
-    elif active_state is RuntimeState.KNOWLEDGE_RETRIEVAL:
-        authority.transition(RuntimeState.KNOWLEDGE_RETRIEVAL, reason='knowledge', request_id='r2')
-    elif active_state is RuntimeState.TOOL_ACTION:
-        authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
-        authority.transition(RuntimeState.TOOL_ACTION, reason='tool', request_id='r2')
-    elif active_state is RuntimeState.RESPONDING:
-        authority.transition(RuntimeState.RESPONDING, reason='responding', request_id='r2')
-    elif active_state is RuntimeState.NEEDS_APPROVAL:
-        authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
-        authority.transition(RuntimeState.NEEDS_APPROVAL, reason='approval', request_id='r2')
+        authority.activate_foreground_request('r2', reason='listening-test', target=RuntimeState.LISTENING)
+    else:
+        events.emit('turn.started', request_id='r2')
+        if active_state is RuntimeState.UNDERSTANDING:
+            pass
+        elif active_state is RuntimeState.THINKING:
+            authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
+        elif active_state is RuntimeState.MEMORY_RETRIEVAL:
+            authority.transition(RuntimeState.MEMORY_RETRIEVAL, reason='memory', request_id='r2')
+        elif active_state is RuntimeState.KNOWLEDGE_RETRIEVAL:
+            authority.transition(RuntimeState.KNOWLEDGE_RETRIEVAL, reason='knowledge', request_id='r2')
+        elif active_state is RuntimeState.TOOL_ACTION:
+            authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
+            authority.transition(RuntimeState.TOOL_ACTION, reason='tool', request_id='r2')
+        elif active_state is RuntimeState.RESPONDING:
+            authority.transition(RuntimeState.RESPONDING, reason='responding', request_id='r2')
+        elif active_state is RuntimeState.NEEDS_APPROVAL:
+            authority.transition(RuntimeState.THINKING, reason='thinking', request_id='r2')
+            authority.transition(RuntimeState.NEEDS_APPROVAL, reason='approval', request_id='r2')
     before = authority.snapshot()
     assert before.state is active_state
+    assert before.request_id == 'r2'
     events.emit('workflow.started', run_id='w1')
     assert authority.snapshot() == before
 
