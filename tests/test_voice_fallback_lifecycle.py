@@ -44,7 +44,7 @@ class CancelledExecutor:
         raise ExecutionCancelled('cancelled')
 
 
-def test_cancelled_turn_suppresses_late_reply_and_tts():
+def test_cancelled_turn_suppresses_late_reply_and_tts_without_legacy_state_writer():
     events = Events()
     session = FullDuplexVoiceSession(Models(), CancelAfterReturnExecutor(), events)
     cancel = threading.Event()
@@ -54,11 +54,12 @@ def test_cancelled_turn_suppresses_late_reply_and_tts():
 
     names = [name for name, _ in events.rows]
     assert 'voice.reply' not in names
-    assert 'state' in names
+    assert 'voice.output.stale_ignored' in names
+    assert 'state' not in names
     assert session._turn_cancel is None
 
 
-def test_execution_cancelled_returns_to_listening_when_session_remains_active():
+def test_execution_cancelled_returns_to_factual_listening_lifecycle():
     events = Events()
     session = FullDuplexVoiceSession(Models(), CancelledExecutor(), events)
     cancel = threading.Event()
@@ -66,12 +67,14 @@ def test_execution_cancelled_returns_to_listening_when_session_remains_active():
 
     session._respond('hello', cancel)
 
-    assert ('voice.turn.cancelled', {}) in events.rows
-    assert any(name == 'state' and payload.get('state') == 'listening' for name, payload in events.rows)
+    names = [name for name, _ in events.rows]
+    assert 'voice.turn.cancelled' in names
+    assert 'voice.listening.started' in names
+    assert 'state' not in names
     assert session._turn_cancel is None
 
 
-def test_stop_cancels_turn_and_drains_pending_audio_blocks():
+def test_stop_cancels_turn_drains_audio_and_emits_factual_session_stop():
     events = Events()
     session = FullDuplexVoiceSession(Models(), CancelAfterReturnExecutor(), events)
     cancel = threading.Event()
@@ -84,4 +87,5 @@ def test_stop_cancels_turn_and_drains_pending_audio_blocks():
     assert cancel.is_set()
     assert session._turn_cancel is None
     assert session._q.empty()
-    assert any(name == 'state' and payload.get('state') == 'idle' for name, payload in events.rows)
+    assert any(name == 'voice.session.stopped' for name, _ in events.rows)
+    assert not any(name == 'state' for name, _ in events.rows)
