@@ -29,6 +29,22 @@ def test_pagination_has_no_duplicate_or_missing_rows(tmp_path):
     assert set(seen) == set(written)
 
 
+@pytest.mark.parametrize('count,limit', [(0,5), (1,5), (4,5), (5,5), (6,5), (10,5), (12,5)])
+def test_exact_page_boundaries(count, limit, tmp_path):
+    store = MemoryStore(tmp_path / f'{count}.sqlite3')
+    written = [store.audit('tool', 'completed', {'execution_id': str(i)}) for i in range(count)]
+    projection = ActivitiesProjection(store)
+    seen, cursor = [], None
+    while True:
+        page = projection.page(limit=limit, cursor=cursor)
+        seen.extend(_ids(page))
+        if not page['has_more']:
+            break
+        cursor = page['next_cursor']
+    assert len(seen) == len(set(seen)) == count
+    assert set(seen) == set(written)
+
+
 def test_snapshot_cursor_excludes_concurrent_newer_audit_writes(tmp_path):
     store = MemoryStore(tmp_path / 'memory.sqlite3')
     original = [store.audit('tool', 'completed', {'execution_id': f'e-{i}'}) for i in range(12)]
@@ -54,21 +70,25 @@ def test_cursor_fails_closed_when_snapshot_falls_out_of_bounded_window(tmp_path)
         projection.page(limit=5, cursor=first['next_cursor'])
 
 
-def test_tampered_and_malformed_cursors_are_rejected(tmp_path):
+def test_tampered_malformed_and_cross_query_cursors_are_rejected(tmp_path):
     store = MemoryStore(tmp_path / 'memory.sqlite3')
-    for i in range(4):
+    for i in range(6):
         store.audit('tool', 'completed', {'execution_id': str(i)})
     projection = ActivitiesProjection(store)
-    page = projection.page(limit=2)
+    page = projection.page(limit=2, category='tool', status='completed')
     raw = page['next_cursor']
     padded = raw + '=' * (-len(raw) % 4)
     data = json.loads(base64.urlsafe_b64decode(padded).decode())
     data['after'] = 'not-a-real-audit-id'
     tampered = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
     with pytest.raises(ValueError):
-        projection.page(limit=2, cursor=tampered)
+        projection.page(limit=2, category='tool', status='completed', cursor=tampered)
     with pytest.raises(ValueError):
         projection.page(limit=2, cursor='not-json')
+    with pytest.raises(ValueError, match='does not match query'):
+        projection.page(limit=2, category='approval', status='completed', cursor=raw)
+    with pytest.raises(ValueError, match='does not match query'):
+        projection.page(limit=2, category='tool', status='error', cursor=raw)
 
 
 def test_equal_timestamps_have_deterministic_id_tiebreak():
@@ -81,6 +101,7 @@ def test_equal_timestamps_have_deterministic_id_tiebreak():
             ]
     projection = ActivitiesProjection(Store())
     assert _ids(projection.page(limit=3)) == ['c', 'b', 'a']
+    assert _ids(ActivitiesProjection(Store()).page(limit=3)) == ['c', 'b', 'a']
     detail = projection.detail('b')
     assert [row['id'] for row in detail['timeline']] == ['b']
 
@@ -92,20 +113,40 @@ def test_recursive_redaction_depth_and_oversized_payload_are_bounded():
     projected = ActivitiesProjection.project_entry({
         'id': 'x', 'category': 'tool', 'action': 'completed', 'created_at': 'now',
         'payload': {
-            'authorization': 'Bearer secret',
+            'authorization': 'Bearer secret', 'api_key': 'k', 'credential': 'c',
+            'secret_env': 'e', 'private_key': 'p', 'cookie': 'cookie',
             'nested': nested,
-            'items': [{'access_token': 'secret', 'safe': i} for i in range(250)],
+            'items': [{'access_token': 'secret', 'refresh_token': 'refresh', 'safe': i} for i in range(250)],
+            'huge_dict': {f'k{i}': i for i in range(250)},
             'text': 'x' * 5000,
+            'error': {'client_secret': 'secret', 'message': 'safe'},
+            'verification': {'recovery_credential': 'secret', 'verified': False},
         },
     })
-    assert projected['details']['authorization'] == '[redacted]'
+    for key in ('authorization', 'api_key', 'credential', 'secret_env', 'private_key', 'cookie'):
+        assert projected['details'][key] == '[redacted]'
     assert len(projected['details']['items']) == 100
-    assert all(item['access_token'] == '[redacted]' for item in projected['details']['items'])
+    assert all(item['access_token'] == '[redacted]' and item['refresh_token'] == '[redacted]' for item in projected['details']['items'])
+    assert len(projected['details']['huge_dict']) == 100
     assert len(projected['details']['text']) == 1000
+    assert projected['details']['error']['client_secret'] == '[redacted]'
+    assert projected['details']['verification']['recovery_credential'] == '[redacted]'
     value = projected['details']['nested']
     for _ in range(8):
         value = value['safe']
     assert value == '[bounded]'
+
+
+def test_activity_identity_is_canonical_and_unique():
+    rows = [
+        {'id': 'audit-2', 'category': 'tool', 'action': 'completed', 'payload': {}, 'created_at': '2'},
+        {'id': 'audit-1', 'category': 'tool', 'action': 'completed', 'payload': {}, 'created_at': '1'},
+    ]
+    class Store:
+        def audit_entries(self, category=None, limit=1000): return rows
+    projected = ActivitiesProjection(Store()).page(limit=2)['activities']
+    assert [(r['id'], r['activity_id']) for r in projected] == [('audit-2', 'audit-2'), ('audit-1', 'audit-1')]
+    assert len({r['activity_id'] for r in projected}) == 2
 
 
 def test_detail_correlates_only_matching_canonical_identifiers():
@@ -115,12 +156,23 @@ def test_detail_correlates_only_matching_canonical_identifiers():
         {'id': 'a3', 'category': 'tool', 'action': 'completed', 'created_at': '3', 'payload': {'request_id': 'r2', 'execution_id': 'e2'}},
     ]
     class Store:
-        def audit_entries(self, category=None, limit=1000):
-            return list(reversed(rows))
+        def audit_entries(self, category=None, limit=1000): return list(reversed(rows))
     detail = ActivitiesProjection(Store()).detail('a1')
     assert detail['correlations'] == {'request_id': 'r1', 'execution_id': 'e1'}
     assert [event['id'] for event in detail['timeline']] == ['a1', 'a2']
     assert ActivitiesProjection(Store()).detail('missing') is None
+
+
+def test_missing_correlations_do_not_merge_unrelated_activities():
+    rows = [
+        {'id': 'a2', 'category': 'tool', 'action': 'completed', 'created_at': '2', 'payload': {'safe': True}},
+        {'id': 'a1', 'category': 'agent', 'action': 'started', 'created_at': '1', 'payload': {}},
+    ]
+    class Store:
+        def audit_entries(self, category=None, limit=1000): return rows
+    detail = ActivitiesProjection(Store()).detail('a1')
+    assert detail['correlations'] == {}
+    assert [event['id'] for event in detail['timeline']] == ['a1']
 
 
 def test_reload_reconstructs_same_snapshot_cursor_from_canonical_audit(tmp_path):
