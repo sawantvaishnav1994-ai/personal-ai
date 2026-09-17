@@ -60,7 +60,17 @@ def test_pwa_middleware_requires_client_uuid_on_turn_and_injects_adapter():
     assert '<script src="/iphone/v1-runtime.js"></script>' in page.text
     adapter=client.get('/iphone/v1-runtime.js')
     assert adapter.status_code==200
-    assert 'crypto.randomUUID' in adapter.text
+    # The transport contract is semantic, not tied to one browser UUID API.
+    # Native randomUUID is preferred, while the fallback must require the Web
+    # Crypto CSPRNG and construct RFC-4122 UUID-v4 variant/version bits.
+    assert "typeof c.randomUUID==='function'" in adapter.text
+    assert "typeof c.getRandomValues!=='function'" in adapter.text
+    assert 'c.getRandomValues(b)' in adapter.text
+    assert 'b[6]=(b[6]&15)|64' in adapter.text
+    assert 'b[8]=(b[8]&63)|128' in adapter.text
+    assert 'Secure request identity is unavailable' in adapter.text
+    assert 'Math.random' not in adapter.text
+    assert 'Date.now()' not in adapter.text.split('const uuid=()=>{',1)[1].split('};',1)[0]
     assert 'request_id:pending.request_id' in adapter.text
 
 
