@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -25,12 +24,13 @@ def validate_request_id(value: str) -> str:
 class LogicalTurnBody(BaseModel):
     # Security-sensitive identity belongs to the trusted server bridge. Unknown
     # client fields are rejected instead of silently accepting fake authority.
+    # Stage 3 intentionally preserves this qualified Stage 1 body shape; input
+    # modality is non-authoritative transport metadata carried separately.
     model_config = ConfigDict(extra='forbid')
 
     request_id: str = Field(min_length=36, max_length=64)
     transcript: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = Field(default=None, max_length=80)
-    input_modality: Literal['text', 'voice'] = 'text'
 
     @field_validator('request_id')
     @classmethod
