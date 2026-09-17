@@ -63,5 +63,7 @@ def test_api_missing_and_cross_session_are_safe_not_found(tmp_path):
 
 def test_read_api_exposes_no_decision_or_dispatch_route(tmp_path):
     c,_=make_client(tmp_path,Devices())
-    paths={route.path for route in c.app.routes if route.path.startswith('/iphone/api/approvals-center')}
+    # FastAPI/Starlette may include middleware wrapper route objects without a path.
+    # Inspect only concrete path routes; the contract remains read-only.
+    paths={path for route in c.app.routes if (path:=getattr(route,'path',None)) and path.startswith('/iphone/api/approvals-center')}
     assert paths=={'/iphone/api/approvals-center','/iphone/api/approvals-center/{approval_id}'}
