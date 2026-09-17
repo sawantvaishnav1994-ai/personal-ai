@@ -4,7 +4,7 @@ import pytest
 
 from core.events import EventBus
 from core.home_state_projection import SAFE_STATE_LABELS, project_home_state
-from core.runtime_state import RuntimeState, RuntimeStateAuthority
+from core.runtime_state import LEGAL_TRANSITIONS, RuntimeState, RuntimeStateAuthority
 
 
 ALL_STATES = list(RuntimeState)
@@ -16,6 +16,12 @@ def authority():
     return events, state
 
 
+def activate(runtime, request_id):
+    """Enter a request through the legal production lifecycle."""
+    runtime.transition(RuntimeState.ACTIVE, reason='owner_active')
+    return runtime.transition(RuntimeState.UNDERSTANDING, reason='turn_started', request_id=request_id, activate_request=True)
+
+
 def test_single_runtime_state_authority_is_event_bus_authority():
     events = EventBus()
     assert isinstance(events.runtime_state, RuntimeStateAuthority)
@@ -24,8 +30,9 @@ def test_single_runtime_state_authority_is_event_bus_authority():
 
 @pytest.mark.parametrize('state', ALL_STATES)
 def test_home_projection_covers_every_canonical_state(state):
+    # Rendering/projection coverage is intentionally isolated from transition-graph qualification.
     events, runtime = authority()
-    snapshot = runtime.transition(state, reason='qualification', force=True)
+    snapshot = runtime.transition(state, reason='projection-only', force=True)
     projected = project_home_state(snapshot).as_dict()
     assert projected['state'] == state.value
     assert projected['label'] == SAFE_STATE_LABELS[state]
@@ -41,19 +48,26 @@ def test_home_projection_rejects_noncanonical_state():
         project_home_state(Unsafe())
 
 
+def test_legal_transition_graph_preserves_idle_contract():
+    assert RuntimeState.UNDERSTANDING not in LEGAL_TRANSITIONS[RuntimeState.IDLE]
+    assert RuntimeState.ACTIVE in LEGAL_TRANSITIONS[RuntimeState.IDLE]
+    assert RuntimeState.UNDERSTANDING in LEGAL_TRANSITIONS[RuntimeState.ACTIVE]
+
+
 def test_sequence_is_monotonic_and_duplicate_is_idempotent():
     _, runtime = authority()
-    a = runtime.transition(RuntimeState.ACTIVE, reason='a', force=True)
-    b = runtime.transition(RuntimeState.ACTIVE, reason='duplicate', force=True)
-    c = runtime.transition(RuntimeState.THINKING, reason='c', force=True)
+    a = runtime.transition(RuntimeState.ACTIVE, reason='a')
+    b = runtime.transition(RuntimeState.ACTIVE, reason='duplicate')
+    c = runtime.transition(RuntimeState.THINKING, reason='projection-transition', force=True)
     assert a.sequence == b.sequence
     assert c.sequence == a.sequence + 1
 
 
 def test_request_r1_r2_isolation_rejects_late_r1():
     _, runtime = authority()
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='r1', request_id='r1', activate_request=True)
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='r2', request_id='r2', activate_request=True)
+    activate(runtime, 'r1')
+    runtime.transition(RuntimeState.THINKING, reason='r1-thinking', request_id='r1')
+    runtime.transition(RuntimeState.UNDERSTANDING, reason='r2', request_id='r2', activate_request=True, force=True)
     before = runtime.snapshot()
     late = runtime.transition(RuntimeState.RESPONDING, reason='late-r1', request_id='r1')
     assert late.sequence == before.sequence
@@ -61,16 +75,34 @@ def test_request_r1_r2_isolation_rejects_late_r1():
     assert runtime.snapshot().state == RuntimeState.UNDERSTANDING
 
 
+@pytest.mark.parametrize('late_state', [
+    RuntimeState.MEMORY_RETRIEVAL,
+    RuntimeState.KNOWLEDGE_RETRIEVAL,
+    RuntimeState.TOOL_ACTION,
+    RuntimeState.RESPONDING,
+    RuntimeState.SUCCESS,
+    RuntimeState.ERROR,
+])
+def test_stale_states_from_old_request_cannot_take_foreground(late_state):
+    _, runtime = authority()
+    activate(runtime, 'r1')
+    runtime.transition(RuntimeState.THINKING, reason='r1-thinking', request_id='r1')
+    runtime.transition(RuntimeState.UNDERSTANDING, reason='r2', request_id='r2', activate_request=True, force=True)
+    before = runtime.snapshot()
+    late = runtime.transition(late_state, reason='late-r1', request_id='r1')
+    assert late.sequence == before.sequence
+    assert runtime.snapshot() == before
+
+
 def test_memory_and_knowledge_late_request_states_are_rejected():
     _, runtime = authority()
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='r1', request_id='r1', activate_request=True)
+    activate(runtime, 'r1')
     runtime.transition(RuntimeState.MEMORY_RETRIEVAL, reason='memory', request_id='r1')
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='r2', request_id='r2', activate_request=True)
-    seq = runtime.snapshot().sequence
+    runtime.transition(RuntimeState.UNDERSTANDING, reason='r2', request_id='r2', activate_request=True, force=True)
+    before = runtime.snapshot()
     runtime.transition(RuntimeState.MEMORY_RETRIEVAL, reason='late-memory', request_id='r1')
     runtime.transition(RuntimeState.KNOWLEDGE_RETRIEVAL, reason='late-knowledge', request_id='r1')
-    assert runtime.snapshot().sequence == seq
-    assert runtime.snapshot().request_id == 'r2'
+    assert runtime.snapshot() == before
 
 
 def test_illegal_transition_fails_closed():
@@ -89,14 +121,15 @@ def test_voice_listening_and_responding_are_canonical_events():
     events, runtime = authority()
     events.emit('voice.listening.started', request_id='r1')
     assert runtime.snapshot().state == RuntimeState.LISTENING
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='heard', request_id='r1', force=True)
+    runtime.transition(RuntimeState.UNDERSTANDING, reason='heard', request_id='r1')
     events.emit('voice.tts.started', request_id='r1')
     assert runtime.snapshot().state == RuntimeState.RESPONDING
 
 
 def test_approval_state_is_canonical_event():
     events, runtime = authority()
-    runtime.transition(RuntimeState.UNDERSTANDING, reason='turn', request_id='r1', activate_request=True)
+    activate(runtime, 'r1')
+    runtime.transition(RuntimeState.THINKING, reason='plan', request_id='r1')
     events.emit('approval.required', request_id='r1')
     assert runtime.snapshot().state == RuntimeState.NEEDS_APPROVAL
 
@@ -114,12 +147,25 @@ def test_home_projection_payload_is_redacted():
     assert forbidden.isdisjoint(projected)
 
 
-def test_pwa_semantic_state_is_projection_only():
+def test_pwa_semantic_state_is_projection_only_and_reconnect_is_bounded():
     source = Path('pwa/v1-runtime.js').read_text(encoding='utf-8')
     assert 'if(!applyingCanonicalState)return;' in source
     assert "api('/runtime-state')" in source
     assert 'sequence<=canonicalSequence' in source
-    assert 'network status is not semantic AI state' in source
+    assert 'STATE_BACKOFF_MAX_MS' in source
+    assert 'statePollFailures' in source
+    assert 'stateRefreshInFlight' in source
+    assert "document.visibilityState==='hidden'" in source
+    assert "removeEventListener('visibilitychange'" in source
+    assert 'clearTimeout(statePollTimer)' in source
+
+
+def test_pwa_reconnect_resync_rejects_stale_and_unknown_snapshots():
+    source = Path('pwa/v1-runtime.js').read_text(encoding='utf-8')
+    assert 'Number(snapshot.schema_version)!==STATE_SCHEMA_VERSION' in source
+    assert 'sequence<=canonicalSequence' in source
+    assert '!CANONICAL_STATES.has(canonicalName)' in source
+    assert 'applyCanonicalState(snapshot)' in source
 
 
 def test_home_uses_canonical_turn_and_voice_transport():
