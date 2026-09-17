@@ -307,6 +307,23 @@ class RuntimeStateAuthority:
         self.events.emit('runtime.state', state=RuntimeState.BACKGROUND.value, previous_state=current.value, sequence=snapshot.sequence, reason='background_started', request_id=None)
         return snapshot
 
+    def _on_approval_required(self, event):
+        """Project approval only when it belongs to the foreground lifecycle.
+
+        Durable approval truth remains outside this projection. An unscoped approval
+        emitted by unrelated background work must not steal an active foreground Core.
+        """
+        scoped = str(event.get('request_id') or '').strip() or None
+        if scoped is None:
+            with self._lock:
+                current_request = self._request_id
+                current_state = self._state
+                snapshot = StateSnapshot(current_state, self._sequence, 'unscoped_approval_ignored', current_request)
+            if current_request is not None:
+                self.events.emit('runtime.state.unscoped_approval_ignored', current_state=current_state.value, current_request_id=current_request)
+                return snapshot
+        return self._safe_transition(RuntimeState.NEEDS_APPROVAL, 'approval_required', event)
+
     def _on_tool_unverified(self, event):
         scoped = str(event.get('request_id') or '').strip() or None
         if scoped is None:
@@ -344,7 +361,6 @@ class RuntimeStateAuthority:
             'turn.needs_approval': (RuntimeState.NEEDS_APPROVAL, 'approval_required', False),
             'turn.cancelled': (RuntimeState.IDLE, 'owner_cancelled', False),
             'turn.failed': (RuntimeState.ERROR, 'turn_failed', False),
-            'approval.required': (RuntimeState.NEEDS_APPROVAL, 'approval_required', False),
             'approval.approved': (RuntimeState.TOOL_ACTION, 'approval_approved', False),
             'emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
             'p10.emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
@@ -358,6 +374,7 @@ class RuntimeStateAuthority:
         }
         for name, (target, reason, activate) in mapping.items():
             self._subscriptions.append(self.events.subscribe(name, lambda event, t=target, r=reason, a=activate: self._safe_transition(t, r, event, activate_request=a)))
+        self._subscriptions.append(self.events.subscribe('approval.required', self._on_approval_required))
         self._subscriptions.append(self.events.subscribe('automation.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('workflow.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('tool.unverified', self._on_tool_unverified))
