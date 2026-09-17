@@ -58,12 +58,12 @@ class RuntimeStateAuthority:
         normalized=normalize_runtime_state(target); scoped=str(request_id or '').strip() or None; stale=False
         with self._lock:
             current=self._state; previous_request=self._request_id
-            if activate_request and scoped:self._request_id=scoped
-            elif scoped and self._request_id and scoped!=self._request_id:
+            if scoped and self._request_id and scoped!=self._request_id and not activate_request:
                 stale=True; current_request=self._request_id; snapshot=StateSnapshot(current,self._sequence,'stale_request_ignored',current_request)
             else:
-                if scoped and self._request_id is None:self._request_id=scoped
                 changed_request=bool(activate_request and scoped and scoped!=previous_request)
+                if activate_request and scoped:self._request_id=scoped
+                elif scoped and self._request_id is None:self._request_id=scoped
                 if normalized==current and not changed_request:return StateSnapshot(current,self._sequence,reason,self._request_id)
                 if not force and normalized!=current and normalized not in LEGAL_TRANSITIONS[current]:
                     raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
@@ -93,8 +93,6 @@ class RuntimeStateAuthority:
         'workflow.started':(RuntimeState.BACKGROUND,'background_started',False),
         'emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
         'p10.emergency_stop':(RuntimeState.ERROR,'emergency_stop',False),
-        # Stage 3 voice events are factual transport/lifecycle observations. They
-        # project through this single authority instead of generic client timers.
         'voice.listening.started':(RuntimeState.LISTENING,'voice_listening',False),
         'voice.tts.started':(RuntimeState.RESPONDING,'voice_tts_started',False),
         'voice.tts.completed':(RuntimeState.ACTIVE,'voice_tts_completed',False),
