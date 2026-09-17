@@ -149,6 +149,8 @@ class StateSnapshot:
 class RuntimeStateAuthority:
     """Canonical V1 user-facing state projection over factual runtime events."""
 
+    MAX_RETIRED_REQUESTS = 128
+
     def __init__(self, events, *, initial=RuntimeState.IDLE):
         self.events = events
         self._state = initial
@@ -159,6 +161,9 @@ class RuntimeStateAuthority:
         # Requests that reached a real degraded/unverified execution outcome must
         # never be projected as SUCCESS merely because the turn later returned text.
         self._degraded_requests: set[str] = set()
+        # A bounded retired-owner set prevents late/duplicate events from old turns
+        # from retaking foreground authority after ownership has moved or yielded.
+        self._retired_request_ids: list[str] = []
         self._bind_compatibility_events()
 
     @property
@@ -169,6 +174,14 @@ class RuntimeStateAuthority:
     def snapshot(self):
         with self._lock:
             return StateSnapshot(self._state, self._sequence, 'current', self._request_id)
+
+    def _retire_request_locked(self, request_id: str | None):
+        scoped = str(request_id or '').strip() or None
+        if not scoped or scoped in self._retired_request_ids:
+            return
+        self._retired_request_ids.append(scoped)
+        if len(self._retired_request_ids) > self.MAX_RETIRED_REQUESTS:
+            del self._retired_request_ids[:-self.MAX_RETIRED_REQUESTS]
 
     def transition(self, target, *, reason, force=False, request_id=None, activate_request=False, **context):
         normalized = _known_runtime_state(target)
@@ -187,7 +200,10 @@ class RuntimeStateAuthority:
         with self._lock:
             current = self._state
             previous_request = self._request_id
-            if scoped and self._request_id and scoped != self._request_id and not activate_request:
+            retired = bool(scoped and scoped in self._retired_request_ids)
+            if scoped and not activate_request and (
+                retired or (self._request_id and scoped != self._request_id)
+            ):
                 stale = True
                 current_request = self._request_id
                 snapshot = StateSnapshot(current, self._sequence, 'stale_request_ignored', current_request)
@@ -200,6 +216,8 @@ class RuntimeStateAuthority:
                 # Ownership changes are committed only after transition validation so a
                 # rejected semantic transition can never leave a partial request takeover.
                 if activate_request and scoped:
+                    if previous_request and previous_request != scoped:
+                        self._retire_request_locked(previous_request)
                     self._request_id = scoped
                 elif scoped and self._request_id is None:
                     self._request_id = scoped
@@ -248,6 +266,26 @@ class RuntimeStateAuthority:
         if normalized is None:
             raise ValueError(f'unknown runtime state: {target}')
 
+        with self._lock:
+            if scoped in self._retired_request_ids and scoped != self._request_id:
+                stale_snapshot = StateSnapshot(
+                    self._state,
+                    self._sequence,
+                    'stale_request_ignored',
+                    self._request_id,
+                )
+                stale_current_request = self._request_id
+            else:
+                stale_snapshot = None
+                stale_current_request = None
+        if stale_snapshot is not None:
+            self.events.emit(
+                'runtime.state.stale_ignored',
+                request_id=scoped,
+                current_request_id=stale_current_request,
+            )
+            return stale_snapshot
+
         records = []
         with self._lock:
             current = self._state
@@ -271,6 +309,8 @@ class RuntimeStateAuthority:
                     raise ValueError(f'illegal runtime state transition: {probe.value} -> {step.value}')
                 probe = step
 
+            if previous_request and previous_request != scoped:
+                self._retire_request_locked(previous_request)
             if scoped != previous_request:
                 self._degraded_requests.discard(scoped)
             self._request_id = scoped
@@ -339,31 +379,52 @@ class RuntimeStateAuthority:
         )
 
     def _compat(self, event):
+        scoped = str(event.get('request_id') or '').strip() or None
+        if scoped is None:
+            with self._lock:
+                current_request = self._request_id
+                current_state = self._state
+                snapshot = StateSnapshot(
+                    current_state,
+                    self._sequence,
+                    'unscoped_compat_ignored',
+                    current_request,
+                )
+            # Foreground work must always be request-scoped. Unscoped legacy state
+            # emissions belong to background/legacy producers and may not mutate an
+            # active foreground owner or escape a BACKGROUND projection.
+            if current_request is not None or current_state == RuntimeState.BACKGROUND:
+                self.events.emit(
+                    'runtime.state.unscoped_compat_ignored',
+                    attempted_state=str(event.get('state') or ''),
+                    current_state=current_state.value,
+                    current_request_id=current_request,
+                )
+                return snapshot
         try:
-            self.transition(
+            return self.transition(
                 event.get('state'),
                 reason=f"legacy:{event.get('event', 'state')}",
-                request_id=event.get('request_id'),
+                request_id=scoped,
             )
         except ValueError:
-            return
+            return self.snapshot()
 
     def _safe_transition(self, target, reason, event, *, activate_request=False):
         try:
             if activate_request:
-                self.activate_foreground_request(
+                return self.activate_foreground_request(
                     event.get('request_id'),
                     reason=reason,
                     target=target,
                 )
-            else:
-                self.transition(
-                    target,
-                    reason=reason,
-                    request_id=event.get('request_id'),
-                )
+            return self.transition(
+                target,
+                reason=reason,
+                request_id=event.get('request_id'),
+            )
         except ValueError:
-            return
+            return self.snapshot()
         finally:
             if reason in {'owner_cancelled', 'turn_failed'}:
                 scoped = str(event.get('request_id') or '').strip()
@@ -371,25 +432,104 @@ class RuntimeStateAuthority:
                     with self._lock:
                         self._degraded_requests.discard(scoped)
 
-    def _on_tool_unverified(self, event):
+    def _on_background_started(self, event):
+        """Project only legitimate background ownership without stealing foreground.
+
+        Request-scoped backgrounding uses the normal legal graph. Unscoped scheduled
+        workflow/automation work may produce BACKGROUND only from a quiescent state;
+        it never interrupts an active foreground request and its later unscoped
+        AgentExecutor state events remain backend/Activities truth, not Home truth.
+        """
         scoped = str(event.get('request_id') or '').strip() or None
         if scoped:
+            return self._safe_transition(RuntimeState.BACKGROUND, 'background_started', event)
+
+        with self._lock:
+            current = self._state
+            current_request = self._request_id
+            if current_request is not None or current not in {
+                RuntimeState.IDLE,
+                RuntimeState.ACTIVE,
+                RuntimeState.SUCCESS,
+                RuntimeState.BACKGROUND,
+            }:
+                ignored = StateSnapshot(
+                    current,
+                    self._sequence,
+                    'background_ignored_for_foreground',
+                    current_request,
+                )
+                should_ignore = True
+            elif current == RuntimeState.BACKGROUND:
+                return StateSnapshot(current, self._sequence, 'background_started', None)
+            else:
+                should_ignore = False
+                if current_request:
+                    self._retire_request_locked(current_request)
+                self._request_id = None
+                self._sequence += 1
+                self._state = RuntimeState.BACKGROUND
+                snapshot = StateSnapshot(
+                    RuntimeState.BACKGROUND,
+                    self._sequence,
+                    'background_started',
+                    None,
+                )
+
+        if should_ignore:
+            self.events.emit(
+                'runtime.state.background_ignored',
+                current_state=current.value,
+                current_request_id=current_request,
+            )
+            return ignored
+
+        self.events.emit(
+            'runtime.state',
+            state=RuntimeState.BACKGROUND.value,
+            previous_state=current.value,
+            sequence=snapshot.sequence,
+            reason='background_started',
+            request_id=None,
+        )
+        return snapshot
+
+    def _on_tool_unverified(self, event):
+        scoped = str(event.get('request_id') or '').strip() or None
+        if scoped is None:
             with self._lock:
-                if self._request_id in {None, scoped}:
+                current_request = self._request_id
+                current_state = self._state
+                snapshot = StateSnapshot(
+                    current_state,
+                    self._sequence,
+                    'unscoped_tool_unverified_ignored',
+                    current_request,
+                )
+            if current_request is not None or current_state == RuntimeState.BACKGROUND:
+                self.events.emit(
+                    'runtime.state.unscoped_tool_ignored',
+                    current_state=current_state.value,
+                    current_request_id=current_request,
+                )
+                return snapshot
+        if scoped:
+            with self._lock:
+                if self._request_id in {None, scoped} and scoped not in self._retired_request_ids:
                     self._degraded_requests.add(scoped)
-        self._safe_transition(RuntimeState.WARNING, 'verification_warning', event)
+        return self._safe_transition(RuntimeState.WARNING, 'verification_warning', event)
 
     def _on_turn_completed(self, event):
         scoped = str(event.get('request_id') or '').strip() or None
         if not scoped:
-            return
+            return self.snapshot()
         with self._lock:
             degraded = scoped in self._degraded_requests
         try:
-            self.complete_foreground_request(scoped, degraded=degraded)
+            return self.complete_foreground_request(scoped, degraded=degraded)
         except ValueError:
             # An impossible completion path fails closed instead of weakening the graph.
-            return
+            return self.snapshot()
         finally:
             with self._lock:
                 self._degraded_requests.discard(scoped)
@@ -403,8 +543,6 @@ class RuntimeStateAuthority:
             'turn.failed': (RuntimeState.ERROR, 'turn_failed', False),
             'approval.required': (RuntimeState.NEEDS_APPROVAL, 'approval_required', False),
             'approval.approved': (RuntimeState.TOOL_ACTION, 'approval_approved', False),
-            'automation.started': (RuntimeState.BACKGROUND, 'background_started', False),
-            'workflow.started': (RuntimeState.BACKGROUND, 'background_started', False),
             'emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
             'p10.emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
             'voice.listening.started': (RuntimeState.LISTENING, 'voice_listening', False),
@@ -424,6 +562,8 @@ class RuntimeStateAuthority:
                     ),
                 )
             )
+        self._subscriptions.append(self.events.subscribe('automation.started', self._on_background_started))
+        self._subscriptions.append(self.events.subscribe('workflow.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('tool.unverified', self._on_tool_unverified))
         self._subscriptions.append(self.events.subscribe('turn.completed', self._on_turn_completed))
 
@@ -433,3 +573,4 @@ class RuntimeStateAuthority:
         self._subscriptions.clear()
         with self._lock:
             self._degraded_requests.clear()
+            self._retired_request_ids.clear()
