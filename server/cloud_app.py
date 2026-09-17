@@ -21,6 +21,7 @@ from server.continuity_sync_api import continuity_sync_router
 from server.pwa_security import pwa_security_router
 from server.pwa_session_middleware import PwaSessionMiddleware
 from server.logical_request_middleware import LogicalRequestMiddleware
+from server.runtime_state_api import runtime_state_router
 from server.session_bound_executor import SessionBoundExecutor
 from server.workflow_budget_api import workflow_budget_router
 from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
@@ -76,6 +77,7 @@ app.include_router(iphone_pwa_router(pwa_runtime, settings))
 app.include_router(pwa_security_router(runtime))
 app.include_router(cloud_security_router(runtime))
 app.include_router(activities_router(runtime))
+app.include_router(runtime_state_router(runtime))
 app.include_router(memory_knowledge_inspection_router(runtime))
 app.include_router(memory_governance_router(runtime))
 app.include_router(everyday_intelligence_router(runtime))
