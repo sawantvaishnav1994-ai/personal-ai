@@ -25,6 +25,7 @@ from server.logical_request_middleware import LogicalRequestMiddleware
 from server.request_aware_pwa_state import RequestAwareIphonePwaState
 from server.runtime_state_api import runtime_state_router
 from server.session_bound_executor import SessionBoundExecutor
+from server.conversation_voice_api import conversation_voice_router
 from server.workflow_budget_api import workflow_budget_router
 from server.workflow_budget_ui import WorkflowBudgetUiMiddleware, workflow_budget_ui_router
 from server.connector_api import connector_router
@@ -65,6 +66,12 @@ pwa_runtime=dict(runtime);pwa_runtime['executor']=SessionBoundExecutor(runtime['
 # Any router-local pending_approvals metadata in iphone_pwa is therefore compatibility-only
 # and cannot decide approval existence, approval outcome, or governed dispatch.
 app.include_router(approval_router(runtime,pwa_runtime['executor']))
+# Stage 3: canonical conversation/voice transport is registered before the legacy
+# compatibility router. These routes write no conversation messages themselves:
+# CanonicalTurnRuntime + ContinuityService own U1/A1, Stage 2 owns approvals, and
+# RuntimeStateAuthority owns semantic state. The legacy duplicate voice endpoints
+# remain source-compatible but are unreachable in this production composition.
+app.include_router(conversation_voice_router(runtime,pwa_runtime['executor']))
 # The router cancellation helper remains transport-only. During production router
 # construction, make it request-aware so duplicate R1 transports share one
 # cooperative token; CanonicalTurnRuntime/SQLite remains the durable authority.
