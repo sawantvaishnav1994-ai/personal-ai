@@ -32,9 +32,6 @@
     }catch{}
   };
 
-  // Legacy UI code can still request presentation changes, but it is no longer
-  // allowed to invent semantic AI state from timers/fetch/mic callbacks. Only an
-  // authenticated RuntimeStateAuthority snapshot may update the semantic label.
   const semanticRenderer=globalThis.setState;
   if(typeof semanticRenderer==='function'){
     globalThis.setState=function stage3StateRenderer(name,detail){
@@ -65,9 +62,6 @@
     body:JSON.stringify({event,request_id:requestId||null,detail:String(detail||'').slice(0,160)})
   }).catch(()=>{});
 
-  // Tag actual browser recognition starts as factual listening observations and
-  // mark only FINAL speech results as voice input. Interim transcripts remain UI
-  // presentation and never create canonical turns.
   const legacyCreateRecognition=globalThis.createRecognition;
   if(typeof legacyCreateRecognition==='function'){
     globalThis.createRecognition=function stage3CreateRecognition(){
@@ -158,9 +152,6 @@
     };
   }
 
-  // Playback barge-in is not canonical operation cancellation. It only stops the
-  // current TTS generation. A new intentional R2 gets its own request ID; tapping
-  // during THINKING uses the explicit canonical cancellation endpoint instead.
   globalThis.interruptAndListen=async function stage3InterruptAndListen(){
     const requestId=currentPlaybackRequestId;
     const wasSpeaking=Boolean(speaking||(globalThis.speechSynthesis&&globalThis.speechSynthesis.speaking));
@@ -187,10 +178,6 @@
     };
   }
 
-  // Bind approval output to the approval's original canonical request, not to
-  // whatever newer R2 happens to be current when the owner decides. A stale R1
-  // approval may finish durably, but its audio is suppressed instead of speaking
-  // over R2. Chained approvals keep the same canonical request identity.
   const approveButton=$('approveApproval');
   if(approveButton){
     approveButton.onclick=async()=>{
@@ -235,9 +222,6 @@
     };
   }
 
-  // Replace only the logical-turn transport. CanonicalTurnRuntime remains replay
-  // authority; this adapter preserves one UUID across retry/reload, carries the
-  // real modality, and never invents semantic UNDERSTANDING/THINKING/ERROR state.
   globalThis.sendTurn=async function v1SendTurn(text){
     const clean=String(text||'').trim();if(!clean||turnInFlight)return;
     const candidateModality=nextInputModality==='voice'?'voice':'text';nextInputModality='text';
@@ -253,7 +237,11 @@
       let result,lastError;
       for(let attempt=0;attempt<2;attempt++){
         try{
-          result=await api('/voice/turn',{method:'POST',body:JSON.stringify({request_id:pending.request_id,transcript:clean,conversation_id:currentConversationId,input_modality:pending.input_modality||'text'})});
+          result=await api('/voice/turn',{
+            method:'POST',
+            headers:{'X-Personal-AI-Input-Modality':pending.input_modality||'text'},
+            body:JSON.stringify({request_id:pending.request_id,transcript:clean,conversation_id:currentConversationId})
+          });
           lastError=null;break;
         }catch(error){lastError=error;if(terminalHttp(error.status))break;await new Promise(resolve=>setTimeout(resolve,180*(attempt+1)))}
       }
