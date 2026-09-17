@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import io
 import queue
 import tempfile
@@ -71,6 +72,25 @@ class FullDuplexVoiceSession:
         with self._lifecycle_lock:
             return self._current_request_id == request_id
 
+    def _canonical_chat(self, text, cancel_event, request_id):
+        """Call canonical runtime kwargs when supported; retain legacy test adapter compatibility."""
+        chat = self.executor.chat
+        try:
+            parameters = inspect.signature(chat).parameters.values()
+            supports_runtime_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
+        except (TypeError, ValueError):
+            supports_runtime_kwargs = True
+        if not supports_runtime_kwargs:
+            return chat(text, cancel_event=cancel_event)
+        return chat(
+            text,
+            request_id=request_id,
+            device_id='desktop',
+            surface='desktop-voice',
+            input_modality='voice',
+            cancel_event=cancel_event,
+        )
+
     def start(self):
         with self._lifecycle_lock:
             if self.thread and self.thread.is_alive():
@@ -110,9 +130,6 @@ class FullDuplexVoiceSession:
             request_id = self._current_request_id
             cancel_event = self._turn_cancel
         self._barge.set()
-        # If R1 is still thinking, cooperative cancellation uses the canonical
-        # request path. If R1 is already complete and only TTS is playing,
-        # _turn_cancel is normally cleared and barge-in stops playback only.
         if cancel_event:
             cancel_event.set()
         self.metrics['barge_ins'] += 1
@@ -157,16 +174,13 @@ class FullDuplexVoiceSession:
             if not self._stop.is_set() and self._is_current(request_id):
                 self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
 
-    def _respond(self, text, cancel_event, request_id):
+    def _respond(self, text, cancel_event, request_id=None):
+        request_id = str(request_id or uuid.uuid4())
+        with self._lifecycle_lock:
+            if self._current_request_id is None:
+                self._current_request_id = request_id
         try:
-            answer = self.executor.chat(
-                text,
-                request_id=request_id,
-                device_id='desktop',
-                surface='desktop-voice',
-                input_modality='voice',
-                cancel_event=cancel_event,
-            )
+            answer = self._canonical_chat(text, cancel_event, request_id)
             if cancel_event.is_set() or self._stop.is_set() or not self._is_current(request_id):
                 self._emit('voice.output.stale_ignored', request_id=request_id, output_event='canonical_reply')
                 return
@@ -174,8 +188,6 @@ class FullDuplexVoiceSession:
             try:
                 wav = self.models.synthesize(answer)
             except Exception as exc:
-                # The canonical turn is already complete. TTS failure is an
-                # output failure only and must never rerun/fail the AI turn.
                 self._emit('voice.tts.failed', request_id=request_id, error_type=type(exc).__name__)
                 if not self._stop.is_set() and self._is_current(request_id):
                     self._emit('voice.listening.started', request_id=request_id, source='desktop-voice')
