@@ -80,6 +80,9 @@ def start_server(runtime):
 def main():
     from PyQt6.QtWidgets import QApplication
     from desktop.floating_presence import FloatingPresence
+    # Keep the historical lazy MainWindow import contract for headless/cloud
+    # qualification while Stage 5 selects its canonical semantic-state wrapper.
+    from ui.main_window import MainWindow
     from ui.canonical_main_window import CanonicalMainWindow
     app=QApplication(sys.argv); app.setApplicationName('Personal AI'); runtime=build_runtime(); runtime['automations'].start()
     if settings.control_server_enabled:threading.Thread(target=start_server,args=(runtime,),daemon=True).start()
