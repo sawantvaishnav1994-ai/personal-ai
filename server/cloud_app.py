@@ -8,6 +8,7 @@ from core.storage import validate_runtime_storage
 from security.pwa_sessions import PwaSessionStore
 from server.api import create_app
 from server.activities_api import activities_router
+from server.approval_api import approval_router
 from server.cloud_security import cloud_security_router
 from server import iphone_pwa as iphone_pwa_module
 from server.owner_product import owner_product_router
@@ -60,6 +61,10 @@ app.add_middleware(LogicalRequestMiddleware)
 app.add_middleware(PwaSessionMiddleware,sessions=runtime['pwa_sessions'],device_registry=runtime['device_registry'],cookie_max_age=60*60*24*max(1,min(int(getattr(settings,'iphone_device_cookie_days',365)),3650)))
 app.add_middleware(WorkflowBudgetUiMiddleware);app.add_middleware(ConnectorUiMiddleware)
 pwa_runtime=dict(runtime);pwa_runtime['executor']=SessionBoundExecutor(runtime['executor'],continuity=runtime['continuity'],surface='iphone-pwa');pwa_runtime['continuity']=CanonicalConversationProjection(runtime['continuity'])
+# Stage 2: register the durable approval transport before the legacy PWA router.
+# Any router-local pending_approvals metadata in iphone_pwa is therefore compatibility-only
+# and cannot decide approval existence, approval outcome, or governed dispatch.
+app.include_router(approval_router(runtime,pwa_runtime['executor']))
 # The router cancellation helper remains transport-only. During production router
 # construction, make it request-aware so duplicate R1 transports share one
 # cooperative token; CanonicalTurnRuntime/SQLite remains the durable authority.
