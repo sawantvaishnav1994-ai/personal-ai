@@ -71,21 +71,70 @@ class RuntimeStateAuthority:
                 stale=True; current_request=self._request_id; snapshot=StateSnapshot(current,self._sequence,'stale_request_ignored',current_request)
             else:
                 changed_request=bool(activate_request and scoped and scoped!=previous_request)
-                if activate_request and scoped:self._request_id=scoped
-                elif scoped and self._request_id is None:self._request_id=scoped
                 if normalized==current and not changed_request:return StateSnapshot(current,self._sequence,reason,self._request_id)
                 if not force and normalized!=current and normalized not in LEGAL_TRANSITIONS[current]:
                     raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
+                # Ownership changes are committed only after transition validation so a
+                # rejected semantic transition can never leave a partial request takeover.
+                if activate_request and scoped:self._request_id=scoped
+                elif scoped and self._request_id is None:self._request_id=scoped
                 self._sequence+=1; self._state=normalized; snapshot=StateSnapshot(normalized,self._sequence,reason,self._request_id)
         if stale:
             self.events.emit('runtime.state.stale_ignored',request_id=scoped,current_request_id=current_request); return snapshot
         self.events.emit('runtime.state',state=normalized.value,previous_state=current.value,sequence=snapshot.sequence,reason=str(reason),request_id=snapshot.request_id,**context)
         return snapshot
+    def activate_foreground_request(self,request_id,*,reason='turn_started',target=RuntimeState.UNDERSTANDING,**context):
+        """Atomically transfer foreground ownership through the legal lifecycle.
+
+        A fresh foreground turn is semantically UNDERSTANDING. IDLE cannot jump
+        directly there, so activation follows IDLE -> ACTIVE -> UNDERSTANDING while
+        holding the authority lock. Observers can never snapshot the new request in
+        the old IDLE state, and no force transition is used.
+        """
+        scoped=str(request_id or '').strip() or None
+        normalized=_known_runtime_state(target)
+        if not scoped: raise ValueError('foreground request activation requires request_id')
+        if normalized is None: raise ValueError(f'unknown runtime state: {target}')
+        records=[]
+        with self._lock:
+            current=self._state; previous_request=self._request_id
+            if scoped==previous_request and normalized==current:
+                return StateSnapshot(current,self._sequence,reason,self._request_id)
+            path=[]
+            if normalized==RuntimeState.UNDERSTANDING and current==RuntimeState.IDLE:
+                path=[RuntimeState.ACTIVE,RuntimeState.UNDERSTANDING]
+            elif normalized==current:
+                path=[normalized]
+            elif normalized in LEGAL_TRANSITIONS[current]:
+                path=[normalized]
+            else:
+                raise ValueError(f'illegal runtime state transition: {current.value} -> {normalized.value}')
+            # Validate the complete route before changing ownership or state.
+            probe=current
+            for step in path:
+                if step!=probe and step not in LEGAL_TRANSITIONS[probe]:
+                    raise ValueError(f'illegal runtime state transition: {probe.value} -> {step.value}')
+                probe=step
+            self._request_id=scoped
+            previous=current
+            for step in path:
+                self._sequence+=1; self._state=step
+                snapshot=StateSnapshot(step,self._sequence,reason,self._request_id)
+                records.append((step,previous,snapshot))
+                previous=step
+            final=StateSnapshot(self._state,self._sequence,reason,self._request_id)
+        for step,previous,snapshot in records:
+            self.events.emit('runtime.state',state=step.value,previous_state=previous.value,sequence=snapshot.sequence,reason=str(reason),request_id=snapshot.request_id,**context)
+        return final
     def _compat(self,event):
         try:self.transition(event.get('state'),reason=f"legacy:{event.get('event','state')}",request_id=event.get('request_id'))
         except ValueError:return
     def _safe_transition(self,target,reason,event,*,activate_request=False):
-        try:self.transition(target,reason=reason,request_id=event.get('request_id'),activate_request=activate_request)
+        try:
+            if activate_request:
+                self.activate_foreground_request(event.get('request_id'),reason=reason,target=target)
+            else:
+                self.transition(target,reason=reason,request_id=event.get('request_id'))
         except ValueError:return
     def _bind_compatibility_events(self):
         self._subscriptions.append(self.events.subscribe('state',self._compat))
