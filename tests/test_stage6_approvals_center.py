@@ -62,8 +62,12 @@ def test_api_missing_and_cross_session_are_safe_not_found(tmp_path):
     t=m.create('e','tool',{},device_id='d',session_id='other');assert c.get('/iphone/api/approvals-center/'+t.id).status_code==404
 
 def test_read_api_exposes_no_decision_or_dispatch_route(tmp_path):
-    c,_=make_client(tmp_path,Devices())
-    # FastAPI/Starlette may include middleware wrapper route objects without a path.
-    # Inspect only concrete path routes; the contract remains read-only.
-    paths={path for route in c.app.routes if (path:=getattr(route,'path',None)) and path.startswith('/iphone/api/approvals-center')}
+    # Test the router object itself. TestClient middleware may replace app.routes
+    # with a wrapper in this dependency version, which is not an API contract.
+    m=manager(tmp_path);agent=SimpleNamespace(approvals=m)
+    router=approvals_center_router({'device_registry':Devices(),'agent_executor':agent})
+    paths={route.path for route in router.routes}
+    methods={route.path:set(route.methods or ()) for route in router.routes}
     assert paths=={'/iphone/api/approvals-center','/iphone/api/approvals-center/{approval_id}'}
+    assert methods['/iphone/api/approvals-center']=={'GET'}
+    assert methods['/iphone/api/approvals-center/{approval_id}']=={'GET'}
