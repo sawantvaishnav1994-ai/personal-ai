@@ -18,17 +18,34 @@ def activities_router(runtime):
             raise HTTPException(401, 'Trusted owner session required')
         if not registry.is_active(context.device_id):
             raise HTTPException(401, 'Trusted device is revoked')
-        # Activities is a bounded projection, not generic chat authority. The
-        # device registry already provisions the dedicated activities:read scope.
-        # Never fall back to ai:chat: chat permission must not expose operational
-        # activity metadata.
         if not hasattr(registry, 'authorize') or not registry.authorize(context.device_id, 'activities:read'):
             raise HTTPException(403, 'This device is not permitted to read Activities')
         return context
 
     @router.get('')
-    def list_activities(limit: int = 100, category: str | None = None):
+    def list_activities(
+        limit: int = 50,
+        category: str | None = None,
+        status: str | None = None,
+        cursor: str | None = None,
+    ):
         require_owner()
-        return {'activities': projection.list(limit=max(1, min(int(limit), 500)), category=category)}
+        try:
+            return projection.page(
+                limit=max(1, min(int(limit), projection.MAX_PAGE)),
+                category=category,
+                status=status,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get('/{activity_id}')
+    def activity_detail(activity_id: str):
+        require_owner()
+        detail = projection.detail(activity_id)
+        if detail is None:
+            raise HTTPException(404, 'Activity not found')
+        return {'activity': detail}
 
     return router
