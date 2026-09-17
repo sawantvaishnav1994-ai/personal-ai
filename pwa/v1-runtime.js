@@ -187,6 +187,54 @@
     };
   }
 
+  // Bind approval output to the approval's original canonical request, not to
+  // whatever newer R2 happens to be current when the owner decides. A stale R1
+  // approval may finish durably, but its audio is suppressed instead of speaking
+  // over R2. Chained approvals keep the same canonical request identity.
+  const approveButton=$('approveApproval');
+  if(approveButton){
+    approveButton.onclick=async()=>{
+      if(!pendingApproval)return;
+      const approval=pendingApproval;
+      const approvalRequestId=approval.request_id||lastApprovalRequestId||null;
+      clearApproval();handsFree=true;renderVoiceControls();
+      try{
+        const result=await api('/approval/'+encodeURIComponent(approval.id)+'/approve',{method:'POST',body:'{}'});
+        const resultRequestId=result.request_id||approvalRequestId;
+        $('reply').textContent=result.reply;
+        if(result.status==='approval_required'&&result.approval){
+          showApproval({...result.approval,request_id:result.approval.request_id||resultRequestId});
+        }else{
+          appendMessage('assistant_message',result.reply);
+          if(!currentUiRequestId||currentUiRequestId===resultRequestId)canonicalSpeakReply(result.reply,resultRequestId);
+          else voiceClientEvent('playback_interrupted',resultRequestId,'stale_approval_result');
+        }
+        refreshCanonicalState();
+      }catch(error){
+        handsFree=false;renderVoiceControls();$('voiceAlert').textContent=error.message;refreshCanonicalState();
+      }
+    };
+  }
+  const rejectButton=$('rejectApproval');
+  if(rejectButton){
+    rejectButton.onclick=async()=>{
+      if(!pendingApproval)return;
+      const approval=pendingApproval;
+      const approvalRequestId=approval.request_id||lastApprovalRequestId||null;
+      clearApproval();handsFree=true;renderVoiceControls();
+      try{
+        const result=await api('/approval/'+encodeURIComponent(approval.id)+'/reject',{method:'POST',body:'{}'});
+        const resultRequestId=result.request_id||approvalRequestId;
+        $('reply').textContent=result.reply;appendMessage('approval_rejected',result.reply);
+        if(!currentUiRequestId||currentUiRequestId===resultRequestId)canonicalSpeakReply(result.reply,resultRequestId);
+        else voiceClientEvent('playback_interrupted',resultRequestId,'stale_approval_result');
+        refreshCanonicalState();
+      }catch(error){
+        handsFree=false;renderVoiceControls();$('voiceAlert').textContent=error.message;refreshCanonicalState();
+      }
+    };
+  }
+
   // Replace only the logical-turn transport. CanonicalTurnRuntime remains replay
   // authority; this adapter preserves one UUID across retry/reload, carries the
   // real modality, and never invents semantic UNDERSTANDING/THINKING/ERROR state.
