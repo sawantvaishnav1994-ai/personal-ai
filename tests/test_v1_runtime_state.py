@@ -105,3 +105,53 @@ def test_emergency_stop_can_force_terminal_error_projection():
     state.transition(RuntimeState.ACTIVE, reason='active')
     state.transition(RuntimeState.ERROR, reason='emergency_stop')
     assert state.state is RuntimeState.ERROR
+
+
+
+def test_unscoped_voice_lifecycle_cannot_steal_busy_foreground_request():
+    events = EventBus()
+    state = events.runtime_state
+    ignored = []
+    events.subscribe('runtime.state.unscoped_voice_ignored', ignored.append)
+
+    events.emit('turn.started', request_id='typed-r1')
+    assert state.state is RuntimeState.UNDERSTANDING
+    assert state.snapshot().request_id == 'typed-r1'
+
+    events.emit('voice.listening.started', source='desktop-voice')
+    events.emit('voice.stt.failed', source='desktop-voice', error_type='RuntimeError')
+    events.emit('voice.session.stopped', source='desktop-voice')
+
+    assert state.state is RuntimeState.UNDERSTANDING
+    assert state.snapshot().request_id == 'typed-r1'
+    assert len(ignored) == 3
+
+
+def test_unscoped_voice_lifecycle_cannot_take_over_background_work():
+    events = EventBus()
+    state = events.runtime_state
+    state.transition(RuntimeState.BACKGROUND, reason='background')
+    events.emit('voice.listening.started', source='desktop-voice')
+    events.emit('voice.session.stopped', source='desktop-voice')
+    assert state.state is RuntimeState.BACKGROUND
+
+
+def test_voice_can_listen_after_terminal_foreground_request():
+    events = EventBus()
+    state = events.runtime_state
+    events.emit('turn.started', request_id='voice-r1')
+    events.emit('turn.completed', request_id='voice-r1')
+    assert state.state is RuntimeState.SUCCESS
+
+    events.emit('voice.listening.started', source='desktop-voice')
+
+    assert state.state is RuntimeState.LISTENING
+
+
+def test_request_scoped_voice_stop_can_close_its_own_foreground_lifecycle():
+    events = EventBus()
+    state = events.runtime_state
+    events.emit('turn.started', request_id='voice-r1')
+    events.emit('voice.session.stopped', request_id='voice-r1', source='desktop-voice')
+    assert state.state is RuntimeState.IDLE
+    assert state.snapshot().request_id == 'voice-r1'
