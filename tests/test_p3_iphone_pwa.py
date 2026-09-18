@@ -281,6 +281,97 @@ def test_voice_tool_request_returns_owner_approval_instead_of_http_500(tmp_path)
     assert approved.json()['reply'] == 'The approved search completed.'
 
 
+def test_pwa_approval_recovers_from_ephemeral_cache_loss_using_canonical_context(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class DurableApprovalExecutor:
+        def __init__(self):
+            self.pending = False
+
+        def chat(self, text, cancel_event=None, device_id=None, conversation_id=None, conversation_history=None):
+            self.pending = True
+            raise ConfirmationRequired(
+                'web_search_browser',
+                {'query': text},
+                'Search the web for the requested information',
+                approval_id='approval-durable',
+                execution_id='execution-durable',
+                expires_at=12345.0,
+            )
+
+        def approval_context(self, approval_id):
+            if self.pending and approval_id == 'approval-durable':
+                return {
+                    'approval_id': approval_id,
+                    'device_id': 'iphone-1',
+                    'conversation_id': None,
+                    'tool': 'web_search_browser',
+                }
+            return None
+
+        def approve(self, approval_id):
+            assert approval_id == 'approval-durable'
+            self.pending = False
+            return 'Recovered durable approval completed.'
+
+        def reject(self, approval_id):
+            self.pending = False
+            return 'Action cancelled.'
+
+    executor = DurableApprovalExecutor()
+    runtime['executor'] = executor
+    settings = SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, settings))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    pending = client.post('/iphone/api/voice/turn', json={'transcript': 'search the web'})
+    assert pending.status_code == 202
+
+    # Recreate the router to simulate process/router-local cache loss while the
+    # canonical durable approval remains pending.
+    reloaded = FastAPI()
+    reloaded.include_router(iphone_pwa_router(runtime, settings))
+    reloaded_client = TestClient(reloaded, base_url='https://testserver')
+    reloaded_client.cookies.update(client.cookies)
+    approved = reloaded_client.post('/iphone/api/approval/approval-durable/approve', json={})
+    assert approved.status_code == 200
+    assert approved.json()['reply'] == 'Recovered durable approval completed.'
+
+
+def test_pwa_approval_cache_cannot_cross_device_binding(tmp_path):
+    client, runtime = make_client(tmp_path)
+
+    class BoundApprovalExecutor:
+        def approval_context(self, approval_id):
+            return {
+                'approval_id': approval_id,
+                'device_id': 'different-device',
+                'conversation_id': None,
+                'tool': 'web_search_browser',
+            }
+
+        def approve(self, approval_id):
+            raise AssertionError('cross-device approval must not execute')
+
+    runtime['executor'] = BoundApprovalExecutor()
+    settings = SimpleNamespace(
+        base_dir=Path(__file__).resolve().parent.parent,
+        iphone_owner_enrollment_code='this-is-a-long-owner-code',
+        iphone_pwa_allow_insecure=False,
+    )
+    app = FastAPI()
+    app.include_router(iphone_pwa_router(runtime, settings))
+    client = TestClient(app, base_url='https://testserver')
+    client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    response = client.post('/iphone/api/approval/approval-durable/approve', json={})
+    assert response.status_code == 404
+
+
 def test_unavailable_tool_returns_safe_error_instead_of_http_500(tmp_path):
     client, runtime = make_client(tmp_path)
 
