@@ -1,8 +1,13 @@
-import time\n\nfrom fastapi import FastAPI
+import time
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from devices.presence_projection import DevicesPresenceProjection
-from devices.registry import DeviceRegistry\nfrom devices.gateway import DeviceCommand, DeviceGateway\nfrom core.events import EventBus\nfrom security.pwa_sessions import PwaSessionStore
+from devices.registry import DeviceRegistry
+from devices.gateway import DeviceCommand, DeviceGateway
+from core.events import EventBus
+from security.pwa_sessions import PwaSessionStore
 from security.request_context import TrustedRequestContext
 import server.devices_presence_api as devices_api
 from server.devices_presence_api import devices_presence_router
