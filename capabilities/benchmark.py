@@ -122,8 +122,8 @@ class CapabilityBenchmark:
         if not tools:
             return False
         try:
-            tools.get(name)
-            return True
+            tool = tools.get(name)
+            return not bool(getattr(tool, 'prohibited', False))
         except Exception:
             return False
 
