@@ -74,3 +74,32 @@ def test_request_id_is_bound_to_device_and_conversation(tmp_path):
     try:r.chat('What is Python?',request_id='r',device_id='d2',conversation_id='c1')
     except PermissionError:pass
     else:raise AssertionError('cross-device replay must fail closed')
+
+
+def test_stage7_repeated_cancel_is_idempotent(tmp_path):
+    r,e=runtime(tmp_path)
+    r._claim_started(request_id='cancel-me',owner_id='owner',conversation_id='c1',device_id='d1',session_id=None,surface='device',input_modality='text',privacy_level='normal',risk_level='low',user_text='work')
+    first=r.cancel_turn('cancel-me',device_id='d1')
+    second=r.cancel_turn('cancel-me',device_id='d1')
+    assert first['status']=='cancelled' and second['status']=='cancelled'
+    assert r.turn('cancel-me')['error_code']=='cancelled'
+
+
+def test_stage7_repeated_emergency_stop_cancellation_is_idempotent(tmp_path):
+    r,e=runtime(tmp_path)
+    r._claim_started(request_id='active',owner_id='owner',conversation_id='c1',device_id='d1',session_id=None,surface='device',input_modality='text',privacy_level='normal',risk_level='low',user_text='work')
+    assert r.cancel_active_turns(reason='emergency_stop')==1
+    assert r.cancel_active_turns(reason='emergency_stop')==0
+    assert r.turn('active')['status']=='cancelled'
+    assert r.turn('active')['error_code']=='emergency_stop'
+
+
+def test_stage7_late_completion_cannot_resurrect_cancelled_turn(tmp_path):
+    r,e=runtime(tmp_path)
+    r._claim_started(request_id='late',owner_id='owner',conversation_id='c1',device_id='d1',session_id=None,surface='device',input_modality='text',privacy_level='normal',risk_level='low',user_text='work')
+    r.cancel_active_turns(reason='emergency_stop')
+    assert r._update('late','completed',assistant_text='late result') is False
+    turn=r.turn('late')
+    assert turn['status']=='cancelled'
+    assert turn['assistant_text'] is None
+    assert turn['error_code']=='emergency_stop'
