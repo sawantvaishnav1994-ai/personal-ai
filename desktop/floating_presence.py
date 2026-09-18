@@ -78,16 +78,20 @@ class PresenceController:
 
 
 try:
-    from PyQt6.QtCore import QPoint, QTimer, Qt
+    from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
     from PyQt6.QtGui import QGuiApplication
     from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
     from ui.pulse import PulseWidget
 except ImportError:  # package/static qualification can still import the controller
     QWidget = object
+    pyqtSignal = None
 
 
 class FloatingPresence(QWidget):
     """Minimal always-on-top projection over the canonical Personal AI runtime."""
+
+    if pyqtSignal is not None:
+        _runtime_state_event = pyqtSignal(object)
 
     CORE_SIZE = 118
     PANEL_WIDTH = 330
@@ -114,7 +118,8 @@ class FloatingPresence(QWidget):
         self._active_cancel_event = None
         self._submit_lock = RLock()
         self._build()
-        self._unsubscribe = self.events.subscribe('runtime.state', self._render_state)
+        self._runtime_state_event.connect(self._render_state)
+        self._unsubscribe = self.events.subscribe('runtime.state', self._runtime_state_event.emit)
         self._render_snapshot()
         self._restore_position()
 
