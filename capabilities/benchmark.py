@@ -129,7 +129,7 @@ class CapabilityBenchmark:
 
     def _register_default_probes(self):
         self.register_probe('voice', 'voice runtime exists', lambda: bool(self.runtime.get('voice')))
-        self.register_probe('voice', 'barge-in capable backend', lambda: hasattr(getattr(self.runtime.get('voice'), 'backend', None), 'cancel_response') or hasattr(getattr(self.runtime.get('voice'), 'backend', None), '_barge_in'))
+        self.register_probe('voice', 'public barge-in control', lambda: callable(getattr(self.runtime.get('voice'), 'barge_in', None)))
         self.register_probe('screen_understanding', 'screen observer tool', lambda: self._tool_exists('computer_observe') or self._tool_exists('screen_understand'))
         self.register_probe('computer_control', 'verified computer executor', lambda: self._tool_exists('computer_execute'))
         self.register_probe('browser_use', 'browser navigation', lambda: self._tool_exists('browser_goto'))
