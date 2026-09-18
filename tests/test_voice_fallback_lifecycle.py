@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 from agent.executor import ExecutionCancelled
@@ -105,7 +106,7 @@ def test_stop_cancels_turn_drains_audio_and_emits_factual_session_stop():
     assert cancel.is_set()
     assert session._turn_cancel is None
     assert session._q.empty()
-    assert any(name == 'voice.session.stopped' for name, _ in events.rows)
+    assert [name for name, _ in events.rows].count('voice.session.stopped') == 1
     assert not any(name == 'state' for name, _ in events.rows)
 
 
@@ -173,3 +174,57 @@ def test_realtime_voice_facade_exposes_truthful_running_and_public_barge_in():
     assert result['interrupted'] is True
     assert result['canonical_turn_cancelled'] is True
     assert executor.cancelled == [('voice-request-2', 'desktop')]
+
+
+def test_audio_stream_failure_emits_error_and_exactly_one_factual_stop(monkeypatch):
+    import sounddevice as sd
+
+    events = Events()
+    session = FullDuplexVoiceSession(Models(), CanonicalCancelProbe(), events)
+
+    def fail_input_stream(**kwargs):
+        raise RuntimeError('no audio device')
+
+    monkeypatch.setattr(sd, 'InputStream', fail_input_stream)
+    session._run()
+    session.stop()
+
+    names = [name for name, _ in events.rows]
+    assert 'voice.session.error' in names
+    assert names.count('voice.session.stopped') == 1
+    assert session.running is False
+
+
+def test_barge_in_still_interrupts_output_when_durable_cancel_reports_error():
+    class FailingCancelExecutor(CanonicalCancelProbe):
+        def cancel_turn(self, request_id, device_id=None):
+            raise RuntimeError('cancel store unavailable')
+
+    events = Events()
+    session = FullDuplexVoiceSession(Models(), FailingCancelExecutor(), events)
+    cancel = threading.Event()
+    session._current_request_id = 'voice-request-error'
+    session._turn_cancel = cancel
+
+    result = session.barge_in()
+
+    assert cancel.is_set()
+    assert result['interrupted'] is True
+    assert result['canonical_turn_cancelled'] is False
+    assert any(name == 'voice.turn.cancel_failed' for name, _ in events.rows)
+    assert any(name == 'voice.barge_in' for name, _ in events.rows)
+
+
+def test_desktop_voice_surfaces_use_public_runtime_lifecycle_contract():
+    realtime = Path('voice/realtime.py').read_text(encoding='utf-8')
+    floating = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    window = Path('ui/main_window.py').read_text(encoding='utf-8')
+    benchmark = Path('capabilities/benchmark.py').read_text(encoding='utf-8')
+
+    assert 'def running(self):' in realtime
+    assert 'def barge_in(self):' in realtime
+    assert "getattr(voice, 'running', False)" in floating
+    assert "hasattr(voice, 'barge_in')" in floating
+    assert 'running = bool(getattr(voice, "running", self.voice_running))' in window
+    assert 'events.subscribe("voice.session.stopped", self._on_voice_session_stopped)' in window
+    assert "callable(getattr(self.runtime.get('voice'), 'barge_in', None))" in benchmark
