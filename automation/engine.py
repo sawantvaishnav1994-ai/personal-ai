@@ -286,6 +286,42 @@ class AutomationEngine:
             try: self.executor.reject(run['pending_approval_id'],**self._authority_kwargs(run))
             except Exception: pass
         self._emit('workflow.cancelled',run_id=run_id,workflow_id=run['workflow_id'],reason='owner_cancelled'); return {'run_id':run_id,'cancelled':True,'status':'cancelled'}
+
+    def cancel_device_runs(self,device_id,*,reason='device_revoked'):
+        device_id=str(device_id or '').strip()
+        if not device_id:return 0
+        with self._con() as con:
+            rows=con.execute(
+                "SELECT id,owner_id,device_id,session_id FROM workflow_runs WHERE device_id=? AND status NOT IN ('completed','failed','cancelled','interrupted','budget_exceeded')",
+                (device_id,),
+            ).fetchall()
+        cancelled=0
+        for row in rows:
+            result=self.cancel_run(
+                row['id'],owner_id=row['owner_id'],device_id=row['device_id'],session_id=row['session_id'],
+            )
+            if result.get('cancelled'):
+                cancelled+=1
+                self._update_run(row['id'],error=str(reason)[:160])
+        return cancelled
+
+    def cancel_session_runs(self,session_id,*,reason='session_revoked'):
+        session_id=str(session_id or '').strip()
+        if not session_id:return 0
+        with self._con() as con:
+            rows=con.execute(
+                "SELECT id,owner_id,device_id,session_id FROM workflow_runs WHERE session_id=? AND status NOT IN ('completed','failed','cancelled','interrupted','budget_exceeded')",
+                (session_id,),
+            ).fetchall()
+        cancelled=0
+        for row in rows:
+            result=self.cancel_run(
+                row['id'],owner_id=row['owner_id'],device_id=row['device_id'],session_id=row['session_id'],
+            )
+            if result.get('cancelled'):
+                cancelled+=1
+                self._update_run(row['id'],error=str(reason)[:160])
+        return cancelled
     def resume_run(self,run_id,*,background=True,owner_id=None,device_id=None,session_id=None):
         run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
         if run['status'] not in {'recovery_required','interrupted'}: raise RuntimeError('workflow run is not waiting for recovery')
