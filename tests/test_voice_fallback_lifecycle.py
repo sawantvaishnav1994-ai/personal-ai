@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -179,15 +180,13 @@ def test_realtime_voice_facade_exposes_truthful_running_and_public_barge_in():
 
 
 def test_audio_stream_failure_emits_error_and_exactly_one_factual_stop(monkeypatch):
-    import sounddevice as sd
-
     events = Events()
     session = FullDuplexVoiceSession(Models(), CanonicalCancelProbe(), events)
 
     def fail_input_stream(**kwargs):
         raise RuntimeError('no audio device')
 
-    monkeypatch.setattr(sd, 'InputStream', fail_input_stream)
+    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace(InputStream=fail_input_stream))
     session._run()
     session.stop()
 
@@ -240,8 +239,6 @@ def test_desktop_voice_surfaces_use_public_runtime_lifecycle_contract():
 
 
 def test_fatal_audio_worker_exit_cancels_inflight_canonical_turn(monkeypatch):
-    import sounddevice as sd
-
     events = Events()
     executor = CanonicalCancelProbe()
     session = FullDuplexVoiceSession(Models(), executor, events)
@@ -252,7 +249,7 @@ def test_fatal_audio_worker_exit_cancels_inflight_canonical_turn(monkeypatch):
     def fail_input_stream(**kwargs):
         raise RuntimeError('audio device disappeared')
 
-    monkeypatch.setattr(sd, 'InputStream', fail_input_stream)
+    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace(InputStream=fail_input_stream))
     session._run()
 
     assert cancel.is_set()
