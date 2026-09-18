@@ -102,6 +102,7 @@ class FloatingPresence(QWidget):
         self.controller = PresenceController(self.events, data_dir / 'floating-presence.json')
         self._drag_offset = None
         self._expanded = False
+        self._always_on_top = True
         self._rendered_sequence = -1
         self._active_request_id = None
         self._active_cancel_event = None
@@ -114,7 +115,7 @@ class FloatingPresence(QWidget):
     def _build(self):
         self.setWindowTitle('Personal AI Floating Presence')
         self.setAccessibleName('Personal AI Floating Presence')
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self._apply_window_flags()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.resize(self.CORE_SIZE, self.CORE_SIZE)
@@ -131,6 +132,7 @@ class FloatingPresence(QWidget):
         actions = QHBoxLayout()
         self.voice = QPushButton('Voice'); self.voice.setAccessibleName('Toggle voice'); self.voice.clicked.connect(self.toggle_voice); actions.addWidget(self.voice)
         self.cancel = QPushButton('Cancel'); self.cancel.setAccessibleName('Cancel current work'); self.cancel.clicked.connect(self.cancel_work); actions.addWidget(self.cancel)
+        self.pin = QPushButton('Unpin'); self.pin.setAccessibleName('Toggle always on top'); self.pin.clicked.connect(self.toggle_always_on_top); actions.addWidget(self.pin)
         self.collapse = QPushButton('Collapse'); self.collapse.clicked.connect(self.toggle_panel); actions.addWidget(self.collapse)
         panel.addLayout(actions); self.panel.setVisible(False); layout.addWidget(self.panel)
 
@@ -153,6 +155,20 @@ class FloatingPresence(QWidget):
         self.core.set_state(presentation.visual)
         self.core.setAccessibleDescription(presentation.label)
         self.status.setText(presentation.label)
+
+    def _apply_window_flags(self):
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        if self._always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+
+    def toggle_always_on_top(self):
+        self._always_on_top = not self._always_on_top
+        position = self.pos()
+        self._apply_window_flags()
+        self.move(position)
+        self.show()
+        self.pin.setText('Unpin' if self._always_on_top else 'Pin')
 
     def toggle_panel(self):
         self._expanded = not self._expanded
