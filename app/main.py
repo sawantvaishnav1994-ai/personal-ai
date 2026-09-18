@@ -42,7 +42,7 @@ from voice.wake_phrase import WakePhraseGate
 
 def build_runtime():
     events=EventBus(); telemetry=Telemetry(settings.data_dir/'telemetry.json'); preferences=Preferences(settings.data_dir/'preferences.json'); backups=BackupService(settings.data_dir)
-    memory=MemoryStore(settings.data_dir/'assistant.sqlite3'); models=GovernedModelRouter(settings,events=events,audit=memory.audit); vector=VectorStore(settings.data_dir/'vectors.sqlite3',models.embed); memory_engine=SecondBrain(memory,models,vector); second_brain=GovernedMemory(memory_engine,settings.data_dir/'memory-candidates.sqlite3',events=events)
+    memory=MemoryStore(settings.data_dir/'assistant.sqlite3'); models=GovernedModelRouter(settings,events=events,audit=memory.audit); vector=VectorStore(settings.data_dir/'vectors.sqlite3',lambda text:models.embed(text,sensitivity='sensitive')); memory_engine=SecondBrain(memory,models,vector); second_brain=GovernedMemory(memory_engine,settings.data_dir/'memory-candidates.sqlite3',events=events)
     knowledge_store=KnowledgeStore(settings.data_dir/'knowledge.sqlite3',settings.data_dir/'knowledge'/'objects'); knowledge=KnowledgeAuthority(knowledge_store,events=events); device_registry=DeviceRegistry(settings.data_dir/'devices.sqlite3'); owner_access=OwnerAccessStore(settings.data_dir/'owner-access.sqlite3'); device_gateway=DeviceGateway(device_registry,events); continuity=ContinuityService(settings.data_dir/'continuity.sqlite3',events=events,second_brain=second_brain)
     primary_thread=continuity.latest_thread()
     if primary_thread is None: primary_thread_id=continuity.create_thread('Primary Personal AI Context',device_id='desktop',context={'surface':'desktop','topic':'current work'})
