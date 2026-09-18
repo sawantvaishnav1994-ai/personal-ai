@@ -65,6 +65,13 @@ class RealtimeToolBridge:
         if not decision.allowed:
             execution_id = f'realtime:{call_id}'
             ticket = self.approvals.create(execution_id, tool_name, params)
+            self.approvals.save_context(ticket.id, {
+                'surface': 'realtime_voice',
+                'call_id': call_id,
+                'execution_id': execution_id,
+                'tool_name': tool_name,
+                'parameters': params,
+            })
             self.pending[call_id] = PendingRealtimeApproval(
                 call_id,
                 tool_name,
@@ -130,10 +137,39 @@ class RealtimeToolBridge:
             self._emit('voice.tool.failed', call_id=call_id, tool=tool.name, error=str(exc))
             return {'status': 'completed', 'ok': False, 'error': str(exc)}
 
-    def approve(self, call_id: str):
-        item = self.pending.pop(call_id)
+    def _pending_item(self, call_id: str, approval_id: str | None = None):
+        item = self.pending.get(call_id)
+        if item is not None:
+            if approval_id is not None and item.ticket_id != approval_id:
+                raise PermissionError('Realtime approval identity mismatch')
+            return item
+        if not approval_id:
+            raise PermissionError('approval_id is required after Realtime reconnect')
+        context = self.approvals.context(approval_id)
+        if not context or context.get('surface') != 'realtime_voice' or context.get('call_id') != call_id:
+            raise PermissionError('Realtime approval is missing or no longer active')
+        item = PendingRealtimeApproval(
+            call_id=call_id,
+            tool_name=str(context['tool_name']),
+            parameters=dict(context.get('parameters') or {}),
+            created_at=time.time(),
+            ticket_id=approval_id,
+            execution_id=str(context['execution_id']),
+        )
+        return item
+
+    def approve(self, call_id: str, approval_id: str | None = None):
+        item = self._pending_item(call_id, approval_id)
+        self.pending.pop(call_id, None)
         tool = self.tools.get(item.tool_name)
-        self.approvals.consume(item.ticket_id, item.execution_id, item.tool_name, item.parameters)
+        self.approvals.approve(item.ticket_id, item.execution_id, item.tool_name, item.parameters)
+        claim = self.approvals.begin_dispatch(item.ticket_id, worker_id=f'realtime:{call_id}')
+        if not claim.get('dispatch'):
+            if claim.get('status') == 'completed':
+                return dict(claim.get('outcome') or {'status': 'completed'})
+            if claim.get('status') == 'recovery_required':
+                raise RuntimeError('Realtime approved action requires verification/recovery')
+            raise RuntimeError(f"Realtime approved action is {claim.get('status')}")
         self.executor.memory.audit(
             'realtime_tool',
             'approved',
@@ -144,10 +180,24 @@ class RealtimeToolBridge:
                 'parameter_hash': parameter_hash(item.parameters),
             },
         )
-        return self._execute(call_id, tool, item.parameters)
+        try:
+            result = self._execute(call_id, tool, item.parameters)
+        except Exception as exc:
+            self.approvals.mark_recovery_required(item.ticket_id, f'{type(exc).__name__}_after_dispatch')
+            raise
+        verified = bool(result.get('ok'))
+        if result.get('ok'):
+            verification = self.tools.verify_result(tool, item.parameters, result.get('result'))
+            verified = bool(verification.verified)
+            result['verified'] = verified
+            result['verification_reason'] = verification.reason
+        outcome = {'status': 'completed', **result, 'verified': verified}
+        self.approvals.complete_dispatch(item.ticket_id, outcome)
+        return outcome
 
-    def reject(self, call_id: str):
-        item = self.pending.pop(call_id)
+    def reject(self, call_id: str, approval_id: str | None = None):
+        item = self._pending_item(call_id, approval_id)
+        self.pending.pop(call_id, None)
         self.approvals.reject(item.ticket_id)
         self.executor.memory.audit(
             'realtime_tool',
