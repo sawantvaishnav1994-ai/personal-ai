@@ -270,11 +270,12 @@ def create_app(
     @app.get('/continuity/sync')
     def continuity_sync(
         limit: int = 200,
+        after_sequence: int | None = None,
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
         device_id = auth_device(authorization, x_device_id)
-        return require_runtime('continuity').sync(device_id, limit=max(1, min(int(limit), 500)))
+        return require_runtime('continuity').sync(device_id, limit=max(1, min(int(limit), 500)), after_sequence=after_sequence)
 
     @app.post('/continuity/append')
     def continuity_append(
