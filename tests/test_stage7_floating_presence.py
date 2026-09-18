@@ -126,3 +126,12 @@ def test_stage7_invalidated_approval_cannot_reconstruct_after_emergency_stop():
     assert 'self.approvals.advance_security_epoch()' in source
     assert "durable = self.approvals.context(approval_id)" in source
     assert "if durable is None:" in source
+
+
+def test_floating_presence_shutdown_cancels_active_work_before_unsubscribe():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    close = source[source.index('    def closeEvent(self, event):'):]
+    assert 'cancel_event.set()' in close
+    assert "self.executor.cancel_turn(request_id, device_id='desktop')" in close
+    assert close.index('cancel_event.set()') < close.index('self._unsubscribe()')
+    assert close.index("self.executor.cancel_turn(request_id, device_id='desktop')") < close.index('self._unsubscribe()')
