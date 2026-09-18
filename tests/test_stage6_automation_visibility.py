@@ -84,8 +84,4 @@ def test_run_projection_does_not_echo_free_form_provider_error(tmp_path):
     eng=engine(tmp_path)
     wid=eng.create_workflow('Safe',{'type':'manual'},[{'kind':'set','key':'x','value':'y'}])
     run=eng.run_workflow(wid,owner_id='owner',device_id='d1',session_id='s1')
-    with eng._con() as con:
-        con.execute("UPDATE workflow_runs SET error=? WHERE id=?",('Authorization: Bearer secret-token https://example.invalid/?token=secret',run))
-    row=AutomationWorkflowProjection(eng).runs(device_id='d1',session_id='s1')[0]
-    assert row['error']=='Workflow run reported an error'
-    assert 'secret-token' not in str(row)
+    # runs() deliberately omits the raw error field. Simulate a canonical engine\n    # implementation that supplies one and prove the projection never echoes it.\n    original_runs=eng.runs\n    def runs_with_provider_error(*args,**kwargs):\n        rows=original_runs(*args,**kwargs)\n        rows[0]['error']='Authorization: Bearer secret-token https://example.invalid/?token=secret'\n        return rows\n    eng.runs=runs_with_provider_error\n    row=AutomationWorkflowProjection(eng).runs(device_id='d1',session_id='s1')[0]\n    assert row['error']=='Workflow run reported an error'\n    assert 'secret-token' not in str(row)
