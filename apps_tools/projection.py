@@ -49,8 +49,12 @@ class AppsToolsProjection:
             return 'blocked_by_policy'
         if bool(getattr(tool, 'requires_reauth', False)):
             return 'reauth_required'
+        # Metadata projection must remain pure: ToolRegistry.authorize() may run
+        # trusted preparation/destination policy intended only for real execution.
+        # Static approval visibility therefore uses the canonical PermissionEngine;
+        # dynamic execution policy is re-evaluated by ToolRegistry at execution.
         try:
-            decision = registry.authorize(tool, confirmed=False) if hasattr(registry, 'authorize') else registry.permissions.decide(int(tool.risk), confirmed=False)
+            decision = registry.permissions.decide(int(tool.risk), confirmed=False)
         except Exception:
             return 'policy_evaluation_required'
         if not decision.allowed and bool(getattr(decision, 'needs_confirmation', False)):
