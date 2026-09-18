@@ -518,10 +518,18 @@ def create_app(
                 initial = relay.status(session).payload
                 yield f"data: {json.dumps({'event': 'status', **initial}, separators=(',', ':'))}\n\n"
                 while not await request.is_disconnected():
+                    # A long-lived stream must not outlive the canonical session or
+                    # trusted-device authority that opened it.
+                    if relay._live_session(session) is None:
+                        break
                     try:
                         item = await asyncio.to_thread(event_queue.get, True, 15)
+                        if relay._live_session(session) is None:
+                            break
                         yield f"data: {json.dumps(item, separators=(',', ':'))}\n\n"
                     except queue.Empty:
+                        if relay._live_session(session) is None:
+                            break
                         yield ': keepalive\n\n'
             finally:
                 for unsubscribe in unsubscribers:
@@ -595,6 +603,14 @@ def create_app(
         try:
             while True:
                 message = await ws.receive_json()
+                # WebSocket authentication is not durable authority. A device can be
+                # revoked after the transport is established, so revalidate trust
+                # before processing any message that could mutate canonical state.
+                if not device_registry or not device_registry.is_active(device_id):
+                    if device_gateway:
+                        device_gateway.disconnect(device_id)
+                    await ws.close(code=4401)
+                    break
                 if message.get('type') == 'push_registration' and message.get('provider') == 'apns' and message.get('token'):
                     device_registry.set_metadata(device_id, 'push.apns.token', str(message['token']).strip())
                     if message.get('environment'):
