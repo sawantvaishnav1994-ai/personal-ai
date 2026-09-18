@@ -132,11 +132,15 @@ def test_realtime_failure_does_not_expose_exception_secret_in_result_event_or_au
     tool=ex.tools.get('read_status')
     secret='provider-secret-must-not-leak'
     tool.handler=lambda params: (_ for _ in ()).throw(RuntimeError(secret))
-    bridge=RealtimeToolBridge(ex, ex.events)
+    captured=[]
+    class Events:
+        def emit(self, name, **data): captured.append((name, data))
+    bridge=RealtimeToolBridge(ex, Events())
     result=bridge.invoke('secret-error-call','read_status','{}')
     assert result['ok'] is False
     assert secret not in repr(result)
     assert result['error_type']=='RuntimeError'
+    assert secret not in repr(captured)
     audits=ex.memory.audit_entries(limit=100)
     assert secret not in repr(audits)
 
