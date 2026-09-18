@@ -61,3 +61,39 @@ def test_projection_cannot_execute_verify_retry_or_compensate():
     projection=ExecutionRecoveryProjection(Authority(base()))
     for name in ('begin_dispatch','record_verification','retry_decision','authorize_compensation','record_compensation_result'):
         assert not hasattr(projection,name)
+
+
+class BoundAuthority(Authority):
+    class Con:
+        def __init__(self,binding): self.binding=binding
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+        def execute(self,sql,args):
+            if args[0] != 'tx1': return None
+            class Row(dict):
+                __getattr__=dict.__getitem__
+            return SimpleResult(Row(self.binding))
+    def __init__(self,view,binding):
+        super().__init__(view); self.binding=binding
+    def _con(self): return self.Con(self.binding)
+
+
+class SimpleResult:
+    def __init__(self,row): self.row=row
+    def fetchone(self): return self.row
+
+
+def test_recovery_visibility_requires_exact_canonical_owner_device_session_binding():
+    authority=BoundAuthority(base(),{'owner_id':'owner','device_id':'d1','session_id':'s1'})
+    projection=ExecutionRecoveryProjection(authority)
+    assert projection.detail('tx1',owner_id='owner',device_id='d1',session_id='s1') is not None
+    assert projection.detail('tx1',owner_id='other',device_id='d1',session_id='s1') is None
+    assert projection.detail('tx1',owner_id='owner',device_id='d2',session_id='s1') is None
+    assert projection.detail('tx1',owner_id='owner',device_id='d1',session_id='s2') is None
+
+
+def test_recovery_visibility_fails_closed_for_partial_or_missing_binding():
+    authority=BoundAuthority(base(),{'owner_id':'owner','device_id':'d1','session_id':'s1'})
+    projection=ExecutionRecoveryProjection(authority)
+    assert projection.detail('tx1',owner_id='owner',device_id='d1',session_id=None) is None
+    assert projection.detail('missing',owner_id='owner',device_id='d1',session_id='s1') is None
