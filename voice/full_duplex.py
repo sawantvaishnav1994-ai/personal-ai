@@ -307,85 +307,89 @@ class FullDuplexVoiceSession:
             except queue.Full:
                 self.metrics['dropped_audio_blocks'] += 1
 
-        with sd.InputStream(
-            samplerate=self.samplerate,
-            channels=1,
-            dtype='float32',
-            blocksize=self.block,
-            callback=cb,
-            device=input_device,
-        ):
-            self._emit('voice.listening.started', source='desktop-voice')
-            while not self._stop.is_set():
-                try:
-                    block = self._q.get(timeout=.15)
-                except queue.Empty:
-                    continue
-                rms = float(np.sqrt(np.mean(block ** 2)))
-                is_voice = self.vad.observe(rms, speech_active=speaking)
-                self.metrics['noise_floor'] = round(self.vad.noise_floor, 6)
-                self.metrics['voice_threshold'] = round(self.vad.threshold, 6)
+        try:
+            with sd.InputStream(
+                samplerate=self.samplerate,
+                channels=1,
+                dtype='float32',
+                blocksize=self.block,
+                callback=cb,
+                device=input_device,
+            ):
+                self._emit('voice.listening.started', source='desktop-voice')
+                while not self._stop.is_set():
+                    try:
+                        block = self._q.get(timeout=.15)
+                    except queue.Empty:
+                        continue
+                    rms = float(np.sqrt(np.mean(block ** 2)))
+                    is_voice = self.vad.observe(rms, speech_active=speaking)
+                    self.metrics['noise_floor'] = round(self.vad.noise_floor, 6)
+                    self.metrics['voice_threshold'] = round(self.vad.threshold, 6)
 
-                if is_voice:
-                    if not speaking:
-                        self.endpoint.reset()
-                        if (
-                            (self._play_thread and self._play_thread.is_alive())
-                            or (self._response_thread and self._response_thread.is_alive())
-                        ):
-                            self.barge_in()
-                    speech.append(block)
-                    speaking = True
-                    self.endpoint.update(voice=True, block_seconds=block_seconds)
-                elif speaking:
-                    speech.append(block)
-                    if self.endpoint.update(voice=False, block_seconds=block_seconds):
-                        audio = np.concatenate(speech)
-                        speech = []
-                        speaking = False
-                        self.endpoint.reset()
-                        if len(audio) < self.samplerate * .22:
-                            continue
-                        self._emit('voice.transcription.started', source='desktop-voice')
-                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as file:
-                            path = Path(file.name)
-                        sf.write(path, audio, self.samplerate)
-                        try:
-                            text = self.models.transcribe(path)
-                        except Exception as exc:
-                            self._emit('voice.stt.failed', error_type=type(exc).__name__, source='desktop-voice')
-                            self._emit('voice.listening.started', source='desktop-voice')
-                            continue
-                        finally:
-                            path.unlink(missing_ok=True)
-                        if not text.strip():
-                            self._emit('voice.stt.empty', source='desktop-voice')
-                            self._emit('voice.listening.started', source='desktop-voice')
-                            continue
-                        request_id = str(uuid.uuid4())
-                        self.metrics['utterances'] += 1
-                        self._emit(
-                            'voice.transcript',
-                            request_id=request_id,
-                            text=text,
-                            final=True,
-                            source='desktop-voice',
-                            metrics=dict(self.metrics),
-                        )
-                        cancel_event = threading.Event()
-                        with self._lifecycle_lock:
-                            previous = self._turn_cancel
-                            if previous:
-                                previous.set()
-                            self._turn_cancel = cancel_event
-                            self._current_request_id = request_id
-                        response_thread = threading.Thread(
-                            target=self._respond,
-                            args=(text, cancel_event, request_id),
-                            daemon=True,
-                            name='personal-ai-voice-turn',
-                        )
-                        with self._lifecycle_lock:
-                            self._response_thread = response_thread
-                        response_thread.start()
-        self._emit('voice.session.stopped')
+                    if is_voice:
+                        if not speaking:
+                            self.endpoint.reset()
+                            if (
+                                (self._play_thread and self._play_thread.is_alive())
+                                or (self._response_thread and self._response_thread.is_alive())
+                            ):
+                                self.barge_in()
+                        speech.append(block)
+                        speaking = True
+                        self.endpoint.update(voice=True, block_seconds=block_seconds)
+                    elif speaking:
+                        speech.append(block)
+                        if self.endpoint.update(voice=False, block_seconds=block_seconds):
+                            audio = np.concatenate(speech)
+                            speech = []
+                            speaking = False
+                            self.endpoint.reset()
+                            if len(audio) < self.samplerate * .22:
+                                continue
+                            self._emit('voice.transcription.started', source='desktop-voice')
+                            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as file:
+                                path = Path(file.name)
+                            sf.write(path, audio, self.samplerate)
+                            try:
+                                text = self.models.transcribe(path)
+                            except Exception as exc:
+                                self._emit('voice.stt.failed', error_type=type(exc).__name__, source='desktop-voice')
+                                self._emit('voice.listening.started', source='desktop-voice')
+                                continue
+                            finally:
+                                path.unlink(missing_ok=True)
+                            if not text.strip():
+                                self._emit('voice.stt.empty', source='desktop-voice')
+                                self._emit('voice.listening.started', source='desktop-voice')
+                                continue
+                            request_id = str(uuid.uuid4())
+                            self.metrics['utterances'] += 1
+                            self._emit(
+                                'voice.transcript',
+                                request_id=request_id,
+                                text=text,
+                                final=True,
+                                source='desktop-voice',
+                                metrics=dict(self.metrics),
+                            )
+                            cancel_event = threading.Event()
+                            with self._lifecycle_lock:
+                                previous = self._turn_cancel
+                                if previous:
+                                    previous.set()
+                                self._turn_cancel = cancel_event
+                                self._current_request_id = request_id
+                            response_thread = threading.Thread(
+                                target=self._respond,
+                                args=(text, cancel_event, request_id),
+                                daemon=True,
+                                name='personal-ai-voice-turn',
+                            )
+                            with self._lifecycle_lock:
+                                self._response_thread = response_thread
+                            response_thread.start()
+        except Exception as exc:
+            self._emit('voice.session.error', error_type=type(exc).__name__)
+        finally:
+            self._emit('voice.session.stopped')
