@@ -204,11 +204,33 @@ class ActivitiesProjection:
             'execution_id', 'operation_id', 'approval_id', 'tool_id', 'parent_activity_id',
         )
         correlations = {key: str(payload[key]) for key in correlation_keys if payload.get(key) is not None}
+        # Correlate by the strongest canonical identity available. Using OR across
+        # every identifier can merge unrelated work that merely shares a broad
+        # conversation/request identifier while stronger execution identities
+        # conflict.
+        correlation_priority = (
+            'operation_id', 'execution_id', 'approval_id', 'workflow_id', 'plan_id',
+            'turn_id', 'request_id', 'parent_activity_id', 'conversation_id', 'tool_id',
+        )
+        primary_key = next((key for key in correlation_priority if key in correlations), None)
         timeline = []
         for row in rows:
             event = self.project_entry(row)
             details = event['details'] if isinstance(event['details'], dict) else {}
-            if event['id'] == wanted or any(str(details.get(key)) == value for key, value in correlations.items()):
+            include = event['id'] == wanted
+            if not include and primary_key is not None:
+                include = str(details.get(primary_key)) == correlations[primary_key]
+                # A candidate sharing the primary identity must not contradict
+                # another stronger canonical identity present on both records.
+                if include:
+                    primary_index = correlation_priority.index(primary_key)
+                    for stronger_key in correlation_priority[:primary_index]:
+                        expected = correlations.get(stronger_key)
+                        actual = details.get(stronger_key)
+                        if expected is not None and actual is not None and str(actual) != expected:
+                            include = False
+                            break
+            if include:
                 timeline.append(event)
         timeline.sort(key=lambda row: (str(row.get('created_at') or ''), str(row.get('id') or '')))
         return {**projected, 'correlations': correlations, 'timeline': timeline[:self.MAX_PAGE]}
