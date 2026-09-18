@@ -78,3 +78,14 @@ def test_projection_does_not_create_second_scheduler_or_executor(tmp_path):
     assert not hasattr(projection,'start')
     assert not hasattr(projection,'run_workflow')
     assert not hasattr(projection,'approve')
+
+
+def test_run_projection_does_not_echo_free_form_provider_error(tmp_path):
+    eng=engine(tmp_path)
+    wid=eng.create_workflow('Safe',{'type':'manual'},[{'kind':'set','key':'x','value':'y'}])
+    run=eng.run_workflow(wid,owner_id='owner',device_id='d1',session_id='s1')
+    with eng._con() as con:
+        con.execute("UPDATE workflow_runs SET error=? WHERE id=?",('Authorization: Bearer secret-token https://example.invalid/?token=secret',run))
+    row=AutomationWorkflowProjection(eng).runs(device_id='d1',session_id='s1')[0]
+    assert row['error']=='Workflow run reported an error'
+    assert 'secret-token' not in str(row)
