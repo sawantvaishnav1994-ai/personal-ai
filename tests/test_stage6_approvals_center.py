@@ -85,3 +85,25 @@ def test_approval_projection_redacts_generic_tokens_headers_prompts_and_unsafe_d
     assert item['outcome']['headers']=='[redacted]'
     assert item['outcome']['raw_prompt']=='[redacted]'
     assert item['outcome']['safe']=='ok'
+
+
+def test_same_canonical_approval_identity_survives_manager_reconstruction_and_projection(tmp_path):
+    path=tmp_path/'trusted-actions.sqlite3'
+    first=ApprovalManager(path=path)
+    ticket=first.create('execution-cross-surface','mail_send',{},owner_id='owner',device_id='d',session_id='s',destination='dest')
+    assert ApprovalsProjection(first).detail(ticket.id,device_id='d',session_id='s')['approval_id']==ticket.id
+    restarted=ApprovalManager(path=path)
+    item=ApprovalsProjection(restarted).detail(ticket.id,device_id='d',session_id='s')
+    assert item['approval_id']==ticket.id
+    assert item['execution_id']=='execution-cross-surface'
+    assert restarted.record(ticket.id)['ticket'].id==ticket.id
+
+
+def test_approval_projection_fails_closed_across_owner_device_and_session(tmp_path):
+    m=manager(tmp_path)
+    ticket=m.create('e-owner','tool',{},owner_id='owner-a',device_id='d',session_id='s')
+    projection=ApprovalsProjection(m)
+    assert projection.detail(ticket.id,owner_id='owner-b',device_id='d',session_id='s') is None
+    assert projection.detail(ticket.id,owner_id='owner-a',device_id='other',session_id='s') is None
+    assert projection.detail(ticket.id,owner_id='owner-a',device_id='d',session_id='other') is None
+    assert projection.detail(ticket.id,owner_id='owner-a',device_id='d',session_id='s')['approval_id']==ticket.id
