@@ -249,4 +249,19 @@ class FloatingPresence(QWidget):
         self._clamp_to_screen()
 
     def closeEvent(self, event):
-        self.controller.save_position(self.x(), self.y()); self._unsubscribe(); self.controller.close(); super().closeEvent(event)
+        with self._submit_lock:
+            cancel_event = self._active_cancel_event
+            request_id = self._active_request_id
+            self._active_cancel_event = None
+            self._active_request_id = None
+        if cancel_event is not None:
+            cancel_event.set()
+        if request_id and hasattr(self.executor, 'cancel_turn'):
+            try:
+                self.executor.cancel_turn(request_id, device_id='desktop')
+            except (KeyError, PermissionError):
+                pass
+        self.controller.save_position(self.x(), self.y())
+        self._unsubscribe()
+        self.controller.close()
+        super().closeEvent(event)
