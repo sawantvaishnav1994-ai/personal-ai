@@ -69,12 +69,13 @@ class FullDuplexVoiceSession:
                 payload['request_id'] = request_id
             self.events.emit(name, **payload)
 
-    def _emit_session_stopped_once(self):
+    def _emit_session_stopped_once(self, request_id: str | None = None):
         with self._lifecycle_lock:
             if self._session_stopped_emitted:
                 return
             self._session_stopped_emitted = True
-        self._emit('voice.session.stopped')
+            scoped_request_id = request_id or self._current_request_id
+        self._emit('voice.session.stopped', request_id=scoped_request_id)
 
     def _is_current(self, request_id: str) -> bool:
         with self._lifecycle_lock:
@@ -160,7 +161,7 @@ class FullDuplexVoiceSession:
                 self._play_thread = None
             if self.thread and not self.thread.is_alive():
                 self.thread = None
-        self._emit_session_stopped_once()
+        self._emit_session_stopped_once(request_id=request_id)
 
     def barge_in(self):
         with self._lifecycle_lock:
