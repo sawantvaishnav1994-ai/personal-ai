@@ -135,3 +135,12 @@ def test_floating_presence_shutdown_cancels_active_work_before_unsubscribe():
     assert "self.executor.cancel_turn(request_id, device_id='desktop')" in close
     assert close.index('cancel_event.set()') < close.index('self._unsubscribe()')
     assert close.index("self.executor.cancel_turn(request_id, device_id='desktop')") < close.index('self._unsubscribe()')
+
+
+def test_floating_presence_compact_mode_does_not_request_keyboard_focus():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    assert 'self.setFocusPolicy(Qt.FocusPolicy.NoFocus)' in source
+    panel = source[source.index('    def toggle_panel(self):'):source.index('    def submit(self):')]
+    assert 'self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)' in panel
+    assert 'self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)' in panel
+    assert panel.rfind('self.setFocusPolicy(Qt.FocusPolicy.NoFocus)') > panel.index('else:')
