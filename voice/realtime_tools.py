@@ -7,6 +7,7 @@ from typing import Any
 
 from security.approvals import parameter_hash
 from security.projection_redaction import sanitize_external_value
+from tools.registry import Risk
 
 
 @dataclass
@@ -62,6 +63,14 @@ class RealtimeToolBridge:
         params = self.parse_arguments(arguments)
         if confirmed:
             raise PermissionError('direct confirmed Realtime calls are disabled; approve the pending one-use ticket')
+        effective_risk = self.tools.effective_risk(tool, parameters=params, data_classification='internal')
+        if tool.requires_reauth or effective_risk == Risk.CRITICAL:
+            return {
+                'status': 'reauthentication_required',
+                'ok': False,
+                'tool': tool_name,
+                'error': 'Fresh owner re-authentication is required before this voice action can execute.',
+            }
         decision = self.tools.authorize(tool, confirmed=False, parameters=params)
         if not decision.allowed:
             execution_id = f'realtime:{call_id}'
@@ -108,7 +117,10 @@ class RealtimeToolBridge:
 
     def _execute(self, call_id, tool, params):
         try:
+            if getattr(self.tools, 'emergency_stop', False):
+                raise PermissionError('owner emergency stop is active')
             result = tool.handler(params)
+            verification = self.tools.verify_result(tool, params, result)
             self.executor.memory.audit(
                 'realtime_tool',
                 'execute',
@@ -117,10 +129,23 @@ class RealtimeToolBridge:
                     'tool': tool.name,
                     'parameter_hash': parameter_hash(params),
                     'ok': True,
+                    'verified': bool(verification.verified),
+                    'verification_reason': str(verification.reason)[:500],
                 },
             )
-            self._emit('voice.tool.completed', call_id=call_id, tool=tool.name)
-            return {'status': 'completed', 'ok': True, 'result': sanitize_external_value(result)}
+            self._emit(
+                'voice.tool.completed',
+                call_id=call_id,
+                tool=tool.name,
+                verified=bool(verification.verified),
+            )
+            return {
+                'status': 'completed',
+                'ok': True,
+                'result': sanitize_external_value(result),
+                'verified': bool(verification.verified),
+                'verification_reason': str(verification.reason),
+            }
         except Exception as exc:
             self.executor.memory.audit(
                 'realtime_tool',
@@ -172,6 +197,10 @@ class RealtimeToolBridge:
         self.pending.pop(call_id, None)
         tool = self.tools.get(item.tool_name)
         self.approvals.approve(item.ticket_id, item.execution_id, item.tool_name, item.parameters)
+        decision = self.tools.authorize(tool, confirmed=True, parameters=item.parameters)
+        if not decision.allowed:
+            self.approvals.invalidate(item.ticket_id, 'permission_or_policy_revoked')
+            raise PermissionError(decision.reason or 'approved voice action is no longer permitted')
         claim = self.approvals.begin_dispatch(item.ticket_id, worker_id=f'realtime:{call_id}')
         if not claim.get('dispatch'):
             if claim.get('status') == 'completed':
@@ -194,12 +223,7 @@ class RealtimeToolBridge:
         except Exception as exc:
             self.approvals.mark_recovery_required(item.ticket_id, f'{type(exc).__name__}_after_dispatch')
             raise
-        verified = bool(result.get('ok'))
-        if result.get('ok'):
-            verification = self.tools.verify_result(tool, item.parameters, result.get('result'))
-            verified = bool(verification.verified)
-            result['verified'] = verified
-            result['verification_reason'] = verification.reason
+        verified = bool(result.get('verified')) if result.get('ok') else False
         outcome = {'status': 'completed', **result, 'verified': verified}
         self.approvals.complete_dispatch(item.ticket_id, outcome)
         return outcome
