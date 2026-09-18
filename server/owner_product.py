@@ -469,12 +469,22 @@ def owner_product_router(runtime):
         require_fresh_reauthentication()
         try:
             result = registry.set_permissions(target_device_id, body.scopes)
+            cancelled_turns = cancelled_workflows = 0
+            if 'ai:chat' not in set(result.get('scopes') or ()):
+                executor = runtime.get('executor')
+                cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
+                if callable(cancel_device_turns):
+                    cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_permission_revoked'))
+                automations = runtime.get('automations')
+                cancel_device_runs = getattr(automations, 'cancel_device_runs', None)
+                if callable(cancel_device_runs):
+                    cancelled_workflows = int(cancel_device_runs(target_device_id, reason='device_permission_revoked'))
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        audit('device.permissions.updated', device_id=device_id, target_device_id=target_device_id, scopes=result['scopes'])
-        return result
+        audit('device.permissions.updated', device_id=device_id, target_device_id=target_device_id, scopes=result['scopes'], cancelled_turns=cancelled_turns, cancelled_workflows=cancelled_workflows)
+        return {**result, 'cancelled_turns': cancelled_turns, 'cancelled_workflows': cancelled_workflows}
 
     @router.post('/devices/{target_device_id}/revoke')
     def device_revoke(
@@ -499,12 +509,16 @@ def owner_product_router(runtime):
         executor = runtime.get('executor')
         cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
         cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_revoked')) if callable(cancel_device_turns) else 0
+        automations = runtime.get('automations')
+        cancel_device_runs = getattr(automations, 'cancel_device_runs', None)
+        cancelled_workflows = int(cancel_device_runs(target_device_id, reason='device_revoked')) if callable(cancel_device_runs) else 0
         audit(
             'device.revoked',
             device_id=device_id,
             target_device_id=target_device_id,
             revoked_sessions=revoked_sessions,
             cancelled_turns=cancelled_turns,
+            cancelled_workflows=cancelled_workflows,
         )
         return {
             'ok': True,
@@ -512,6 +526,7 @@ def owner_product_router(runtime):
             'current_device_revoked': target_device_id == device_id,
             'revoked_sessions': revoked_sessions,
             'cancelled_turns': cancelled_turns,
+            'cancelled_workflows': cancelled_workflows,
         }
 
     @router.get('/workflows')
