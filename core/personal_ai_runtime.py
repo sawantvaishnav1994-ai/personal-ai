@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -25,6 +26,8 @@ class CanonicalTurnRuntime:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.p10_selector = P10TurnSelector()
         self.autonomy = None
+        self._cancel_lock = threading.RLock()
+        self._cancel_events: dict[str, threading.Event] = {}
         with self._con() as con:
             con.executescript("CREATE TABLE IF NOT EXISTS canonical_turns(request_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,conversation_id TEXT,device_id TEXT,session_id TEXT,surface TEXT NOT NULL,input_modality TEXT NOT NULL,privacy_level TEXT NOT NULL,risk_level TEXT NOT NULL,user_text TEXT NOT NULL,status TEXT NOT NULL,assistant_text TEXT,approval_id TEXT,error_code TEXT,p10_goal_id TEXT,p10_plan_id TEXT,created_at REAL NOT NULL,updated_at REAL NOT NULL);CREATE UNIQUE INDEX IF NOT EXISTS idx_canonical_turn_approval ON canonical_turns(approval_id) WHERE approval_id IS NOT NULL;CREATE INDEX IF NOT EXISTS idx_canonical_turn_conversation ON canonical_turns(conversation_id,created_at);")
             cols = {row[1] for row in con.execute('PRAGMA table_info(canonical_turns)')}
@@ -37,6 +40,22 @@ class CanonicalTurnRuntime:
     def __getattr__(self, name): return getattr(self._executor, name)
     def _emit(self, event, **payload):
         if self.events: self.events.emit(event, **payload)
+    def _register_cancel_event(self, request_id, supplied=None):
+        event = supplied if supplied is not None and hasattr(supplied, 'is_set') and hasattr(supplied, 'set') else threading.Event()
+        with self._cancel_lock: self._cancel_events[str(request_id)] = event
+        return event
+    def _signal_cancel(self, request_id):
+        with self._cancel_lock: event = self._cancel_events.get(str(request_id))
+        if event is not None: event.set()
+    def _release_cancel_event(self, request_id, event):
+        with self._cancel_lock:
+            if self._cancel_events.get(str(request_id)) is event:
+                self._cancel_events.pop(str(request_id), None)
+    @staticmethod
+    def _check_cooperative_cancel(kwargs):
+        event = kwargs.get('cancel_event')
+        if event is not None and event.is_set():
+            raise ExecutionCancelled('canonical turn cancelled')
     @staticmethod
     def _clean_text(text):
         value = str(text or '').strip()
@@ -123,10 +142,28 @@ class CanonicalTurnRuntime:
             rows = con.execute("SELECT request_id,conversation_id FROM canonical_turns WHERE status NOT IN ('completed','failed','cancelled')").fetchall()
         cancelled = 0
         for row in rows:
+            self._signal_cancel(row['request_id'])
             changed = self._update(str(row['request_id']), 'cancelled', error_code=str(reason or 'cancelled')[:80])
             if changed:
                 cancelled += 1
                 self._emit('turn.cancelled', request_id=str(row['request_id']), conversation_id=row['conversation_id'], reason=str(reason or 'cancelled')[:80])
+        return cancelled
+
+    def cancel_device_turns(self, device_id, *, reason='device_revoked'):
+        device_id = str(device_id or '').strip()
+        if not device_id: return 0
+        with self._con() as con:
+            rows = con.execute(
+                "SELECT request_id,conversation_id FROM canonical_turns WHERE device_id=? AND status NOT IN ('completed','failed','cancelled')",
+                (device_id,),
+            ).fetchall()
+        cancelled = 0
+        for row in rows:
+            self._signal_cancel(row['request_id'])
+            changed = self._update(str(row['request_id']), 'cancelled', error_code=str(reason or 'device_revoked')[:80])
+            if changed:
+                cancelled += 1
+                self._emit('turn.cancelled', request_id=str(row['request_id']), conversation_id=row['conversation_id'], reason=str(reason or 'device_revoked')[:80])
         return cancelled
 
     def cancel_turn(self, request_id, *, owner_id=CANONICAL_OWNER, device_id=None, session_id=None):
@@ -136,6 +173,7 @@ class CanonicalTurnRuntime:
         if device_id and existing.get('device_id') and existing['device_id'] != device_id: raise PermissionError('request is not bound to this trusted device')
         if session_id and existing.get('session_id') and existing['session_id'] != session_id: raise PermissionError('request is not bound to this trusted session')
         if existing['status'] in self.TERMINAL_STATUSES: return self.turn(str(request_id))
+        self._signal_cancel(request_id)
         changed = self._update(str(request_id),'cancelled',error_code='cancelled')
         if changed: self._emit('turn.cancelled',request_id=str(request_id),conversation_id=existing.get('conversation_id'),reason='owner_cancelled')
         return self.turn(str(request_id))
@@ -151,6 +189,7 @@ class CanonicalTurnRuntime:
         if tokens[0] is not None: reset_turn_context(tokens[0])
 
     def _orchestrate(self, text, *, request_id, owner_id, device_id, session_id, privacy_level, risk_level, kwargs):
+        self._check_cooperative_cancel(kwargs)
         selection = self.p10_selector.select(text,explicit_background=bool(kwargs.get('background',False)),requested_actions=int(kwargs.pop('requested_actions',0) or 0))
         self._emit('turn.orchestration_selected',request_id=request_id,use_p10=selection.use_p10,reason=selection.reason,signals=list(selection.signals))
         if not selection.use_p10: return None
@@ -160,6 +199,7 @@ class CanonicalTurnRuntime:
         plan = self.autonomy.propose_plan_with_model(goal['id'],owner_id=owner_id,device_trusted=bool(device_id),session_fresh=bool(session_id))
         self._update(request_id,'orchestrating',p10_goal_id=goal['id'],p10_plan_id=plan['id']); self._emit('turn.p10_bound',request_id=request_id,goal_id=goal['id'],plan_id=plan['id'])
         while True:
+            self._check_cooperative_cancel(kwargs)
             ready = self.autonomy.ready_tasks(plan['id'],owner_id=owner_id)
             if not ready: break
             for task in ready:
@@ -183,6 +223,8 @@ class CanonicalTurnRuntime:
         history=self._history(conversation_id,kwargs.pop('conversation_history',None)); kwargs['conversation_id']=conversation_id or None
         if history is not None: kwargs['conversation_history']=history
         kwargs['owner_id']=owner_id
+        cancel_event=self._register_cancel_event(request_id, kwargs.get('cancel_event'))
+        kwargs['cancel_event']=cancel_event
         self._append(conversation_id,device_id=device_id,kind='user_message',text=user_text,event_id=f'{request_id}:user')
         self._emit('turn.started',request_id=request_id,conversation_id=conversation_id,device_id=device_id,surface=surface,input_modality=input_modality)
         tokens=self._bind_context(request_id=request_id,conversation_id=conversation_id,owner_id=owner_id,device_id=device_id,session_id=session_id,surface=surface,input_modality=input_modality,privacy_level=privacy_level,risk_level=risk_level,refs=refs)
@@ -198,7 +240,9 @@ class CanonicalTurnRuntime:
         except TurnReplayBlocked: raise
         except Exception as exc:
             self._update(request_id,'failed',error_code=type(exc).__name__); self._emit('turn.failed',request_id=request_id,conversation_id=conversation_id,error_type=type(exc).__name__); raise
-        finally: self._reset_context(tokens)
+        finally:
+            self._reset_context(tokens)
+            self._release_cancel_event(request_id, cancel_event)
         answer=str(answer)
         if not self._update(request_id,'completed',assistant_text=answer):
             current=self._existing(request_id)
