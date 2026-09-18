@@ -179,7 +179,7 @@ class FullDuplexVoiceSession:
             try:
                 turn = self._cancel_canonical_turn(request_id)
                 canonical_turn_cancelled = bool(turn and turn.get('status') == 'cancelled') if isinstance(turn, dict) else False
-            except (KeyError, PermissionError) as exc:
+            except Exception as exc:
                 self._emit('voice.turn.cancel_failed', request_id=request_id, error_type=type(exc).__name__)
         self.metrics['barge_ins'] += 1
         self._emit(
