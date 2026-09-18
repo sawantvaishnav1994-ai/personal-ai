@@ -117,7 +117,7 @@ class FloatingPresence(QWidget):
         self.setAccessibleName('Personal AI Floating Presence')
         self._apply_window_flags()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.resize(self.CORE_SIZE, self.CORE_SIZE)
         self.shell = QFrame(self)
         self.shell.setObjectName('presenceShell')
@@ -175,7 +175,11 @@ class FloatingPresence(QWidget):
         self.panel.setVisible(self._expanded)
         self.resize(self.PANEL_WIDTH if self._expanded else self.CORE_SIZE, 230 if self._expanded else self.CORE_SIZE)
         self._clamp_to_screen()
-        if self._expanded: self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        if self._expanded:
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        else:
+            self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def submit(self):
         text = self.input.text().strip()
