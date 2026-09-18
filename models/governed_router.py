@@ -61,8 +61,22 @@ class GovernedModelRouter(ModelRouter):
 
     def _eligible(self, capability: str, sensitivity: str, *, hybrid_request: HybridRequest | None = None):
         raw = self._candidates(capability, sensitivity)
-        if hybrid_request is not None:
-            raw = HybridPolicy.filter_candidates(hybrid_request, raw)
+        if hybrid_request is None:
+            # Canonical callers such as AgentExecutor/Planner use the inherited
+            # chat/json/vision/audio APIs. Owner privacy and allow/block policy
+            # must govern those paths too, not only explicit P9 hybrid calls.
+            try:
+                privacy = PrivacyMode(self.owner_privacy)
+            except ValueError:
+                privacy = PrivacyMode.LOCAL_ONLY
+            hybrid_request = HybridRequest(
+                capability=str(capability),
+                sensitivity=str(sensitivity),
+                privacy=privacy,
+                allowed_providers=self.owner_allowed,
+                blocked_providers=tuple(self.disabled),
+            )
+        raw = HybridPolicy.filter_candidates(hybrid_request, raw)
         eligible=[]
         for provider in raw:
             if provider.id in self.disabled:
