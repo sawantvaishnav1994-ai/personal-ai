@@ -106,11 +106,18 @@ class SecureCloudRelay:
         return RelayResult(200, {'revoked': ok})
 
     def _live_session(self, session):
-        current = self.sessions.session(session.id) if session is not None else None
+        if session is None:
+            return None
+        lookup = getattr(self.sessions, 'session', None)
+        # Compatibility session adapters used by non-cloud callers do not expose
+        # durable lookup. Real CloudSessionStore does, and is revalidated here.
+        current = lookup(session.id) if callable(lookup) else session
         if current is None or current.device_id != getattr(session, 'device_id', None):
             return None
         if not self.device_registry or not self.device_registry.is_active(current.device_id):
-            self.sessions.revoke(current.id)
+            revoke = getattr(self.sessions, 'revoke', None)
+            if callable(revoke):
+                revoke(current.id)
             return None
         return current
 
