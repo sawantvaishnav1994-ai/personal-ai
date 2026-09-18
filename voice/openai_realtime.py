@@ -7,6 +7,7 @@ import threading
 import time
 from urllib.parse import quote
 
+from security.projection_redaction import sanitize_sensitive_text
 from voice.intelligence import AudioDeviceManager, VoiceProfile
 from voice.realtime_tools import RealtimeToolBridge
 
@@ -202,7 +203,7 @@ class OpenAIRealtimeVoiceSession:
             self._speech_stopped_at = time.monotonic()
             self._emit('state', state='understanding')
         elif event_type == 'error':
-            self.metrics['last_error'] = str(event.get('error', event))
+            self.metrics['last_error'] = sanitize_sensitive_text(str(event.get('error', event)))
             self._emit('voice.error', error=self.metrics['last_error'])
 
     def start(self):
@@ -253,7 +254,7 @@ class OpenAIRealtimeVoiceSession:
                 backoff = 1.0
             except Exception as exc:
                 self._connected = False
-                self.metrics['last_error'] = str(exc)
+                self.metrics['last_error'] = sanitize_sensitive_text(str(exc))
                 self._emit('voice.realtime.disconnected', error=str(exc), metrics=dict(self.metrics))
                 if self._stop.wait(backoff):
                     break
@@ -273,10 +274,10 @@ class OpenAIRealtimeVoiceSession:
             try:
                 self.handle_event(json.loads(message))
             except Exception as exc:
-                self._emit('voice.error', error=f'realtime event: {exc}')
+                self._emit('voice.error', error=sanitize_sensitive_text(f'realtime event: {exc}'))
 
         def on_error(ws, error):
-            self._emit('voice.error', error=f'realtime transport: {error}')
+            self._emit('voice.error', error=sanitize_sensitive_text(f'realtime transport: {error}'))
 
         def on_close(ws, status, message):
             self._connected = False
