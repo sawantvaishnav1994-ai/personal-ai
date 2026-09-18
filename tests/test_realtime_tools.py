@@ -142,8 +142,9 @@ def test_realtime_failure_does_not_expose_exception_secret_in_result_event_or_au
     assert secret not in repr(result)
     assert result['error_type']=='RuntimeError'
     assert secret not in repr(captured)
-    audits=ex.memory.audit_entries(limit=100)
-    assert secret not in repr(audits)
+    payloads=[row[2] for row in ex.memory.rows if len(row)>2 and isinstance(row[2],dict)]
+    assert payloads
+    assert secret not in repr(payloads)
 
 
 def test_realtime_authorization_receives_parameters_for_policy_evaluation():
