@@ -75,7 +75,8 @@ class BoundAuthority(Authority):
             return SimpleResult(Row(self.binding))
     def __init__(self,view,binding):
         super().__init__(view); self.binding=binding
-    def _con(self): return self.Con(self.binding)
+    def transaction_binding(self,transaction_id):
+        return dict(self.binding) if transaction_id=='tx1' else None
 
 
 class SimpleResult:
