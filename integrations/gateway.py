@@ -101,8 +101,13 @@ class ConnectorGateway:
                         rid=str(data.get('id') or data.get('spreadsheetId') or data.get('messageId') or '') if isinstance(data,dict) else ''
                         reqid=''
                         if getattr(r,'headers',None):reqid=str(r.headers.get('X-Request-Id') or r.headers.get('X-GUploader-UploadID') or '')[:500]
-                        if isinstance(data,dict):data=dict(data);data['_personal_ai_operation_id']=ledger['operation_id']
-                        self.state.transition_operation(ledger['operation_id'],'verification_pending',provider_request_id=reqid or None,provider_resource_id=rid or None,result=data if isinstance(data,dict) else {'bytes':len(data)})
+                        if isinstance(data,dict):
+                            data=dict(data);data['_personal_ai_operation_id']=ledger['operation_id']
+                            durable_result=data
+                        else:
+                            durable_result={'value':data,'_personal_ai_operation_id':ledger['operation_id']}
+                            data=durable_result
+                        self.state.transition_operation(ledger['operation_id'],'verification_pending',provider_request_id=reqid or None,provider_resource_id=rid or None,result=durable_result)
                         self.state.audit('provider.accepted',connector_id=connector,owner_id=owner_id,device_id=device_id,session_id=session_id,correlation_id=ledger['operation_id'],payload={'operation':operation.name,'provider_resource_id':rid})
                     return data
             self.state.set_health(operation.name.split('.',1)[0],error.health_state,error_code=error.code,error_message=error.safe_message)
