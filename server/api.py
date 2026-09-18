@@ -536,6 +536,16 @@ def create_app(
             headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'},
         )
 
+    @app.get('/cloud/approval/{approval_id}')
+    def cloud_approval_status(approval_id: str, authorization: str | None = Header(default=None)):
+        relay, session = cloud_auth(authorization, 'approval:read')
+        context = executor.approval_context(approval_id) if hasattr(executor, 'approval_context') else None
+        if not context:
+            raise HTTPException(404, 'approval unavailable')
+        if context.get('device_id') not in (None, session.device_id):
+            raise HTTPException(403, 'approval device mismatch')
+        return {key: context.get(key) for key in ('approval_id','execution_id','device_id','conversation_id','tool','expires_at','security_epoch','destination','data_classification')}
+
     @app.post('/cloud/approval')
     def cloud_approval(body: ApprovalDecision, authorization: str | None = Header(default=None)):
         relay, session = cloud_auth(authorization, 'approval:write', body.nonce)
