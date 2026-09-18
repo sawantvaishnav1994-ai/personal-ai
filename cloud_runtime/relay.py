@@ -237,8 +237,10 @@ class SecureCloudRelay:
         tools = getattr(self.executor, 'tools', None)
         if tools is not None and hasattr(tools, 'set_emergency_stop'):
             tools.set_emergency_stop(enabled)
-        elif enabled and hasattr(self.executor, 'invalidate_pending_approvals'):
+        if enabled and hasattr(self.executor, 'invalidate_pending_approvals'):
             self.executor.invalidate_pending_approvals()
+        if enabled and hasattr(self.executor, 'cancel_active_turns'):
+            self.executor.cancel_active_turns(reason='emergency_stop')
         self.memory.audit('cloud', 'emergency_stop', {'enabled': enabled})
         if self.events:
             self.events.emit('emergency.stop', enabled=enabled)
