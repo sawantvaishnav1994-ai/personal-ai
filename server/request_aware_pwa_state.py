@@ -28,24 +28,23 @@ class RequestAwareIphonePwaState:
 
     def begin_turn(self, device_id: str) -> threading.Event:
         request_id = current_logical_request_id()
-        previous_request_id = None
         with self._lock:
             previous = self._active.get(device_id)
             if previous and request_id and previous.get('request_id') == request_id:
                 previous['leases'] += 1
                 return previous['event']
             if previous:
+                # Supersession is transport-local cooperative cancellation only.
+                # Durable request authority remains CanonicalTurnRuntime and is
+                # mutated only by an explicit owner cancellation operation.
                 previous['event'].set()
-                previous_request_id = previous.get('request_id')
             current = threading.Event()
             self._active[device_id] = {
                 'request_id': request_id,
                 'event': current,
                 'leases': 1,
             }
-        if previous_request_id and previous_request_id != request_id:
-            self._cancel_durable(previous_request_id)
-        return current
+            return current
 
     def cancel(self, device_id: str, *, request_id: str | None = None) -> bool:
         with self._lock:
