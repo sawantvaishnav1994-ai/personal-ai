@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from security.approvals import parameter_hash
+from security.projection_redaction import sanitize_external_value
 
 
 @dataclass
@@ -119,7 +120,7 @@ class RealtimeToolBridge:
                 },
             )
             self._emit('voice.tool.completed', call_id=call_id, tool=tool.name)
-            return {'status': 'completed', 'ok': True, 'result': result}
+            return {'status': 'completed', 'ok': True, 'result': sanitize_external_value(result)}
         except Exception as exc:
             self.executor.memory.audit(
                 'realtime_tool',
