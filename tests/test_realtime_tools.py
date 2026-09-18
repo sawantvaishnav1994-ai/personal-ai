@@ -157,3 +157,51 @@ def test_realtime_authorization_receives_parameters_for_policy_evaluation():
     ex.tools.authorize=capture
     RealtimeToolBridge(ex).invoke('policy-params','read_status','{"scope":"private"}')
     assert seen.get('parameters')=={'scope':'private'}
+
+
+def test_stage8_realtime_critical_tool_requires_fresh_reauthentication():
+    ex = build_executor('ask')
+    executed = []
+    ex.tools.register(Tool(
+        'critical_action',
+        'critical',
+        lambda params: executed.append(params) or {'done': True},
+        Risk.CRITICAL,
+        requires_reauth=True,
+    ))
+    result = RealtimeToolBridge(ex).invoke('critical-call', 'critical_action', '{"value":1}')
+    assert result['status'] == 'reauthentication_required'
+    assert result['ok'] is False
+    assert executed == []
+    assert ex.approvals.list_pending(owner_id='owner') == []
+
+
+def test_stage8_realtime_approval_revalidates_policy_before_dispatch():
+    ex = build_executor('ask')
+    executed = []
+    tool = ex.tools.get('change_state')
+    tool.handler = lambda params: executed.append(params['value']) or {'changed': params['value']}
+    bridge = RealtimeToolBridge(ex)
+    required = bridge.invoke('policy-revoke-call', 'change_state', '{"value":31}')
+    tool.prohibited = True
+
+    with pytest.raises(PermissionError):
+        bridge.approve('policy-revoke-call', approval_id=required['approval_id'])
+
+    assert executed == []
+    record = ex.approvals.record(required['approval_id'])
+    assert record is not None and record['status'] == 'invalidated'
+
+
+def test_stage8_realtime_auto_execution_reports_verification_truth():
+    ex = build_executor('act')
+    result = RealtimeToolBridge(ex).invoke('read-verified', 'read_status', '{}')
+    assert result['ok'] is True
+    assert result['verified'] is True
+
+    reversible = Tool('reversible_change', 'reversible', lambda params: {'changed': True}, Risk.REVERSIBLE)
+    ex.tools.register(reversible)
+    result = RealtimeToolBridge(ex).invoke('reversible-unverified', 'reversible_change', '{}')
+    assert result['ok'] is True
+    assert result['verified'] is False
+    assert result['verification_reason']
