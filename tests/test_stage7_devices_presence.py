@@ -1,8 +1,8 @@
-from fastapi import FastAPI
+import time\n\nfrom fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from devices.presence_projection import DevicesPresenceProjection
-from devices.registry import DeviceRegistry
+from devices.registry import DeviceRegistry\nfrom devices.gateway import DeviceCommand, DeviceGateway\nfrom core.events import EventBus\nfrom security.pwa_sessions import PwaSessionStore
 from security.request_context import TrustedRequestContext
 import server.devices_presence_api as devices_api
 from server.devices_presence_api import devices_presence_router
@@ -95,3 +95,85 @@ def test_devices_presence_api_requires_active_scoped_trusted_device(tmp_path, mo
     registry.set_permissions(caller['id'], {'device:read'})
     registry.revoke(caller['id'])
     assert client.get('/iphone/api/devices-presence').status_code == 401
+
+
+
+def test_owner_revocation_requires_admin_and_fresh_reauthentication(tmp_path, monkeypatch):
+    registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
+    caller, _ = registry.enroll('Owner', 'ios-pwa')
+    target, _ = registry.enroll('Desktop', 'windows')
+    registry.set_permissions(caller['id'], {'device:read', 'device:admin'})
+    sessions = PwaSessionStore(tmp_path / 'pwa-sessions.sqlite3')
+    _, target_session = sessions.issue(target['id'])
+    gateway = DeviceGateway(registry, EventBus())
+    current = {'value': TrustedRequestContext(device_id=caller['id'], session_id='owner-session', reauthenticated_at=None)}
+    monkeypatch.setattr(devices_api, 'current_trusted_request', lambda: current['value'])
+    app = FastAPI()
+    app.include_router(devices_presence_router({
+        'device_registry': registry, 'device_gateway': gateway, 'pwa_sessions': sessions,
+    }))
+    client = TestClient(app)
+
+    assert client.delete(f"/iphone/api/devices-presence/{target['id']}").status_code == 403
+    current['value'] = TrustedRequestContext(
+        device_id=caller['id'], session_id='owner-session', reauthenticated_at=time.time() - 999,
+    )
+    assert client.delete(f"/iphone/api/devices-presence/{target['id']}").status_code == 403
+
+    current['value'] = TrustedRequestContext(
+        device_id=caller['id'], session_id='owner-session', reauthenticated_at=time.time(),
+    )
+    response = client.delete(f"/iphone/api/devices-presence/{target['id']}")
+    assert response.status_code == 200
+    assert response.json()['trust_state'] == 'revoked'
+    assert response.json()['revoked_sessions'] == 1
+    assert registry.is_active(target['id']) is False
+    assert sessions.get(target_session.id) is None
+
+
+def test_revocation_rejects_unknown_target_and_revoked_caller(tmp_path, monkeypatch):
+    registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
+    caller, _ = registry.enroll('Owner', 'ios-pwa')
+    registry.set_permissions(caller['id'], {'device:admin'})
+    current = {'value': TrustedRequestContext(
+        device_id=caller['id'], session_id='owner-session', reauthenticated_at=time.time(),
+    )}
+    monkeypatch.setattr(devices_api, 'current_trusted_request', lambda: current['value'])
+    app = FastAPI()
+    app.include_router(devices_presence_router({'device_registry': registry, 'device_gateway': Gateway()}))
+    client = TestClient(app)
+
+    assert client.delete('/iphone/api/devices-presence/not-a-device').status_code == 404
+    registry.revoke(caller['id'])
+    assert client.delete(f"/iphone/api/devices-presence/{caller['id']}").status_code == 401
+
+
+def test_device_gateway_fails_closed_after_revocation_and_rejects_late_result(tmp_path):
+    registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
+    device, _ = registry.enroll('Desktop', 'windows')
+    events = EventBus()
+    gateway = DeviceGateway(registry, events)
+
+    class Session:
+        async def send_json(self, payload):
+            self.payload = payload
+
+    session = Session()
+    gateway.connect(device['id'], session)
+    assert gateway.online() == [device['id']]
+    registry.revoke(device['id'])
+    assert gateway.online() == []
+    assert gateway.receive(device['id'], {'request_id': 'late', 'ok': True}) is False
+
+
+def test_device_gateway_cannot_reconnect_revoked_device(tmp_path):
+    registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
+    device, _ = registry.enroll('Desktop', 'windows')
+    registry.revoke(device['id'])
+    gateway = DeviceGateway(registry, EventBus())
+    try:
+        gateway.connect(device['id'], object())
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError('revoked device reconnected')
