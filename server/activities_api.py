@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from activities.projection import ActivitiesProjection
 from security.request_context import current_trusted_request
@@ -24,10 +24,10 @@ def activities_router(runtime):
 
     @router.get('')
     def list_activities(
-        limit: int = 50,
-        category: str | None = None,
-        status: str | None = None,
-        cursor: str | None = None,
+        limit: int = Query(default=50, ge=1, le=200),
+        category: str | None = Query(default=None, max_length=100),
+        status: str | None = Query(default=None, max_length=80),
+        cursor: str | None = Query(default=None, max_length=768),
     ):
         require_owner()
         try:
