@@ -216,3 +216,11 @@ def test_floating_presence_runtime_projection_preserves_keyboard_accessibility_h
     projection = source[source.index('    def _apply_projection(self, state_value, sequence):'):source.index('    def _apply_window_flags(self):')]
     assert "self.core.setAccessibleDescription(f'{presentation.label}. Press Enter or Space to open quick controls')" in projection
     assert 'self.core.setAccessibleDescription(presentation.label)' not in projection
+
+
+def test_stage7_pulse_reduces_background_animation_wakeups():
+    source = Path('ui/pulse.py').read_text(encoding='utf-8')
+    setter = source[source.index('    def set_state(self,state):'):source.index('    def set_memory_labels', source.index('    def set_state(self,state):'))]
+    assert '100 if self.state=="background" else 16' in setter
+    assert 'if self.timer.interval()!=interval:self.timer.setInterval(interval)' in setter
+    assert '120 if self.reduce_motion' in setter
