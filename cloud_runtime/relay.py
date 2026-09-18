@@ -105,7 +105,19 @@ class SecureCloudRelay:
         })
         return RelayResult(200, {'revoked': ok})
 
+    def _live_session(self, session):
+        current = self.sessions.session(session.id) if session is not None else None
+        if current is None or current.device_id != getattr(session, 'device_id', None):
+            return None
+        if not self.device_registry or not self.device_registry.is_active(current.device_id):
+            self.sessions.revoke(current.id)
+            return None
+        return current
+
     def command(self, session, text: str, nonce: str):
+        session = self._live_session(session)
+        if session is None:
+            return RelayResult(401, {'error': 'session_expired_or_revoked'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         text = (text or '').strip()
@@ -178,6 +190,9 @@ class SecureCloudRelay:
         })
 
     def approval(self, session, approval_id: str, decision: str):
+        session = self._live_session(session)
+        if session is None:
+            return RelayResult(401, {'error': 'session_expired_or_revoked'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         try:
