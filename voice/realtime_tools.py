@@ -146,6 +146,11 @@ class RealtimeToolBridge:
         if not approval_id:
             raise PermissionError('approval_id is required after Realtime reconnect')
         context = self.approvals.context(approval_id)
+        if context is None:
+            record = self.approvals.record(approval_id)
+            if record and record.get('status') == 'completed':
+                outcome = record.get('outcome') or {}
+                return {'completed_outcome': dict(outcome), 'approval_id': approval_id, 'call_id': call_id}
         if not context or context.get('surface') != 'realtime_voice' or context.get('call_id') != call_id:
             raise PermissionError('Realtime approval is missing or no longer active')
         item = PendingRealtimeApproval(
@@ -160,6 +165,8 @@ class RealtimeToolBridge:
 
     def approve(self, call_id: str, approval_id: str | None = None):
         item = self._pending_item(call_id, approval_id)
+        if isinstance(item, dict) and 'completed_outcome' in item:
+            return dict(item['completed_outcome'])
         self.pending.pop(call_id, None)
         tool = self.tools.get(item.tool_name)
         self.approvals.approve(item.ticket_id, item.execution_id, item.tool_name, item.parameters)
