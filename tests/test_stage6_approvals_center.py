@@ -107,3 +107,26 @@ def test_approval_projection_fails_closed_across_owner_device_and_session(tmp_pa
     assert projection.detail(ticket.id,owner_id='owner-a',device_id='other',session_id='s') is None
     assert projection.detail(ticket.id,owner_id='owner-a',device_id='d',session_id='other') is None
     assert projection.detail(ticket.id,owner_id='owner-a',device_id='d',session_id='s')['approval_id']==ticket.id
+
+
+def test_revoked_device_cannot_read_stage6_approvals_center(tmp_path):
+    from devices.registry import DeviceRegistry
+    from security.request_context import TrustedRequestContext, set_trusted_request, reset_trusted_request
+    from server.approvals_center_api import approvals_center_router
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+
+    registry=DeviceRegistry(tmp_path/'devices.sqlite3')
+    device,_=registry.enroll('revocation-test','ios-pwa')
+    registry.set_permissions(device['id'], registry.OWNER_SCOPES)
+    manager=ApprovalManager(path=tmp_path/'trusted-actions.sqlite3')
+    runtime={'device_registry':registry,'agent_executor':SimpleNamespace(approvals=manager)}
+    app=FastAPI(); app.include_router(approvals_center_router(runtime))
+    token=set_trusted_request(TrustedRequestContext(device_id=device['id'],session_id='revoked-session'))
+    try:
+        assert TestClient(app).get('/iphone/api/approvals-center').status_code==200
+        assert registry.revoke(device['id']) is True
+        assert TestClient(app).get('/iphone/api/approvals-center').status_code==401
+    finally:
+        reset_trusted_request(token)
