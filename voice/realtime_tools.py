@@ -149,7 +149,10 @@ class RealtimeToolBridge:
         if context is None:
             record = self.approvals.record(approval_id)
             if record and record.get('status') == 'completed':
+                ticket = record.get('ticket')
                 outcome = record.get('outcome') or {}
+                if ticket is None or ticket.execution_id != f'realtime:{call_id}':
+                    raise PermissionError('Realtime completed approval identity mismatch')
                 return {'completed_outcome': dict(outcome), 'approval_id': approval_id, 'call_id': call_id}
         if not context or context.get('surface') != 'realtime_voice' or context.get('call_id') != call_id:
             raise PermissionError('Realtime approval is missing or no longer active')
