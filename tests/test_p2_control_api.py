@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from automation.engine import AutomationEngine
 from capabilities.benchmark import CapabilityBenchmark
@@ -180,3 +181,31 @@ def test_stage7_continuity_sync_accepts_reconnect_cursor_without_advancing_truth
     assert 'after = min(requested_after, stored_after)' in continuity
     assert 'after_sequence: int | None = None' in api
     assert 'after_sequence=after_sequence' in api
+
+
+def test_stage8_revoked_websocket_cannot_mutate_continuity(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    device, token = registry.enroll('Phone', 'ios')
+    resumed = runtime['continuity'].resume(device['id'])
+    thread_id = resumed['thread']['id']
+    before = runtime['continuity'].events_for_thread(thread_id, limit=50)
+
+    with client.websocket_connect(
+        f"/device/ws/{device['id']}",
+        headers={'Authorization': f'Bearer {token}'},
+    ) as websocket:
+        assert registry.revoke(device['id'])
+        websocket.send_json({
+            'type': 'continuity_event',
+            'kind': 'user_message',
+            'payload': {'text': 'must-not-survive-revocation'},
+        })
+        try:
+            websocket.receive_json()
+            assert False, 'revoked websocket should be closed before processing the message'
+        except WebSocketDisconnect as exc:
+            assert exc.code == 4401
+
+    after = runtime['continuity'].events_for_thread(thread_id, limit=50)
+    assert after == before
+    assert device['id'] not in runtime['device_gateway'].online()
