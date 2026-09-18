@@ -114,7 +114,6 @@ class RealtimeToolBridge:
                 {
                     'call_id': call_id,
                     'tool': tool.name,
-                    'params': params,
                     'parameter_hash': parameter_hash(params),
                     'ok': True,
                 },
@@ -128,10 +127,9 @@ class RealtimeToolBridge:
                 {
                     'call_id': call_id,
                     'tool': tool.name,
-                    'params': params,
                     'parameter_hash': parameter_hash(params),
                     'ok': False,
-                    'error': str(exc),
+                    'error_type': type(exc).__name__,
                 },
             )
             self._emit('voice.tool.failed', call_id=call_id, tool=tool.name, error=str(exc))
