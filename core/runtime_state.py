@@ -307,6 +307,33 @@ class RuntimeStateAuthority:
         self.events.emit('runtime.state', state=RuntimeState.BACKGROUND.value, previous_state=current.value, sequence=snapshot.sequence, reason='background_started', request_id=None)
         return snapshot
 
+    def _on_voice_state(self, target, reason, event):
+        scoped = str(event.get('request_id') or '').strip() or None
+        if scoped is None:
+            with self._lock:
+                current = self._state
+                current_request = self._request_id
+                busy_foreground = current in {
+                    RuntimeState.UNDERSTANDING,
+                    RuntimeState.THINKING,
+                    RuntimeState.MEMORY_RETRIEVAL,
+                    RuntimeState.KNOWLEDGE_RETRIEVAL,
+                    RuntimeState.TOOL_ACTION,
+                    RuntimeState.RESPONDING,
+                    RuntimeState.NEEDS_APPROVAL,
+                }
+                snapshot = StateSnapshot(current, self._sequence, 'unscoped_voice_ignored', current_request)
+            if current == RuntimeState.BACKGROUND or (current_request is not None and busy_foreground):
+                self.events.emit(
+                    'runtime.state.unscoped_voice_ignored',
+                    attempted_state=target.value,
+                    current_state=current.value,
+                    current_request_id=current_request,
+                    voice_event=event.get('event'),
+                )
+                return snapshot
+        return self._safe_transition(target, reason, event)
+
     def _on_approval_required(self, event):
         """Project approval only when it belongs to the foreground lifecycle.
 
@@ -364,16 +391,20 @@ class RuntimeStateAuthority:
             'approval.approved': (RuntimeState.TOOL_ACTION, 'approval_approved', False),
             'emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
             'p10.emergency_stop': (RuntimeState.ERROR, 'emergency_stop', False),
-            'voice.listening.started': (RuntimeState.LISTENING, 'voice_listening', False),
-            'voice.tts.started': (RuntimeState.RESPONDING, 'voice_tts_started', False),
-            'voice.tts.completed': (RuntimeState.ACTIVE, 'voice_tts_completed', False),
-            'voice.tts.failed': (RuntimeState.WARNING, 'voice_tts_failed', False),
-            'voice.stt.failed': (RuntimeState.WARNING, 'voice_stt_failed', False),
-            'voice.approval.required': (RuntimeState.NEEDS_APPROVAL, 'voice_approval_required', False),
-            'voice.session.stopped': (RuntimeState.IDLE, 'voice_session_stopped', False),
         }
         for name, (target, reason, activate) in mapping.items():
             self._subscriptions.append(self.events.subscribe(name, lambda event, t=target, r=reason, a=activate: self._safe_transition(t, r, event, activate_request=a)))
+        voice_mapping = {
+            'voice.listening.started': (RuntimeState.LISTENING, 'voice_listening'),
+            'voice.tts.started': (RuntimeState.RESPONDING, 'voice_tts_started'),
+            'voice.tts.completed': (RuntimeState.ACTIVE, 'voice_tts_completed'),
+            'voice.tts.failed': (RuntimeState.WARNING, 'voice_tts_failed'),
+            'voice.stt.failed': (RuntimeState.WARNING, 'voice_stt_failed'),
+            'voice.approval.required': (RuntimeState.NEEDS_APPROVAL, 'voice_approval_required'),
+            'voice.session.stopped': (RuntimeState.IDLE, 'voice_session_stopped'),
+        }
+        for name, (target, reason) in voice_mapping.items():
+            self._subscriptions.append(self.events.subscribe(name, lambda event, t=target, r=reason: self._on_voice_state(t, r, event)))
         self._subscriptions.append(self.events.subscribe('approval.required', self._on_approval_required))
         self._subscriptions.append(self.events.subscribe('automation.started', self._on_background_started))
         self._subscriptions.append(self.events.subscribe('workflow.started', self._on_background_started))
