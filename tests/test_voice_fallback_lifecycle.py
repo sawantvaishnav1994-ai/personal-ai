@@ -282,3 +282,42 @@ def test_desktop_qt_surfaces_marshal_worker_events_before_touching_widgets():
     assert "self._runtime_state_event.connect(self._render_state)" in floating
     assert "self.events.subscribe('runtime.state', self._runtime_state_event.emit)" in floating
     assert "self.events.subscribe('runtime.state', self._render_state)" not in floating
+
+
+
+def test_barge_in_sets_request_scoped_playback_interrupt_before_thread_runs():
+    events = Events()
+    session = FullDuplexVoiceSession(Models(), CanonicalCancelProbe(), events)
+    session._current_request_id = 'completed-request'
+    play_cancel = threading.Event()
+    session._play_cancel = play_cancel
+
+    result = session.barge_in()
+
+    assert result['interrupted'] is True
+    assert result['canonical_turn_cancelled'] is False
+    assert play_cancel.is_set()
+
+
+def test_pre_start_playback_interrupt_cannot_be_cleared_by_playback_worker():
+    events = Events()
+    session = FullDuplexVoiceSession(Models(), CanonicalCancelProbe(), events)
+    session._current_request_id = 'completed-request'
+    play_cancel = threading.Event()
+    play_cancel.set()
+    session._play_cancel = play_cancel
+
+    session._play(b'not-decoded-because-interrupted', 'completed-request', play_cancel)
+
+    names = [name for name, _ in events.rows]
+    assert 'voice.playback.interrupted' in names
+    assert 'voice.tts.started' not in names
+    assert session._play_cancel is None
+
+
+def test_playback_worker_never_clears_shared_barge_state_after_start():
+    source = Path('voice/full_duplex.py').read_text(encoding='utf-8')
+    play = source[source.index('    def _play('):source.index('    def _respond(')]
+    assert 'self._barge.clear()' not in play
+    assert 'interrupt_event.is_set()' in play
+    assert 'self._play_cancel = play_cancel' in source
