@@ -74,7 +74,10 @@ def pwa_security_router(runtime):
                 'message': 'That browser session was not found for this trusted device.',
             })
         sessions.revoke(session_id)
-        return {'ok': True, 'revoked': session_id, 'current': session_id == current.session_id}
+        automations = runtime.get('automations')
+        cancel_session_runs = getattr(automations, 'cancel_session_runs', None)
+        cancelled_workflows = int(cancel_session_runs(session_id, reason='session_revoked')) if callable(cancel_session_runs) else 0
+        return {'ok': True, 'revoked': session_id, 'current': session_id == current.session_id, 'cancelled_workflows': cancelled_workflows}
 
     @router.post('/sessions/revoke-others')
     def revoke_other_sessions():
@@ -83,6 +86,10 @@ def pwa_security_router(runtime):
         for row in sessions.active_for_device(current.device_id):
             if row.id != current.session_id and sessions.revoke(row.id):
                 count += 1
+                automations = runtime.get('automations')
+                cancel_session_runs = getattr(automations, 'cancel_session_runs', None)
+                if callable(cancel_session_runs):
+                    cancel_session_runs(row.id, reason='session_revoked')
         return {'ok': True, 'revoked': count, 'current_session_id': current.session_id}
 
     return router
