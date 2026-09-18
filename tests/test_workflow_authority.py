@@ -209,3 +209,41 @@ def test_session_bound_workflow_approval_survives_engine_and_executor_restart(tm
 
     assert restarted._run(run_id)['status'] == 'completed'
     assert calls == [{'destination': 'example.com'}]
+
+
+def test_stage8_device_revocation_cancels_only_bound_workflows(tmp_path):
+    executor = ApprovalExecutor()
+    engine = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=executor)
+    workflow_id = create_prompt_workflow(engine)
+    first = engine.run_workflow(
+        workflow_id, background=False, owner_id='owner', device_id='device-1', session_id='session-1'
+    )
+    second = engine.run_workflow(
+        workflow_id, background=False, owner_id='owner', device_id='device-2', session_id='session-2'
+    )
+    assert engine._run(first)['status'] == 'waiting_approval'
+    assert engine._run(second)['status'] == 'waiting_approval'
+
+    assert engine.cancel_device_runs('device-1', reason='device_revoked') == 1
+
+    assert engine._run(first)['status'] == 'cancelled'
+    assert engine._run(first)['error'] == 'device_revoked'
+    assert engine._run(second)['status'] == 'waiting_approval'
+
+
+def test_stage8_session_revocation_cancels_only_bound_workflows(tmp_path):
+    executor = ApprovalExecutor()
+    engine = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=executor)
+    workflow_id = create_prompt_workflow(engine)
+    first = engine.run_workflow(
+        workflow_id, background=False, owner_id='owner', device_id='device-1', session_id='session-1'
+    )
+    second = engine.run_workflow(
+        workflow_id, background=False, owner_id='owner', device_id='device-1', session_id='session-2'
+    )
+
+    assert engine.cancel_session_runs('session-1', reason='session_revoked') == 1
+
+    assert engine._run(first)['status'] == 'cancelled'
+    assert engine._run(first)['error'] == 'session_revoked'
+    assert engine._run(second)['status'] == 'waiting_approval'
