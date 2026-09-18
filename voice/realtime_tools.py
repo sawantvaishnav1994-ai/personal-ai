@@ -225,6 +225,14 @@ class RealtimeToolBridge:
             self.approvals.mark_recovery_required(item.ticket_id, f'{type(exc).__name__}_after_dispatch')
             raise
         verified = bool(result.get('verified')) if result.get('ok') else False
+        if not result.get('ok') and self.tools.effective_risk(
+            tool, parameters=item.parameters, data_classification='internal'
+        ) >= Risk.EXTERNAL_SIDE_EFFECT:
+            self.approvals.mark_recovery_required(
+                item.ticket_id,
+                f"{result.get('error_type') or 'tool_failure'}_after_dispatch",
+            )
+            raise RuntimeError('Realtime approved action has an uncertain post-dispatch outcome; recovery review is required')
         outcome = {'status': 'completed', **result, 'verified': verified}
         self.approvals.complete_dispatch(item.ticket_id, outcome)
         return outcome
