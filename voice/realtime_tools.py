@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from security.approvals import ApprovalManager, parameter_hash
+from security.approvals import parameter_hash
 
 
 @dataclass
@@ -26,7 +26,9 @@ class RealtimeToolBridge:
         self.tools = executor.tools
         self.events = events
         self.pending = {}
-        self.approvals = getattr(executor, 'approvals', ApprovalManager())
+        self.approvals = getattr(executor, 'approvals', None)
+        if self.approvals is None:
+            raise RuntimeError('canonical approval authority is required for Realtime tools')
 
     def definitions(self):
         return [
