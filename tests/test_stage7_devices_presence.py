@@ -50,28 +50,22 @@ def test_revoked_device_is_never_presented_connected(tmp_path):
     assert item['connected'] is False
 
 
-def test_devices_presence_api_requires_active_scoped_trusted_device(tmp_path):
+def test_devices_presence_api_requires_active_scoped_trusted_device(tmp_path, monkeypatch):
     registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
     caller, _ = registry.enroll('Owner', 'ios-pwa')
     target, _ = registry.enroll('Desktop', 'windows')
+    current = {'value': None}
+    monkeypatch.setattr(devices_api, 'current_trusted_request', lambda: current['value'])
     app = FastAPI()
     app.include_router(devices_presence_router({'device_registry': registry, 'device_gateway': Gateway([target['id']])}))
-
-    @app.middleware('http')
-    async def bind_context(request, call_next):
-        device_id = request.headers.get('x-test-device')
-        scopes = frozenset(registry.permissions(device_id)['scopes']) if device_id else frozenset()
-        if not device_id:
-            return await call_next(request)
-        with trusted_request(SimpleNamespace(device_id=device_id, session_id='s1', scopes=scopes, owner_id='owner')):
-            return await call_next(request)
-
     client = TestClient(app)
+
     assert client.get('/iphone/api/devices-presence').status_code == 401
-    response = client.get('/iphone/api/devices-presence', headers={'x-test-device': caller['id']})
+    current['value'] = TrustedRequestContext(device_id=caller['id'], session_id='s1')
+    response = client.get('/iphone/api/devices-presence')
     assert response.status_code == 200
     assert any(row['device_id'] == target['id'] and row['presence_state'] == 'online' for row in response.json()['devices'])
     registry.set_permissions(caller['id'], {'ai:chat'})
-    assert client.get('/iphone/api/devices-presence', headers={'x-test-device': caller['id']}).status_code == 403
+    assert client.get('/iphone/api/devices-presence').status_code == 403
     registry.revoke(caller['id'])
-    assert client.get('/iphone/api/devices-presence', headers={'x-test-device': caller['id']}).status_code == 401
+    assert client.get('/iphone/api/devices-presence').status_code == 401
