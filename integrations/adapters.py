@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, requests
+import hashlib, json, requests
 from integrations.contracts import gmail_manifest, calendar_manifest, slack_manifest, home_assistant_manifest
 from integrations.gateway import ConnectorError
 
@@ -69,12 +69,70 @@ class SlackAdapter(BearerREST):
     def _ok(self,data):
         if not data.get('ok'):raise IntegrationError('Slack rejected the request')
         return data
-    def auth_test(self):return self._ok(self.request('POST','auth.test'))
-    def history(self,channel,limit=50):return self._ok(self.request('GET','conversations.history',params={'channel':channel,'limit':limit}))
-    def post_message(self,channel,text):return self._ok(self.request('POST','chat.postMessage',json={'channel':channel,'text':text}))
+    def auth_test(self,**ctx):
+        return self._ok(self.request(
+            'POST','auth.test',
+            operation=self.manifest.operation('slack.read'),
+            operation_parameters={'healthcheck':True},
+            **ctx,
+        ))
+    def history(self,channel,limit=50,**ctx):
+        channel=str(channel).strip()[:200];limit=max(1,min(int(limit),100))
+        return self._ok(self.request(
+            'GET','conversations.history',
+            params={'channel':channel,'limit':limit},
+            operation=self.manifest.operation('slack.read'),
+            operation_parameters={'channel':channel,'limit':limit},
+            destination=channel,
+            **ctx,
+        ))
+    def post_message(self,channel,text,**ctx):
+        channel=str(channel).strip()[:200];text=str(text)[:40000]
+        return self._ok(self.request(
+            'POST','chat.postMessage',
+            json={'channel':channel,'text':text},
+            operation=self.manifest.operation('slack.send'),
+            operation_parameters={
+                'channel':channel,
+                'text_sha256':hashlib.sha256(text.encode()).hexdigest(),
+                'text_length':len(text),
+            },
+            destination=channel,
+            **ctx,
+        ))
 class HomeAssistantAdapter(BearerREST):
     manifest=home_assistant_manifest()
     def __init__(self,base_url,token,*,gateway=None):super().__init__(f'{base_url.rstrip("/")}/api',token,gateway=gateway,connector_id='home_assistant')
-    def states(self):return self.request('GET','states')
-    def state(self,entity_id):return self.request('GET',f'states/{entity_id}')
-    def call_service(self,domain,service,data):return self.request('POST',f'services/{domain}/{service}',json=data)
+    def states(self,**ctx):
+        return self.request(
+            'GET','states',
+            operation=self.manifest.operation('home_assistant.read'),
+            operation_parameters={'resource':'states'},
+            **ctx,
+        )
+    def state(self,entity_id,**ctx):
+        entity_id=str(entity_id).strip()[:240]
+        return self.request(
+            'GET',f'states/{entity_id}',
+            operation=self.manifest.operation('home_assistant.read'),
+            operation_parameters={'entity_id':entity_id},
+            destination=entity_id,
+            **ctx,
+        )
+    def call_service(self,domain,service,data,**ctx):
+        domain=str(domain).strip()[:120];service=str(service).strip()[:120];payload=dict(data or {})
+        entity_id=str(payload.get('entity_id') or '')[:240]
+        safe_parameters={
+            'domain':domain,
+            'service':service,
+            'entity_id':entity_id,
+            'data_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True,default=str,separators=(',',':')).encode()).hexdigest(),
+        }
+        return self.request(
+            'POST',f'services/{domain}/{service}',
+            json=payload,
+            operation=self.manifest.operation('home_assistant.call_service'),
+            operation_parameters=safe_parameters,
+            destination=entity_id or f'{domain}.{service}',
+            **ctx,
+        )
