@@ -69,6 +69,15 @@ def test_presence_position_persistence_is_bounded_on_restore(tmp_path):
     restored.close()
 
 
+def test_presence_clamp_supports_negative_secondary_monitor_coordinates():
+    assert PresenceController.clamp_position(
+        -2500, 120, left=-1920, top=0, right=0, bottom=1080, width=118, height=118,
+    ) == (-1920, 120)
+    assert PresenceController.clamp_position(
+        -100, 1200, left=-1920, top=0, right=0, bottom=1080, width=118, height=118,
+    ) == (-118, 962)
+
+
 def test_presence_controller_unsubscribes_on_close(tmp_path):
     events = EventBus()
     controller = PresenceController(events, tmp_path / 'presence.json')
@@ -150,5 +159,30 @@ def test_floating_presence_reclamps_after_non_drag_screen_move():
     source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
     move = source[source.index('    def moveEvent(self, event):'):source.index('    def _clamp_to_screen(self):')]
     assert 'super().moveEvent(event)' in move
-    assert 'if self._drag_offset is None:' in move
+    assert 'if self._drag_offset is None and not self._clamping_position:' in move
     assert 'self._clamp_to_screen()' in move
+
+
+def test_floating_presence_tracks_screen_topology_and_available_geometry_changes():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    assert 'QGuiApplication' in source
+    assert 'app.screenAdded.connect(self._on_screen_topology_changed)' in source
+    assert 'app.screenRemoved.connect(self._on_screen_topology_changed)' in source
+    assert 'handle.screenChanged.connect(self._on_window_screen_changed)' in source
+    assert 'screen.availableGeometryChanged.connect(self._on_screen_geometry_changed)' in source
+    assert 'screen.geometryChanged.connect(self._on_screen_geometry_changed)' in source
+    request = source[source.index('    def _request_lifecycle_reclamp(self):'):source.index('    def _reclamp_after_screen_change(self):')]
+    assert 'self._drag_offset is not None' in request
+    assert 'self._reclamp_pending' in request
+    assert 'QTimer.singleShot(0, self._reclamp_after_screen_change)' in request
+
+
+def test_floating_presence_screen_lifecycle_cleanup_and_clamp_are_reentrant_safe():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    clamp = source[source.index('    def _clamp_to_screen(self):'):source.index('    def _restore_position(self):')]
+    assert 'self._clamping_position' in clamp
+    assert "if (x, y) == (self.x(), self.y()):" in clamp
+    assert 'finally:' in clamp
+    close = source[source.index('    def closeEvent(self, event):'):]
+    assert 'self._remove_screen_lifecycle()' in close
+    assert close.index('self._remove_screen_lifecycle()') < close.index('self.controller.close()')
