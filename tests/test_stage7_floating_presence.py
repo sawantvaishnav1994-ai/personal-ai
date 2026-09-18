@@ -109,3 +109,20 @@ def test_stage7_emergency_stop_has_canonical_active_turn_cancellation():
     assert "status NOT IN ('completed','failed','cancelled')" in source
     assert "self._update(str(row['request_id']), 'cancelled'" in source
     assert "self._emit('turn.cancelled'" in source
+
+
+def test_stage7_emergency_stop_invalidates_approval_before_turn_cancellation():
+    source = Path('cloud_runtime/relay.py').read_text(encoding='utf-8')
+    invalidate = source.index("if enabled and hasattr(self.executor, 'invalidate_pending_approvals')")
+    cancel = source.index("if enabled and hasattr(self.executor, 'cancel_active_turns')")
+    assert invalidate < cancel
+    assert "self.executor.invalidate_pending_approvals()" in source
+    assert "self.executor.cancel_active_turns(reason='emergency_stop')" in source
+
+
+def test_stage7_invalidated_approval_cannot_reconstruct_after_emergency_stop():
+    source = Path('agent/executor.py').read_text(encoding='utf-8')
+    assert 'self._paused.clear()' in source
+    assert 'self.approvals.advance_security_epoch()' in source
+    assert "durable = self.approvals.context(approval_id)" in source
+    assert "if durable is None:" in source
