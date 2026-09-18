@@ -72,6 +72,27 @@ class FullDuplexVoiceSession:
         with self._lifecycle_lock:
             return self._current_request_id == request_id
 
+    @property
+    def running(self) -> bool:
+        with self._lifecycle_lock:
+            thread = self.thread
+            return bool(thread and thread.is_alive() and not self._stop.is_set())
+
+    def _cancel_canonical_turn(self, request_id: str | None):
+        cancel = getattr(self.executor, 'cancel_turn', None)
+        if not request_id or not callable(cancel):
+            return None
+        try:
+            parameters = inspect.signature(cancel).parameters.values()
+            supports_device = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters) or any(
+                p.name == 'device_id' for p in parameters
+            )
+        except (TypeError, ValueError):
+            supports_device = True
+        if supports_device:
+            return cancel(request_id, device_id='desktop')
+        return cancel(request_id)
+
     def _canonical_chat(self, text, cancel_event, request_id):
         """Call canonical runtime kwargs when supported; retain legacy test adapter compatibility."""
         chat = self.executor.chat
@@ -107,9 +128,16 @@ class FullDuplexVoiceSession:
         with self._lifecycle_lock:
             self._stop.set()
             self._barge.set()
-            if self._turn_cancel:
-                self._turn_cancel.set()
+            cancel_event = self._turn_cancel
+            request_id = self._current_request_id
+            if cancel_event:
+                cancel_event.set()
             workers = (self._response_thread, self._play_thread, self.thread)
+        if cancel_event is not None and request_id:
+            try:
+                self._cancel_canonical_turn(request_id)
+            except (KeyError, PermissionError) as exc:
+                self._emit('voice.turn.cancel_failed', request_id=request_id, error_type=type(exc).__name__)
         for worker in workers:
             if worker and worker is not threading.current_thread():
                 worker.join(timeout=3)
@@ -125,15 +153,41 @@ class FullDuplexVoiceSession:
                 self.thread = None
         self._emit('voice.session.stopped')
 
-    def _barge_in(self):
+    def barge_in(self):
         with self._lifecycle_lock:
             request_id = self._current_request_id
             cancel_event = self._turn_cancel
+            play_active = bool(self._play_thread and self._play_thread.is_alive())
+            response_active = bool(self._response_thread and self._response_thread.is_alive())
+        active = bool(cancel_event is not None or play_active or response_active)
+        if not active:
+            return {'interrupted': False, 'request_id': request_id, 'canonical_turn_cancelled': False}
         self._barge.set()
-        if cancel_event:
+        if cancel_event is not None:
             cancel_event.set()
+        canonical_turn_cancelled = False
+        if cancel_event is not None and request_id:
+            try:
+                turn = self._cancel_canonical_turn(request_id)
+                canonical_turn_cancelled = bool(turn and turn.get('status') == 'cancelled') if isinstance(turn, dict) else False
+            except (KeyError, PermissionError) as exc:
+                self._emit('voice.turn.cancel_failed', request_id=request_id, error_type=type(exc).__name__)
         self.metrics['barge_ins'] += 1
-        self._emit('voice.barge_in', request_id=request_id, metrics=dict(self.metrics))
+        self._emit(
+            'voice.barge_in',
+            request_id=request_id,
+            canonical_turn_cancelled=canonical_turn_cancelled,
+            metrics=dict(self.metrics),
+        )
+        return {
+            'interrupted': True,
+            'request_id': request_id,
+            'canonical_turn_cancelled': canonical_turn_cancelled,
+        }
+
+    def _barge_in(self):
+        """Compatibility alias for older probes; owner/UI code uses barge_in()."""
+        return self.barge_in()
 
     def _play(self, wav: bytes, request_id: str):
         completed = False
@@ -279,7 +333,7 @@ class FullDuplexVoiceSession:
                             (self._play_thread and self._play_thread.is_alive())
                             or (self._response_thread and self._response_thread.is_alive())
                         ):
-                            self._barge_in()
+                            self.barge_in()
                     speech.append(block)
                     speaking = True
                     self.endpoint.update(voice=True, block_seconds=block_seconds)
