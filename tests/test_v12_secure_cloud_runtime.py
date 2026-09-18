@@ -110,3 +110,16 @@ def test_stage7_cloud_activities_preserve_canonical_execution_identities():
     assert "('execution_id','run_id','approval_id')" in source
     assert "'activity_id': f'{identity_kind}:{identity}'" in source
     assert "('execution_id','run_id','approval_id','tool','status','verified','failure_code')" in source
+
+
+def test_stage7_command_and_approval_revalidate_live_session_at_use_time():
+    from pathlib import Path
+    source = Path('cloud_runtime/relay.py').read_text(encoding='utf-8')
+    assert 'def _live_session(self, session):' in source
+    assert 'self.sessions.session(session.id)' in source
+    assert 'self.device_registry.is_active(current.device_id)' in source
+    assert "return RelayResult(401, {'error': 'session_expired_or_revoked'})" in source
+    command = source.index('def command(self, session, text: str, nonce: str):')
+    approval = source.index('def approval(self, session, approval_id: str, decision: str):')
+    assert 'session = self._live_session(session)' in source[command:command+500]
+    assert 'session = self._live_session(session)' in source[approval:approval+500]
