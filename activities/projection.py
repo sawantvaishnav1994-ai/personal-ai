@@ -5,6 +5,8 @@ import json
 import re
 from copy import deepcopy
 
+from security.projection_redaction import sanitize_sensitive_text
+
 
 _SECRET_KEYS = re.compile(
     r'(api[_-]?key|authorization|cookie|session[_-]?(token|secret)|access[_-]?token|refresh[_-]?token|'
@@ -59,7 +61,7 @@ class ActivitiesProjection:
         if isinstance(value, (list, tuple)):
             return [cls._sanitize(item, depth=depth + 1) for item in list(value)[:100]]
         if isinstance(value, str):
-            return value[:1000]
+            return sanitize_sensitive_text(value)[:1000]
         if value is None or isinstance(value, (bool, int, float)):
             return value
         return str(value)[:1000]
