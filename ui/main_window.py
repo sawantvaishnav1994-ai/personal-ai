@@ -941,3 +941,13 @@ class MainWindow(QMainWindow):
                 self._set_state("idle"),
             ),
         )
+
+
+    def closeEvent(self, event):
+        for unsubscribe in getattr(self, "_event_unsubscribers", []):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        self._event_unsubscribers = []
+        super().closeEvent(event)
