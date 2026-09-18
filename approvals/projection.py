@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from security.projection_redaction import sanitize_sensitive_text
+
 
 class ApprovalsProjection:
     """Read-only owner projection over the Stage-2 durable ApprovalManager.
@@ -29,7 +31,7 @@ class ApprovalsProjection:
                 out[str(key)] = '[redacted]' if any(x in normalized for x in cls._SECRET_FRAGMENTS) else cls._safe(item, depth=depth + 1)
             return out
         if isinstance(value, (list, tuple)): return [cls._safe(x, depth=depth + 1) for x in list(value)[:60]]
-        if isinstance(value, str): return value[:1000]
+        if isinstance(value, str): return sanitize_sensitive_text(value)[:1000]
         if value is None or isinstance(value, (bool, int, float)): return value
         return str(value)[:1000]
 
@@ -47,7 +49,7 @@ class ApprovalsProjection:
             'status': self._status(record, ticket, now),
             'created_at': ticket.created_at,
             'expires_at': ticket.expires_at,
-            'destination': '[redacted]' if str(ticket.destination or '').lower().startswith(('javascript:', 'data:', 'vbscript:')) else str(ticket.destination or '')[:1000],
+            'destination': '[redacted]' if str(ticket.destination or '').lower().startswith(('javascript:', 'data:', 'vbscript:')) else sanitize_sensitive_text(str(ticket.destination or ''))[:1000],
             'data_classification': str(ticket.data_classification or 'internal')[:40],
             'device_bound': ticket.device_id is not None,
             'session_bound': ticket.session_id is not None,
