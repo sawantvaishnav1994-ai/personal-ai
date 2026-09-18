@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -10,6 +11,8 @@ from devices.continuity import ContinuityService
 from server.iphone_pwa import iphone_pwa_router
 from models.router import ModelTimeout, ModelUnavailable
 from security.owner_access import OwnerAccessStore
+from security.pwa_sessions import PwaSessionStore
+from server.pwa_session_middleware import PwaSessionMiddleware
 
 
 class Registry:
@@ -68,7 +71,7 @@ class Recorder:
         return [{'id': 'session-1'}]
 
 
-def make_client(tmp_path: Path, allow_insecure=False, google_signin=False):
+def make_client(tmp_path: Path, allow_insecure=False, google_signin=False, server_sessions=False):
     settings = SimpleNamespace(
         base_dir=Path(__file__).resolve().parent.parent,
         iphone_owner_enrollment_code='this-is-a-long-owner-code',
@@ -85,7 +88,16 @@ def make_client(tmp_path: Path, allow_insecure=False, google_signin=False):
         'voice_qualification': Recorder(),
         'owner_access': OwnerAccessStore(tmp_path / 'owner-access.sqlite3'),
     }
+    if server_sessions:
+        runtime['pwa_sessions'] = PwaSessionStore(tmp_path / 'pwa-sessions.sqlite3', ttl_seconds=600)
     app = FastAPI()
+    if server_sessions:
+        app.add_middleware(
+            PwaSessionMiddleware,
+            sessions=runtime['pwa_sessions'],
+            device_registry=runtime['device_registry'],
+            cookie_max_age=600,
+        )
     app.include_router(iphone_pwa_router(runtime, settings))
     return TestClient(app, base_url='https://testserver'), runtime
 
@@ -696,3 +708,27 @@ def test_browser_cannot_stop_another_browsers_qualification_session(tmp_path):
     assert blocked.status_code == 409
     assert blocked.json()['detail']['code'] == 'qualification_session_owned_by_other_device'
     assert runtime['voice_qualification'].active_session() is not None
+
+
+def test_stage8_stale_server_reauth_blocks_owner_credential_changes(tmp_path):
+    client, runtime = make_client(tmp_path, server_sessions=True)
+    enrolled = client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    assert enrolled.status_code == 200
+
+    session_id = next(iter(runtime['pwa_sessions'].active_for_device(enrolled.json()['device_id']))).id
+    assert runtime['pwa_sessions'].mark_reauthenticated(session_id, at=time.time() - 1000)
+
+    password = client.post('/iphone/api/access/password/setup', json={
+        'password': 'correct horse battery staple',
+    })
+    assert password.status_code == 401
+    assert password.json()['detail']['code'] == 'reauthentication_required'
+
+    recovery = client.post('/iphone/api/access/recovery/regenerate', json={})
+    assert recovery.status_code == 401
+
+    passkey = client.post('/iphone/api/access/passkey/register/options', json={})
+    assert passkey.status_code == 401
+
+    assert runtime['owner_access'].password_configured() is False
+    assert runtime['owner_access'].recovery_codes_remaining() == 0
