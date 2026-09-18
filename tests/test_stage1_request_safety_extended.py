@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import threading
+import time
 import pytest
 
 from activities.projection import ActivitiesProjection
+from agent.executor import ExecutionCancelled
 from core.personal_ai_runtime import CanonicalTurnRuntime, TurnReplayBlocked
 from devices.continuity import ContinuityService
 
@@ -167,3 +170,46 @@ def test_completed_transport_replay_does_not_duplicate_activity_projection(tmp_p
     activities = ActivitiesProjection(audit).list(limit=20)
     assert len(activities) == 1
     assert activities[0]['status'] == 'completed'
+
+
+def test_stage8_device_revocation_cooperatively_stops_only_bound_turn(tmp_path):
+    started = threading.Event()
+    stopped = threading.Event()
+
+    class BlockingExecutor(Executor):
+        def chat(self, text, **kwargs):
+            event = kwargs['cancel_event']
+            started.set()
+            deadline = time.time() + 2
+            while not event.is_set() and time.time() < deadline:
+                time.sleep(0.005)
+            if event.is_set():
+                stopped.set()
+                raise ExecutionCancelled('device revoked')
+            return 'unexpected completion'
+
+    turn_runtime, _, _ = runtime(tmp_path, BlockingExecutor())
+    error = []
+
+    def run_turn():
+        try:
+            turn_runtime.chat(
+                'long task',
+                request_id=RID,
+                device_id='device-a',
+                session_id='session-a',
+            )
+        except ExecutionCancelled:
+            error.append('cancelled')
+
+    worker = threading.Thread(target=run_turn)
+    worker.start()
+    assert started.wait(1)
+    assert turn_runtime.cancel_device_turns('device-b') == 0
+    assert stopped.is_set() is False
+    assert turn_runtime.cancel_device_turns('device-a') == 1
+    worker.join(2)
+
+    assert error == ['cancelled']
+    assert stopped.is_set() is True
+    assert turn_runtime.turn(RID)['status'] == 'cancelled'
