@@ -94,3 +94,10 @@ def test_floating_presence_window_policy_is_owner_controllable():
     assert "def toggle_always_on_top" in source
     assert "Qt.WindowType.WindowStaysOnTopHint" in source
     assert "self.pin.setText('Unpin' if self._always_on_top else 'Pin')" in source
+
+
+def test_stage7_conversation_projection_preserves_stable_event_identity():
+    source = Path('app/main.py').read_text(encoding='utf-8')
+    assert 'def append_continuity(kind,text,device_id=None,conversation_id=None,event_id=None)' in source
+    assert "event.get('event_id') or event.get('message_id')" in source
+    assert "event_id=str(event_id) if event_id else None" in source
