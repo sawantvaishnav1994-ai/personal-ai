@@ -16,3 +16,12 @@ def test_owner_control_does_not_invent_stage7_privacy_authority():
     assert 'LOCAL_ONLY' not in source
     assert 'LOCAL_PREFERRED' not in source
     assert 'EXTERNAL_ALLOWED' not in source
+
+
+def test_owner_control_projects_existing_model_and_preference_authorities():
+    source = Path('ui/control_panel.py').read_text(encoding='utf-8')
+    assert "'Models'" in source
+    assert "models.health_status(probe=False)" in source
+    assert "rt['preferences'].snapshot()" in source
+    assert "'reduce_motion':prefs.get('reduce_motion')" in source
+    assert "'autonomy_mode':prefs.get('autonomy_mode')" in source
