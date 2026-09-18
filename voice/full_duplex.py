@@ -403,5 +403,9 @@ class FullDuplexVoiceSession:
                             response_thread.start()
         except Exception as exc:
             self._emit('voice.session.error', error_type=type(exc).__name__)
+            # A fatal capture-stream failure terminates the voice session. Use the
+            # same stop path as an owner stop so no canonical response/tool work can
+            # survive a dead microphone worker.
+            self.stop()
         finally:
             self._emit_session_stopped_once()
