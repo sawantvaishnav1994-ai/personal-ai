@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+import pytest
+from security.approvals import ApprovalManager
 from tools.registry import ToolRegistry,Tool,Risk
 from voice.realtime_tools import RealtimeToolBridge
 from voice.openai_realtime import OpenAIRealtimeVoiceSession
@@ -14,7 +16,7 @@ def build_executor(mode='ask'):
     tools=ToolRegistry(settings)
     tools.register(Tool('read_status','read',lambda p:{'ok':'read'},Risk.READ_ONLY))
     tools.register(Tool('change_state','change',lambda p:{'changed':p['value']},Risk.EXTERNAL_SIDE_EFFECT))
-    ex=Executor();ex.tools=tools;ex.memory=Memory();return ex
+    ex=Executor();ex.tools=tools;ex.memory=Memory();ex.approvals=ApprovalManager();return ex
 
 def test_realtime_read_only_executes_automatically():
     bridge=RealtimeToolBridge(build_executor('ask'))
@@ -42,3 +44,11 @@ def test_native_session_exposes_tools_and_records_metrics():
     session.handle_event({'type':'response.created'})
     session.handle_event({'type':'response.output_audio.delta','delta':'AA=='})
     assert session.metrics['response_count']==1 and session.metrics['audio_chunks_out']==1
+
+
+def test_realtime_bridge_fails_closed_without_canonical_approval_authority():
+    ex=Executor()
+    ex.tools=build_executor('ask').tools
+    ex.memory=Memory()
+    with pytest.raises(RuntimeError, match='canonical approval authority'):
+        RealtimeToolBridge(ex)
