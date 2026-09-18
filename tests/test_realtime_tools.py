@@ -125,3 +125,29 @@ def test_realtime_pending_approval_is_invalidated_by_global_emergency_stop_epoch
     assert record is not None and record['status']=='invalidated'
     with pytest.raises(PermissionError):
         RealtimeToolBridge(ex).approve('estop-call',approval_id=approval_id)
+
+
+def test_realtime_failure_does_not_expose_exception_secret_in_result_event_or_audit():
+    ex=build_executor('auto')
+    tool=ex.tools.get('read_status')
+    secret='provider-secret-must-not-leak'
+    tool.handler=lambda params: (_ for _ in ()).throw(RuntimeError(secret))
+    bridge=RealtimeToolBridge(ex, ex.events)
+    result=bridge.invoke('secret-error-call','read_status','{}')
+    assert result['ok'] is False
+    assert secret not in repr(result)
+    assert result['error_type']=='RuntimeError'
+    audits=ex.memory.audit_entries(limit=100)
+    assert secret not in repr(audits)
+
+
+def test_realtime_authorization_receives_parameters_for_policy_evaluation():
+    ex=build_executor('auto')
+    seen={}
+    original=ex.tools.authorize
+    def capture(tool, confirmed=False, **kwargs):
+        seen.update(kwargs)
+        return original(tool, confirmed=confirmed, **kwargs)
+    ex.tools.authorize=capture
+    RealtimeToolBridge(ex).invoke('policy-params','read_status','{"scope":"private"}')
+    assert seen.get('parameters')=={'scope':'private'}
