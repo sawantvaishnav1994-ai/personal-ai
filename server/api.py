@@ -536,6 +536,28 @@ def create_app(
             headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'},
         )
 
+    @app.get('/cloud/activities')
+    def cloud_activities(limit: int = 100, authorization: str | None = Header(default=None)):
+        relay, session = cloud_auth(authorization, 'status:read')
+        rows = require_runtime('memory').audit_entries(limit=max(1, min(int(limit), 200)))
+        output = []
+        seen = set()
+        for entry in rows:
+            payload = entry.get('payload') or {}
+            identity_kind = next((key for key in ('execution_id','run_id','approval_id') if payload.get(key)), None)
+            if not identity_kind:
+                continue
+            identity = str(payload[identity_kind])[:200]
+            key = (identity_kind, identity, entry.get('category'), entry.get('action'))
+            if key in seen:
+                continue
+            seen.add(key)
+            safe_payload = {key: payload.get(key) for key in ('execution_id','run_id','approval_id','tool','status','verified','failure_code') if key in payload}
+            output.append({'activity_id': f'{identity_kind}:{identity}', 'identity_kind': identity_kind, 'identity': identity, 'category': str(entry.get('category') or '')[:80], 'action': str(entry.get('action') or '')[:80], 'created_at': entry.get('created_at'), 'payload': safe_payload})
+            if len(output) >= max(1, min(int(limit), 200)):
+                break
+        return {'activities': output}
+
     @app.get('/cloud/approval/{approval_id}')
     def cloud_approval_status(approval_id: str, authorization: str | None = Header(default=None)):
         relay, session = cloud_auth(authorization, 'approval:read')
