@@ -114,3 +114,14 @@ def test_realtime_cancel_after_bridge_reconstruction_rejects_durable_pending_app
     assert record is not None and record['status']=='rejected'
     with pytest.raises(PermissionError):
         reloaded.approve('cancel-after-reload',approval_id=approval_id)
+
+
+def test_realtime_pending_approval_is_invalidated_by_global_emergency_stop_epoch():
+    ex=build_executor('ask')
+    required=RealtimeToolBridge(ex).invoke('estop-call','change_state','{"value":22}')
+    approval_id=required['approval_id']
+    ex.approvals.advance_security_epoch()
+    record=ex.approvals.record(approval_id)
+    assert record is not None and record['status']=='invalidated'
+    with pytest.raises(PermissionError):
+        RealtimeToolBridge(ex).approve('estop-call',approval_id=approval_id)
