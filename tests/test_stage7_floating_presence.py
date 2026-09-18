@@ -153,6 +153,7 @@ def test_floating_presence_compact_mode_does_not_request_keyboard_focus():
     assert 'self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)' in panel
     assert 'self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)' in panel
     assert panel.rfind('self.setFocusPolicy(Qt.FocusPolicy.NoFocus)') > panel.index('else:')
+    assert 'self.core.setFocus(Qt.FocusReason.ShortcutFocusReason)' in panel
 
 
 def test_floating_presence_reclamps_after_non_drag_screen_move():
@@ -186,3 +187,25 @@ def test_floating_presence_screen_lifecycle_cleanup_and_clamp_are_reentrant_safe
     close = source[source.index('    def closeEvent(self, event):'):]
     assert 'self._remove_screen_lifecycle()' in close
     assert close.index('self._remove_screen_lifecycle()') < close.index('self.controller.close()')
+
+
+
+def test_floating_presence_compact_core_has_keyboard_equivalent_for_double_click():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    build = source[source.index('    def _build(self):'):source.index('    def _render_snapshot(self):')]
+    assert "self.core.setAccessibleDescription('Press Enter or Space to open quick controls')" in build
+    assert 'self.core.setFocusPolicy(Qt.FocusPolicy.StrongFocus)' in build
+    assert 'self.core.keyPressEvent = self._core_key_press' in build
+    keyboard = source[source.index('    def _core_key_press(self, event):'):source.index('    def keyPressEvent(self, event):')]
+    assert 'Qt.Key.Key_Return' in keyboard
+    assert 'Qt.Key.Key_Enter' in keyboard
+    assert 'Qt.Key.Key_Space' in keyboard
+    assert 'self.toggle_panel()' in keyboard
+
+
+def test_floating_presence_escape_collapses_quick_controls_and_collapse_is_named():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    assert "self.collapse.setAccessibleName('Collapse quick controls')" in source
+    keyboard = source[source.index('    def keyPressEvent(self, event):'):source.index('    def submit(self):')]
+    assert 'self._expanded and event.key() == Qt.Key.Key_Escape' in keyboard
+    assert 'self.toggle_panel()' in keyboard
