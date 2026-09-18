@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from server.logical_request_middleware import LogicalRequestMiddleware
+from server.request_aware_pwa_state import RequestAwareIphonePwaState
+import server.request_aware_pwa_state as request_state_module
 from server.session_bound_executor import SessionBoundExecutor
 import server.session_bound_executor as session_module
 
@@ -81,3 +83,40 @@ def test_client_adapter_keeps_pending_request_until_terminal_result():
     assert "for(let attempt=0;attempt<2;attempt++)" in text
     assert "clearPending(pending.request_id)" in text
     assert "if(!samePending)appendMessage('user_message',clean)" in text
+
+
+
+def test_request_aware_voice_state_supersedes_prior_turn_cooperatively_and_durably(monkeypatch):
+    current = {'request_id': '11111111-1111-4111-8111-111111111111'}
+    cancelled = []
+    monkeypatch.setattr(request_state_module, 'current_logical_request_id', lambda: current['request_id'])
+    state = RequestAwareIphonePwaState(cancel_turn=lambda request_id: cancelled.append(request_id))
+
+    first = state.begin_turn('device-1')
+    duplicate = state.begin_turn('device-1')
+    assert duplicate is first
+    assert not first.is_set()
+    assert cancelled == []
+
+    current['request_id'] = '22222222-2222-4222-8222-222222222222'
+    second = state.begin_turn('device-1')
+
+    assert first.is_set()
+    assert not second.is_set()
+    assert cancelled == ['11111111-1111-4111-8111-111111111111']
+
+
+def test_request_aware_voice_cancel_is_bound_to_exact_active_request(monkeypatch):
+    current = {'request_id': '22222222-2222-4222-8222-222222222222'}
+    cancelled = []
+    monkeypatch.setattr(request_state_module, 'current_logical_request_id', lambda: current['request_id'])
+    state = RequestAwareIphonePwaState(cancel_turn=lambda request_id: cancelled.append(request_id))
+    active = state.begin_turn('device-1')
+
+    assert state.cancel('device-1', request_id='11111111-1111-4111-8111-111111111111') is False
+    assert not active.is_set()
+    assert cancelled == []
+
+    assert state.cancel('device-1', request_id=current['request_id']) is True
+    assert active.is_set()
+    assert cancelled == ['22222222-2222-4222-8222-222222222222']
