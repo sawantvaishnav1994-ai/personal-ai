@@ -40,6 +40,23 @@ class Tools:
         return self.emergency_stop
 
 
+class SessionStoreProbe:
+    def __init__(self):
+        self.revoked_devices = []
+
+    def revoke_device(self, device_id):
+        self.revoked_devices.append(device_id)
+        return 1
+
+
+class GatewayProbe:
+    def __init__(self):
+        self.disconnected = []
+
+    def disconnect(self, device_id):
+        self.disconnected.append(device_id)
+
+
 def make_client(tmp_path):
     registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
     device, token = registry.enroll('Owner iPhone', 'ios-pwa')
@@ -54,6 +71,9 @@ def make_client(tmp_path):
         'knowledge': KnowledgeStore(tmp_path / 'knowledge.sqlite3', tmp_path / 'objects'),
         'automations': automations,
         'executor': executor,
+        'pwa_sessions': SessionStoreProbe(),
+        'cloud_sessions': SessionStoreProbe(),
+        'device_gateway': GatewayProbe(),
         'p3_qualification': P3QualificationProgram(tmp_path / 'qualification.sqlite3'),
         'models': Models(),
         'tools': Tools(),
@@ -150,6 +170,10 @@ def test_owner_can_manage_other_device_and_revocation_is_immediate(tmp_path):
     revoked = client.post(f"/iphone/api/devices/{other['id']}/revoke", json={'confirm': True})
     assert revoked.status_code == 200
     assert runtime['device_registry'].authenticate(other['id'], other_token) is False
+    assert runtime['pwa_sessions'].revoked_devices == [other['id']]
+    assert runtime['cloud_sessions'].revoked_devices == [other['id']]
+    assert runtime['device_gateway'].disconnected == [other['id']]
+    assert revoked.json()['revoked_sessions'] == {'pwa_sessions': 1, 'cloud_sessions': 1}
 
 
 def test_ui_preferences_are_scoped_to_the_trusted_device_and_persist(tmp_path):
