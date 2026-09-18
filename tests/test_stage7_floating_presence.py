@@ -101,3 +101,11 @@ def test_stage7_conversation_projection_preserves_stable_event_identity():
     assert 'def append_continuity(kind,text,device_id=None,conversation_id=None,event_id=None)' in source
     assert "event.get('event_id') or event.get('message_id')" in source
     assert "event_id=str(event_id) if event_id else None" in source
+
+
+def test_stage7_emergency_stop_has_canonical_active_turn_cancellation():
+    source = Path('core/personal_ai_runtime.py').read_text(encoding='utf-8')
+    assert "def cancel_active_turns(self, *, reason='emergency_stop')" in source
+    assert "status NOT IN ('completed','failed','cancelled')" in source
+    assert "self._update(str(row['request_id']), 'cancelled'" in source
+    assert "self._emit('turn.cancelled'" in source
