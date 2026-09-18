@@ -103,6 +103,9 @@ class FloatingPresence(QWidget):
         self._drag_offset = None
         self._expanded = False
         self._rendered_sequence = -1
+        self._active_request_id = None
+        self._active_cancel_event = None
+        self._submit_lock = RLock()
         self._build()
         self._unsubscribe = self.events.subscribe('runtime.state', self._render_state)
         self._render_snapshot()
@@ -160,11 +163,27 @@ class FloatingPresence(QWidget):
 
     def submit(self):
         text = self.input.text().strip()
-        if not text: return
+        if not text:
+            return
         self.input.clear()
         import threading
-        threading.Thread(target=lambda: self.executor.chat(text, surface='floating-presence', device_id='desktop'), daemon=True).start()
+        import uuid
+        request_id = 'floating-' + str(uuid.uuid4())
+        cancel_event = threading.Event()
+        with self._submit_lock:
+            self._active_request_id = request_id
+            self._active_cancel_event = cancel_event
 
+        def run():
+            try:
+                self.executor.chat(text, request_id=request_id, surface='floating-presence', device_id='desktop', cancel_event=cancel_event)
+            finally:
+                with self._submit_lock:
+                    if self._active_request_id == request_id:
+                        self._active_request_id = None
+                        self._active_cancel_event = None
+
+        threading.Thread(target=run, daemon=True).start()
     def toggle_voice(self):
         voice = self.runtime.get('voice')
         if not voice: return
@@ -172,9 +191,18 @@ class FloatingPresence(QWidget):
 
     def cancel_work(self):
         voice = self.runtime.get('voice')
-        if voice and hasattr(voice, 'barge_in'): voice.barge_in()
-        self.events.emit('presence.cancel.requested', source='floating-presence')
-
+        if voice and hasattr(voice, 'barge_in'):
+            voice.barge_in()
+        with self._submit_lock:
+            request_id = self._active_request_id
+            cancel_event = self._active_cancel_event
+        if cancel_event is not None:
+            cancel_event.set()
+        if request_id and hasattr(self.executor, 'cancel_turn'):
+            try:
+                self.executor.cancel_turn(request_id, device_id='desktop')
+            except (KeyError, PermissionError):
+                return
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self._expanded:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft(); event.accept()
