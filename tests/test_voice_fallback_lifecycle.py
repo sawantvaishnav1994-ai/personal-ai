@@ -228,7 +228,13 @@ def test_desktop_voice_surfaces_use_public_runtime_lifecycle_contract():
     assert "getattr(voice, 'running', False)" in floating
     assert "hasattr(voice, 'barge_in')" in floating
     assert 'running = bool(getattr(voice, "running", self.voice_running))' in window
-    assert 'events.subscribe("voice.session.stopped", self._on_voice_session_stopped)' in window
+    assert 'events.subscribe("voice.session.stopped", self._voice_session_stopped_event.emit)' in window
+    assert 'events.subscribe("voice.transcript", self._voice_transcript_event.emit)' in window
+    assert 'events.subscribe("voice.reply", self._voice_reply_event.emit)' in window
+    assert 'self._voice_transcript_event.connect(self._on_voice_transcript)' in window
+    assert 'self._voice_reply_event.connect(self._on_voice_reply)' in window
+    assert 'def closeEvent(self, event):' in window
+    assert 'unsubscribe()' in window
     assert "callable(getattr(self.runtime.get('voice'), 'barge_in', None))" in benchmark
 
 
@@ -256,3 +262,23 @@ def test_fatal_audio_worker_exit_cancels_inflight_canonical_turn(monkeypatch):
     assert 'voice.session.error' in names
     stopped = [payload for name, payload in events.rows if name == 'voice.session.stopped']
     assert stopped == [{'request_id': 'voice-request-audio-failure'}]
+
+
+
+def test_desktop_qt_surfaces_marshal_worker_events_before_touching_widgets():
+    window = Path('ui/main_window.py').read_text(encoding='utf-8')
+    floating = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+
+    assert '_voice_transcript_event = pyqtSignal(object)' in window
+    assert '_voice_reply_event = pyqtSignal(object)' in window
+    assert '_voice_session_stopped_event = pyqtSignal(object)' in window
+    assert 'events.subscribe("voice.transcript", self._voice_transcript_event.emit)' in window
+    assert 'events.subscribe("voice.reply", self._voice_reply_event.emit)' in window
+    assert 'events.subscribe("voice.session.stopped", self._voice_session_stopped_event.emit)' in window
+    assert 'events.subscribe("voice.transcript", self._on_voice_transcript)' not in window
+    assert 'events.subscribe("voice.reply", self._on_voice_reply)' not in window
+
+    assert '_runtime_state_event = pyqtSignal(object)' in floating
+    assert "self._runtime_state_event.connect(self._render_state)" in floating
+    assert "self.events.subscribe('runtime.state', self._runtime_state_event.emit)" in floating
+    assert "self.events.subscribe('runtime.state', self._render_state)" not in floating
