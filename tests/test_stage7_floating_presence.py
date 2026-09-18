@@ -144,3 +144,11 @@ def test_floating_presence_compact_mode_does_not_request_keyboard_focus():
     assert 'self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)' in panel
     assert 'self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)' in panel
     assert panel.rfind('self.setFocusPolicy(Qt.FocusPolicy.NoFocus)') > panel.index('else:')
+
+
+def test_floating_presence_reclamps_after_non_drag_screen_move():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    move = source[source.index('    def moveEvent(self, event):'):source.index('    def _clamp_to_screen(self):')]
+    assert 'super().moveEvent(event)' in move
+    assert 'if self._drag_offset is None:' in move
+    assert 'self._clamp_to_screen()' in move
