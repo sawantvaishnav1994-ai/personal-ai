@@ -79,3 +79,14 @@ def test_realtime_reconnect_requires_exact_approval_identity():
         reloaded.approve('bound-call')
     with pytest.raises(PermissionError):
         reloaded.approve('wrong-call',approval_id=required['approval_id'])
+
+
+def test_completed_realtime_replay_cannot_be_claimed_by_different_call_id():
+    ex=build_executor('ask')
+    first=RealtimeToolBridge(ex)
+    required=first.invoke('original-call','change_state','{"value":13}')
+    approval_id=required['approval_id']
+    completed=RealtimeToolBridge(ex).approve('original-call',approval_id=approval_id)
+    assert completed['ok'] is True
+    with pytest.raises(PermissionError):
+        RealtimeToolBridge(ex).approve('attacker-call',approval_id=approval_id)
