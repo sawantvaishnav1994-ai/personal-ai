@@ -70,9 +70,94 @@ def register(registry,adapters):
         registry.register(Tool('calendar_delete_event','Delete a calendar event; params: event_id,calendar_id. Requires explicit owner approval.',lambda p:_connector_call(calendar,'delete_event',str(p['event_id']),str(p.get('calendar_id','primary')),destination=str(p.get('calendar_id','primary'))),Risk.DESTRUCTIVE,verifier=verify_delete,verification_required=True,requires_reauth=True,connector_id='calendar',capability='calendar.delete',minimum_risk=Risk.DESTRUCTIVE))
     slack=adapters.get('slack')
     if slack is not None:
-        registry.register(Tool('slack_read_messages','Read recent Slack channel messages; params: channel,limit',lambda p:slack.history(str(p['channel']),max(1,min(int(p.get('limit',50)),100))),Risk.READ_ONLY,connector_id='slack',capability='slack.read'))
-        registry.register(Tool('slack_send_message','Send a Slack channel message; params: channel,text. Requires owner approval.',lambda p:slack.post_message(str(p['channel']),str(p['text'])[:40000]),Risk.EXTERNAL_SIDE_EFFECT,connector_id='slack',capability='slack.send',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,prohibited_data_classifications=('secret',)))
+        registry.register(Tool(
+            'slack_read_messages',
+            'Read recent Slack channel messages; params: channel,limit',
+            lambda p:_connector_call(
+                slack,'history',str(p['channel']),max(1,min(int(p.get('limit',50)),100)),
+                destination=str(p['channel']),
+            ),
+            Risk.READ_ONLY,connector_id='slack',capability='slack.read',
+        ))
+        def send_slack(params):
+            channel=str(params['channel']).strip()
+            return _connector_call(
+                slack,'post_message',channel,str(params['text'])[:40000],destination=channel,
+            )
+        def verify_slack(params,result):
+            ok=bool(isinstance(result,dict) and result.get('ok') and result.get('ts'))
+            opid=str((result or {}).get('_personal_ai_operation_id') or '') if isinstance(result,dict) else ''
+            if opid and getattr(slack,'gateway',None):
+                slack.gateway.state.transition_operation(
+                    opid,'verified' if ok else 'failed',
+                    verification_state='verified' if ok else 'verification_failed',
+                )
+                slack.gateway.state.audit(
+                    'operation.verified' if ok else 'operation.verification_failed',
+                    connector_id='slack',correlation_id=opid,payload={'operation':'slack.send'},
+                )
+            evidence={'provider_message_ts':str(result.get('ts'))[:200]} if ok else {}
+            return VerificationResult(ok,'provider message timestamp returned' if ok else 'provider message timestamp missing',evidence)
+        registry.register(Tool(
+            'slack_send_message',
+            'Send a Slack channel message; params: channel,text. Requires owner approval.',
+            send_slack,Risk.EXTERNAL_SIDE_EFFECT,
+            verifier=verify_slack,verification_required=True,
+            connector_id='slack',capability='slack.send',
+            minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,
+            prohibited_data_classifications=('secret',),
+        ))
     home=adapters.get('home_assistant')
     if home is not None:
-        registry.register(Tool('home_assistant_read_state','Read a Home Assistant entity state; params: entity_id',lambda p:home.state(str(p['entity_id'])),Risk.READ_ONLY,connector_id='home_assistant',capability='home_assistant.read'))
-        registry.register(Tool('home_assistant_call_service','Call a Home Assistant service; params: domain,service,data. Requires owner approval.',lambda p:home.call_service(str(p['domain']),str(p['service']),dict(p.get('data') or {})),Risk.EXTERNAL_SIDE_EFFECT,connector_id='home_assistant',capability='home_assistant.call_service',minimum_risk=Risk.EXTERNAL_SIDE_EFFECT))
+        registry.register(Tool(
+            'home_assistant_read_state',
+            'Read a Home Assistant entity state; params: entity_id',
+            lambda p:_connector_call(home,'state',str(p['entity_id']),destination=str(p['entity_id'])),
+            Risk.READ_ONLY,connector_id='home_assistant',capability='home_assistant.read',
+        ))
+        def call_home_service(params):
+            data=dict(params.get('data') or {})
+            destination=str(data.get('entity_id') or f"{params['domain']}.{params['service']}")
+            return _connector_call(
+                home,'call_service',str(params['domain']),str(params['service']),data,
+                destination=destination,
+            )
+        def verify_home_service(params,result):
+            data=dict(params.get('data') or {})
+            entity_id=str(data.get('entity_id') or '').strip()
+            service=str(params.get('service') or '').strip().lower()
+            expected={'turn_on':'on','turn_off':'off'}.get(service)
+            verified=False;evidence={}
+            if entity_id and expected:
+                try:
+                    observed=_connector_call(home,'state',entity_id,destination=entity_id)
+                    actual=str((observed or {}).get('state') or '').lower() if isinstance(observed,dict) else ''
+                    verified=actual==expected
+                    evidence={'entity_id':entity_id[:240],'expected_state':expected,'observed_state':actual[:120]}
+                except Exception:
+                    verified=False
+            opid=str((result or {}).get('_personal_ai_operation_id') or '') if isinstance(result,dict) else ''
+            if opid and getattr(home,'gateway',None):
+                home.gateway.state.transition_operation(
+                    opid,'verified' if verified else 'recovery_review_required',
+                    verification_state='verified' if verified else 'verification_failed',
+                    retry_decision='no_blind_retry' if not verified else None,
+                )
+                home.gateway.state.audit(
+                    'operation.verified' if verified else 'recovery.review_required',
+                    connector_id='home_assistant',correlation_id=opid,
+                    payload={'operation':'home_assistant.call_service','entity_id':entity_id[:240]},
+                )
+            return VerificationResult(
+                verified,
+                'fresh entity state matches requested service' if verified else 'service effect could not be independently verified',
+                evidence,
+            )
+        registry.register(Tool(
+            'home_assistant_call_service',
+            'Call a Home Assistant service; params: domain,service,data. Requires owner approval.',
+            call_home_service,Risk.EXTERNAL_SIDE_EFFECT,
+            verifier=verify_home_service,verification_required=True,
+            connector_id='home_assistant',capability='home_assistant.call_service',
+            minimum_risk=Risk.EXTERNAL_SIDE_EFFECT,
+        ))
