@@ -42,18 +42,32 @@ class RealtimeVoiceSession:
     def connected(self):
         return getattr(self.backend, 'connected', bool(self.thread and self.thread.is_alive()))
 
+    @property
+    def running(self):
+        return bool(getattr(self.backend, 'running', bool(self.thread and self.thread.is_alive())))
+
     def start(self):
         return self.backend.start()
 
     def stop(self):
         return self.backend.stop()
 
+    def barge_in(self):
+        handler = getattr(self.backend, 'barge_in', None)
+        if callable(handler):
+            return handler()
+        legacy = getattr(self.backend, 'cancel_response', None)
+        if callable(legacy):
+            legacy()
+            return {'interrupted': True, 'request_id': None, 'canonical_turn_cancelled': False}
+        return {'interrupted': False, 'request_id': None, 'canonical_turn_cancelled': False}
+
     def list_audio_devices(self):
         return self.devices.list()
 
     def select_audio_devices(self, *, input_name: str | None = None, output_name: str | None = None, restart: bool = True):
         """Select microphone/speaker by name, optionally restarting an active session."""
-        was_running = bool(self.thread and self.thread.is_alive())
+        was_running = self.running
         if was_running:
             self.stop()
         settings = replace(
