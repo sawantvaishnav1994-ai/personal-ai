@@ -496,17 +496,22 @@ def owner_product_router(runtime):
         gateway = runtime.get('device_gateway')
         if gateway is not None:
             gateway.disconnect(target_device_id)
+        executor = runtime.get('executor')
+        cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
+        cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_revoked')) if callable(cancel_device_turns) else 0
         audit(
             'device.revoked',
             device_id=device_id,
             target_device_id=target_device_id,
             revoked_sessions=revoked_sessions,
+            cancelled_turns=cancelled_turns,
         )
         return {
             'ok': True,
             'revoked_device_id': target_device_id,
             'current_device_revoked': target_device_id == device_id,
             'revoked_sessions': revoked_sessions,
+            'cancelled_turns': cancelled_turns,
         }
 
     @router.get('/workflows')
