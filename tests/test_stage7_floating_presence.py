@@ -78,3 +78,11 @@ def test_presence_controller_unsubscribes_on_close(tmp_path):
     events.emit('runtime.state', state='ERROR', sequence=sequence + 1)
     assert controller.state == state
     assert controller.sequence == sequence
+
+
+def test_floating_presence_source_uses_canonical_turn_cancellation():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    assert "request_id=request_id" in source
+    assert "cancel_event=cancel_event" in source
+    assert "self.executor.cancel_turn(request_id, device_id='desktop')" in source
+    assert "presence.cancel.requested" not in source
