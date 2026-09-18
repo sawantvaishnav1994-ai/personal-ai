@@ -75,6 +75,14 @@ class MainWindow(QMainWindow):
     }
     CLOUD_URL = "https://personal-ai-runtime-production.up.railway.app/iphone/"
 
+    # EventBus callbacks may originate on voice/runtime worker threads. PyQt
+    # signals marshal these payloads back onto the MainWindow GUI thread.
+    _state_event = pyqtSignal(object)
+    _voice_transcript_event = pyqtSignal(object)
+    _voice_reply_event = pyqtSignal(object)
+    _voice_session_stopped_event = pyqtSignal(object)
+    _voice_wake_event = pyqtSignal(object)
+
     def __init__(self, *, events, executor, memory, runtime=None):
         super().__init__()
         self.events = events
@@ -260,17 +268,18 @@ class MainWindow(QMainWindow):
 
         self._show_page("Home", close_menu=False)
 
-        events.subscribe("state", self.on_state)
-        events.subscribe("voice.transcript", self._on_voice_transcript)
-        events.subscribe("voice.reply", self._on_voice_reply)
-        events.subscribe("voice.session.stopped", self._on_voice_session_stopped)
-        events.subscribe(
-            "voice.wake",
-            lambda event: self._append_chat(
-                "System",
-                f"Wake phrase detected: {event.get('phrase', 'Hey Personal')}",
-            ),
-        )
+        self._state_event.connect(self.on_state)
+        self._voice_transcript_event.connect(self._on_voice_transcript)
+        self._voice_reply_event.connect(self._on_voice_reply)
+        self._voice_session_stopped_event.connect(self._on_voice_session_stopped)
+        self._voice_wake_event.connect(self._on_voice_wake)
+        self._event_unsubscribers = [
+            events.subscribe("state", self._state_event.emit),
+            events.subscribe("voice.transcript", self._voice_transcript_event.emit),
+            events.subscribe("voice.reply", self._voice_reply_event.emit),
+            events.subscribe("voice.session.stopped", self._voice_session_stopped_event.emit),
+            events.subscribe("voice.wake", self._voice_wake_event.emit),
+        ]
 
     def _build_top_nav(self):
         nav = QHBoxLayout()
@@ -839,6 +848,12 @@ class MainWindow(QMainWindow):
             self._append_chat("AI", text)
             self._set_state("speaking")
             QTimer.singleShot(1000, lambda: self._set_state("idle"))
+
+    def _on_voice_wake(self, event):
+        self._append_chat(
+            "System",
+            f"Wake phrase detected: {event.get('phrase', 'Hey Personal')}",
+        )
 
     def _on_voice_session_stopped(self, event):
         self.voice_running = False
