@@ -639,8 +639,30 @@ def iphone_pwa_router(runtime, settings):
             state.finish(device_id, cancel_event)
 
     def claim_pending_approval(approval_id: str, device_id: str):
+        # The in-memory map is presentation/correlation state only. Canonical
+        # approval existence and binding live in the durable Stage-2 authority,
+        # so a router reload or lost response must not make a valid ticket vanish.
         with pending_approvals_lock:
             pending = pending_approvals.get(approval_id)
+        canonical = None
+        lookup = getattr(executor, 'approval_context', None)
+        if callable(lookup):
+            try:
+                canonical = lookup(approval_id)
+            except Exception:
+                canonical = None
+        if canonical is not None:
+            if canonical.get('device_id') not in (None, device_id):
+                raise HTTPException(404, {
+                    'code': 'approval_not_found',
+                    'message': 'This approval is missing, expired, or belongs to another device.',
+                })
+            if pending is None:
+                pending = {
+                    'device_id': device_id,
+                    'tool': canonical.get('tool'),
+                    'conversation_id': canonical.get('conversation_id'),
+                }
         if not pending or pending['device_id'] != device_id:
             raise HTTPException(404, {
                 'code': 'approval_not_found',
