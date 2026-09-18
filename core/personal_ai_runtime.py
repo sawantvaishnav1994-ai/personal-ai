@@ -118,6 +118,17 @@ class CanonicalTurnRuntime:
         self._emit('turn.replay_blocked', request_id=request_id, status=str(existing.get('status') or 'unknown'))
         raise TurnReplayBlocked(f"request {request_id} is {existing['status']}; resume its governed lifecycle instead of duplicating work")
 
+    def cancel_active_turns(self, *, reason='emergency_stop'):
+        with self._con() as con:
+            rows = con.execute("SELECT request_id,conversation_id FROM canonical_turns WHERE status NOT IN ('completed','failed','cancelled')").fetchall()
+        cancelled = 0
+        for row in rows:
+            changed = self._update(str(row['request_id']), 'cancelled', error_code=str(reason or 'cancelled')[:80])
+            if changed:
+                cancelled += 1
+                self._emit('turn.cancelled', request_id=str(row['request_id']), conversation_id=row['conversation_id'], reason=str(reason or 'cancelled')[:80])
+        return cancelled
+
     def cancel_turn(self, request_id, *, owner_id=CANONICAL_OWNER, device_id=None, session_id=None):
         owner_id = self._owner(owner_id); existing = self._existing(str(request_id))
         if existing is None: return None
