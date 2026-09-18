@@ -24,6 +24,20 @@ from security.keychain import KeychainUnavailable, RootKeyStore
 
 EXCLUDED_NAMES = {'vault.json', '.env', 'secrets.json'}
 EXCLUDED_DIRS = {'browser-profile', 'cache', 'tmp'}
+# Security authority is intentionally non-restorable from ordinary data backups.
+# Restoring an older copy could resurrect revoked devices/sessions, roll back the
+# approval security epoch, or weaken owner/policy controls.
+NON_RESTORABLE_SECURITY_NAMES = {
+    'devices.sqlite3',
+    'pwa-sessions.sqlite3',
+    'cloud-sessions.sqlite3',
+    'trusted-actions.sqlite3',
+    'runtime-controls.sqlite3',
+    'operator-policies.sqlite3',
+    'operator-transactions.sqlite3',
+    'owner-access.sqlite3',
+    'connectors.sqlite3',
+}
 SQLITE_SUFFIXES = {'.sqlite3', '.sqlite', '.db'}
 SQLITE_SIDECARS = ('-wal', '-shm', '-journal')
 
@@ -436,11 +450,15 @@ class BackupService:
                     staged.write_bytes(zipped.read(item['path']))
 
             destinations: list[tuple[Path, Path, Path]] = []
+            skipped_security_state: list[str] = []
             for item in manifest['files']:
                 rel = self._safe_rel(item['path'])
                 staged = stage / rel
                 if staged.suffix.lower() in SQLITE_SUFFIXES:
                     self._sqlite_integrity(staged)
+                if rel.name in NON_RESTORABLE_SECURITY_NAMES:
+                    skipped_security_state.append(rel.as_posix())
+                    continue
                 destination = self._safe_destination(rel)
                 destinations.append((rel, staged, destination))
 
@@ -496,6 +514,7 @@ class BackupService:
                 'restored': restored,
                 'created_at': manifest['created_at'],
                 'encrypted': bool(encrypted),
+                'skipped_security_state': sorted(skipped_security_state),
             }
         finally:
             shutil.rmtree(stage, ignore_errors=True)
