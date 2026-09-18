@@ -90,3 +90,13 @@ def test_completed_realtime_replay_cannot_be_claimed_by_different_call_id():
     assert completed['ok'] is True
     with pytest.raises(PermissionError):
         RealtimeToolBridge(ex).approve('attacker-call',approval_id=approval_id)
+
+
+def test_realtime_audit_never_persists_raw_tool_parameters_or_exception_text():
+    ex=build_executor('ask')
+    bridge=RealtimeToolBridge(ex)
+    bridge.invoke('secret-call','read_status','{"token":"super-secret-value"}')
+    payloads=[row[2] for row in ex.memory.rows if len(row)>2 and isinstance(row[2],dict)]
+    assert payloads
+    assert all('params' not in payload for payload in payloads)
+    assert 'super-secret-value' not in repr(payloads)
