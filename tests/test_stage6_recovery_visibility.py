@@ -97,3 +97,37 @@ def test_recovery_visibility_fails_closed_for_partial_or_missing_binding():
     projection=ExecutionRecoveryProjection(authority)
     assert projection.detail('tx1',owner_id='owner',device_id='d1',session_id=None) is None
     assert projection.detail('missing',owner_id='owner',device_id='d1',session_id='s1') is None
+
+
+def test_recovery_api_requires_trusted_active_authorized_exact_session(tmp_path):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from security.request_context import TrustedRequestContext, set_trusted_request, reset_trusted_request
+    from server.recovery_visibility_api import recovery_visibility_router
+
+    authority=BoundAuthority(base(),{'owner_id':'owner','device_id':'d1','session_id':'s1'})
+    class Devices:
+        def __init__(self,active=True,allowed=True): self.active=active; self.allowed=allowed
+        def is_active(self,device_id): return self.active and device_id=='d1'
+        def authorize(self,device_id,scope): return self.allowed and device_id=='d1' and scope=='ai:chat'
+    class Tools:
+        def ensure_recovery_authority(self): return authority
+    class ContextMiddleware(BaseHTTPMiddleware):
+        def __init__(self,app,session='s1'): super().__init__(app); self.session=session
+        async def dispatch(self,request,call_next):
+            token=set_trusted_request(TrustedRequestContext('d1',self.session))
+            try:return await call_next(request)
+            finally:reset_trusted_request(token)
+    def client(devices,session='s1',trusted=True):
+        app=FastAPI()
+        if trusted: app.add_middleware(ContextMiddleware,session=session)
+        app.include_router(recovery_visibility_router({'device_registry':devices,'tools':Tools()}))
+        return TestClient(app)
+    assert client(Devices(),trusted=False).get('/iphone/api/execution-recovery/tx1').status_code==401
+    assert client(Devices(active=False)).get('/iphone/api/execution-recovery/tx1').status_code==401
+    assert client(Devices(allowed=False)).get('/iphone/api/execution-recovery/tx1').status_code==403
+    assert client(Devices(),session='other').get('/iphone/api/execution-recovery/tx1').status_code==404
+    response=client(Devices()).get('/iphone/api/execution-recovery/tx1')
+    assert response.status_code==200 and response.json()['transaction_id']=='tx1'
