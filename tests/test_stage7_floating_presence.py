@@ -209,3 +209,10 @@ def test_floating_presence_escape_collapses_quick_controls_and_collapse_is_named
     keyboard = source[source.index('    def keyPressEvent(self, event):'):source.index('    def submit(self):')]
     assert 'self._expanded and event.key() == Qt.Key.Key_Escape' in keyboard
     assert 'self.toggle_panel()' in keyboard
+
+
+def test_floating_presence_runtime_projection_preserves_keyboard_accessibility_hint():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    projection = source[source.index('    def _apply_projection(self, state_value, sequence):'):source.index('    def _apply_window_flags(self):')]
+    assert "self.core.setAccessibleDescription(f'{presentation.label}. Press Enter or Space to open quick controls')" in projection
+    assert 'self.core.setAccessibleDescription(presentation.label)' not in projection
