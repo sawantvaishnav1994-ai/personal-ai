@@ -252,3 +252,36 @@ def test_stage8_realtime_provider_error_is_redacted():
     assert 'token=leak' not in session.metrics['last_error']
     assert 'super-secret-token' not in repr(captured)
     assert '[redacted]' in session.metrics['last_error']
+
+
+def test_stage8_realtime_provider_errors_are_redacted():
+    captured = []
+    class Events:
+        def emit(self, name, **data):
+            captured.append((name, data))
+
+    s=SimpleNamespace(
+        openai_api_key='x',realtime_provider='openai',realtime_model='gpt-realtime',
+        realtime_safety_identifier='',realtime_instructions='x',realtime_reasoning_effort='low',
+        realtime_sample_rate=24000,realtime_voice='alloy',
+        voice_personality='calm',voice_speaking_rate=1.0,voice_min_endpoint_ms=420,
+        voice_max_endpoint_ms=1100,voice_noise_multiplier=2.4,voice_min_threshold=.008,
+        voice_max_utterance_seconds=45.0,
+    )
+    session=OpenAIRealtimeVoiceSession(s,events=Events(),executor=None)
+    session.handle_event({
+        'type':'error',
+        'error':'Authorization: Bearer SUPERSECRETTOKEN123 api_key=TOPSECRET123 Cookie: sid=COOKIESECRET123',
+    })
+    text=repr((session.metrics, captured))
+    assert 'SUPERSECRETTOKEN123' not in text
+    assert 'TOPSECRET123' not in text
+    assert 'COOKIESECRET123' not in text
+    assert 'redacted' in text.lower()
+
+
+def test_stage8_realtime_transport_error_sanitizer_bounds_and_redacts():
+    secret='Bearer SUPERSECRETTOKEN123 ' + ('x' * 5000)
+    safe=OpenAIRealtimeVoiceSession._safe_error(secret)
+    assert 'SUPERSECRETTOKEN123' not in safe
+    assert len(safe) <= 1000
