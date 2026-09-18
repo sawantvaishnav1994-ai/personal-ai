@@ -96,13 +96,13 @@ class AutomationWorkflowProjection:
                 continue
             if row.get('device_id') not in (None, device_id):
                 continue
-            # Engine deliberately strips session_id from runs(); use the canonical
-            # record for session-bound visibility instead of weakening isolation.
+            # Engine deliberately strips session_id from runs(); use its narrow
+            # canonical binding reader instead of reaching into a private run record.
             try:
-                canonical = self.engine._run(row['id'])
-            except KeyError:
+                canonical = self.engine.run_binding(row['id'])
+            except Exception:
                 continue
-            if canonical.get('session_id') not in (None, session_id):
+            if not canonical or canonical.get('session_id') not in (None, session_id):
                 continue
             out.append({
                 'run_id': str(row.get('id')),
