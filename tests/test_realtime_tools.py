@@ -100,3 +100,17 @@ def test_realtime_audit_never_persists_raw_tool_parameters_or_exception_text():
     assert payloads
     assert all('params' not in payload for payload in payloads)
     assert 'super-secret-value' not in repr(payloads)
+
+
+def test_realtime_cancel_after_bridge_reconstruction_rejects_durable_pending_approval():
+    ex=build_executor('ask')
+    first=RealtimeToolBridge(ex)
+    required=first.invoke('cancel-after-reload','change_state','{"value":21}')
+    approval_id=required['approval_id']
+    reloaded=RealtimeToolBridge(ex)
+    cancelled=reloaded.cancel_unapproved(reason='voice_stopped')
+    assert 'cancel-after-reload' in cancelled
+    record=ex.approvals.record(approval_id)
+    assert record is not None and record['status']=='rejected'
+    with pytest.raises(PermissionError):
+        reloaded.approve('cancel-after-reload',approval_id=approval_id)
