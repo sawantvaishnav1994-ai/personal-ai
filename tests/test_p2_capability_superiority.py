@@ -302,7 +302,7 @@ class FakeToolRegistry:
 
 def test_p27_benchmark_never_claims_superior_from_structure_alone(tmp_path):
     runtime = {
-        'voice': SimpleNamespace(backend=SimpleNamespace(cancel_response=lambda: None)),
+        'voice': SimpleNamespace(barge_in=lambda: {'interrupted': True}),
         'tools': FakeToolRegistry(),
         'second_brain': SimpleNamespace(temporal=lambda *a, **k: []),
         'proactive': object(),
