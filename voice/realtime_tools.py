@@ -41,6 +41,7 @@ class RealtimeToolBridge:
                 'parameters': {'type': 'object', 'additionalProperties': True},
             }
             for tool in self.tools.all()
+            if not bool(getattr(tool, 'prohibited', False))
         ]
 
     def _emit(self, name, **data):
