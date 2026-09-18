@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from security.projection_redaction import sanitize_sensitive_text
+
 
 class ExecutionRecoveryProjection:
     """Read-only owner projection over the existing W7 recovery authority."""
@@ -21,7 +23,7 @@ class ExecutionRecoveryProjection:
                 out[str(key)]='[redacted]' if any(s in normalized for s in cls._SECRET) else cls._safe(item,depth+1)
             return out
         if isinstance(value,(list,tuple)):return [cls._safe(x,depth+1) for x in list(value)[:cls.MAX_ITEMS]]
-        if isinstance(value,str):return value[:cls.MAX_TEXT]
+        if isinstance(value,str):return sanitize_sensitive_text(value)[:cls.MAX_TEXT]
         if value is None or isinstance(value,(bool,int,float)):return value
         return str(value)[:cls.MAX_TEXT]
 
