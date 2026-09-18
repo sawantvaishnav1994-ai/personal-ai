@@ -223,12 +223,34 @@ class RealtimeToolBridge:
     def cancel_unapproved(self, *, reason: str = 'cancelled'):
         """Invalidate voice approvals that have not been explicitly accepted yet."""
         cancelled = []
-        for call_id in list(self.pending):
-            item = self.pending.pop(call_id)
+        candidates = {call_id: item for call_id, item in self.pending.items()}
+        try:
+            for row in self.approvals.list_pending(owner_id='owner'):
+                approval_id = row.get('approval_id') or row.get('id')
+                if not approval_id:
+                    continue
+                context = self.approvals.context(approval_id)
+                if not context or context.get('surface') != 'realtime_voice':
+                    continue
+                call_id = str(context.get('call_id') or '')
+                if not call_id or call_id in candidates:
+                    continue
+                candidates[call_id] = PendingRealtimeApproval(
+                    call_id=call_id,
+                    tool_name=str(context.get('tool_name') or ''),
+                    parameters=dict(context.get('parameters') or {}),
+                    created_at=time.time(),
+                    ticket_id=str(approval_id),
+                    execution_id=str(context.get('execution_id') or ''),
+                )
+        except Exception:
+            pass
+        for call_id, item in candidates.items():
+            self.pending.pop(call_id, None)
             try:
                 self.approvals.reject(item.ticket_id)
             except Exception:
-                pass
+                continue
             self.executor.memory.audit(
                 'realtime_tool',
                 'cancelled',
