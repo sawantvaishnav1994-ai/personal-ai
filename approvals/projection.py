@@ -14,7 +14,7 @@ class ApprovalsProjection:
     MAX_ITEMS = 100
     _SECRET_FRAGMENTS = (
         'password', 'secret', 'credential', 'api_key', 'apikey', 'access_token',
-        'refresh_token', 'authorization', 'cookie', 'private_key', 'client_secret',
+        'refresh_token', 'authorization', 'cookie', 'private_key', 'client_secret', 'token', 'headers', 'provider_config', 'raw_prompt', 'system_prompt',
     )
 
     def __init__(self, manager): self.manager = manager
@@ -47,7 +47,7 @@ class ApprovalsProjection:
             'status': self._status(record, ticket, now),
             'created_at': ticket.created_at,
             'expires_at': ticket.expires_at,
-            'destination': str(ticket.destination or '')[:1000],
+            'destination': '[redacted]' if str(ticket.destination or '').lower().startswith(('javascript:', 'data:', 'vbscript:')) else str(ticket.destination or '')[:1000],
             'data_classification': str(ticket.data_classification or 'internal')[:40],
             'device_bound': ticket.device_id is not None,
             'session_bound': ticket.session_id is not None,
