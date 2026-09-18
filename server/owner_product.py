@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -129,6 +130,22 @@ def owner_product_router(runtime):
 
     def audit(action: str, *, device_id: str, **payload):
         memory.audit('owner-product', action, {'device_id': device_id, **payload})
+
+    def require_fresh_reauthentication():
+        context = current_trusted_request()
+        ttl = int(getattr(runtime.get('agent_executor'), 'reauth_ttl_seconds', 300) or 300)
+        ttl = max(30, min(ttl, 900))
+        stamp = getattr(context, 'reauthenticated_at', None) if context is not None else None
+        try:
+            age = time.time() - float(stamp)
+        except (TypeError, ValueError):
+            age = ttl + 1
+        if context is None or age < 0 or age > ttl:
+            raise HTTPException(401, {
+                'code': 'reauthentication_required',
+                'message': 'Fresh owner verification is required for this security-sensitive action.',
+            })
+        return context
 
     def workflow_authority(device_id: str):
         context = current_trusted_request()
@@ -449,6 +466,7 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        require_fresh_reauthentication()
         try:
             result = registry.set_permissions(target_device_id, body.scopes)
         except KeyError as exc:
@@ -466,6 +484,7 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        require_fresh_reauthentication()
         if not registry.revoke(target_device_id):
             raise HTTPException(404, 'Device not found')
         revoked_sessions = {}
@@ -601,6 +620,8 @@ def owner_product_router(runtime):
     @router.post('/system/emergency-stop')
     def emergency_stop(body: EmergencyStopBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        if not body.enabled:
+            require_fresh_reauthentication()
         runtime['tools'].set_emergency_stop(body.enabled)
         # ToolRegistry is the canonical E-stop authority and advances the
         # security epoch. Also cancel active canonical turns so this owner
