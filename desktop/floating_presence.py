@@ -78,7 +78,8 @@ class PresenceController:
 
 
 try:
-    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtCore import QPoint, QTimer, Qt
+    from PyQt6.QtGui import QGuiApplication
     from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
     from ui.pulse import PulseWidget
 except ImportError:  # package/static qualification can still import the controller
@@ -101,6 +102,11 @@ class FloatingPresence(QWidget):
         data_dir = Path(getattr(runtime.get('settings'), 'data_dir', Path.home() / '.personal-ai'))
         self.controller = PresenceController(self.events, data_dir / 'floating-presence.json')
         self._drag_offset = None
+        self._clamping_position = False
+        self._screen_lifecycle_connected = False
+        self._bound_screen = None
+        self._bound_window_handle = None
+        self._reclamp_pending = False
         self._expanded = False
         self._always_on_top = True
         self._rendered_sequence = -1
@@ -238,22 +244,117 @@ class FloatingPresence(QWidget):
             self._drag_offset = None; self._clamp_to_screen(); self.controller.save_position(self.x(), self.y())
         super().mouseReleaseEvent(event)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._install_screen_lifecycle()
+        self._request_lifecycle_reclamp()
+
     def _screen_geometry(self):
         screen = self.screen()
         if screen is None:
             return None
         return screen.availableGeometry()
 
+    def _disconnect_bound_screen(self):
+        screen = self._bound_screen
+        if screen is None:
+            return
+        for signal_name in ('availableGeometryChanged', 'geometryChanged'):
+            try:
+                getattr(screen, signal_name).disconnect(self._on_screen_geometry_changed)
+            except (TypeError, RuntimeError):
+                pass
+        self._bound_screen = None
+
+    def _bind_screen(self, screen):
+        if screen is self._bound_screen:
+            return
+        self._disconnect_bound_screen()
+        self._bound_screen = screen
+        if screen is None:
+            return
+        screen.availableGeometryChanged.connect(self._on_screen_geometry_changed)
+        screen.geometryChanged.connect(self._on_screen_geometry_changed)
+
+    def _install_screen_lifecycle(self):
+        app = QGuiApplication.instance()
+        if app is not None and not self._screen_lifecycle_connected:
+            app.screenAdded.connect(self._on_screen_topology_changed)
+            app.screenRemoved.connect(self._on_screen_topology_changed)
+            self._screen_lifecycle_connected = True
+
+        handle = self.windowHandle()
+        if handle is not self._bound_window_handle:
+            if self._bound_window_handle is not None:
+                try:
+                    self._bound_window_handle.screenChanged.disconnect(self._on_window_screen_changed)
+                except (TypeError, RuntimeError):
+                    pass
+            self._bound_window_handle = handle
+            if handle is not None:
+                handle.screenChanged.connect(self._on_window_screen_changed)
+        self._bind_screen(self.screen())
+
+    def _remove_screen_lifecycle(self):
+        self._disconnect_bound_screen()
+        if self._bound_window_handle is not None:
+            try:
+                self._bound_window_handle.screenChanged.disconnect(self._on_window_screen_changed)
+            except (TypeError, RuntimeError):
+                pass
+            self._bound_window_handle = None
+        app = QGuiApplication.instance()
+        if app is not None and self._screen_lifecycle_connected:
+            for signal_name in ('screenAdded', 'screenRemoved'):
+                try:
+                    getattr(app, signal_name).disconnect(self._on_screen_topology_changed)
+                except (TypeError, RuntimeError):
+                    pass
+        self._screen_lifecycle_connected = False
+        self._reclamp_pending = False
+
+    def _on_window_screen_changed(self, screen):
+        self._bind_screen(screen)
+        self._request_lifecycle_reclamp()
+
+    def _on_screen_geometry_changed(self, *_):
+        self._request_lifecycle_reclamp()
+
+    def _on_screen_topology_changed(self, *_):
+        self._request_lifecycle_reclamp()
+
+    def _request_lifecycle_reclamp(self):
+        if self._drag_offset is not None or self._reclamp_pending or not self._screen_lifecycle_connected:
+            return
+        self._reclamp_pending = True
+        QTimer.singleShot(0, self._reclamp_after_screen_change)
+
+    def _reclamp_after_screen_change(self):
+        self._reclamp_pending = False
+        if self._drag_offset is not None or not self._screen_lifecycle_connected:
+            return
+        self._install_screen_lifecycle()
+        self._clamp_to_screen()
+
     def moveEvent(self, event):
         super().moveEvent(event)
-        if self._drag_offset is None:
+        if self._drag_offset is None and not self._clamping_position:
             self._clamp_to_screen()
 
     def _clamp_to_screen(self):
+        if self._drag_offset is not None or self._clamping_position:
+            return
         geometry = self._screen_geometry()
-        if geometry is None: return
+        if geometry is None:
+            return
         x, y = self.controller.clamp_position(self.x(), self.y(), left=geometry.left(), top=geometry.top(), right=geometry.right() + 1, bottom=geometry.bottom() + 1, width=self.width(), height=self.height())
-        self.move(x, y)
+        if (x, y) == (self.x(), self.y()):
+            return
+        self._clamping_position = True
+        try:
+            self.move(x, y)
+        finally:
+            self._clamping_position = False
 
     def _restore_position(self):
         saved = self.controller.position
@@ -261,6 +362,7 @@ class FloatingPresence(QWidget):
         self._clamp_to_screen()
 
     def closeEvent(self, event):
+        self._remove_screen_lifecycle()
         with self._submit_lock:
             cancel_event = self._active_cancel_event
             request_id = self._active_request_id
@@ -273,6 +375,8 @@ class FloatingPresence(QWidget):
                 self.executor.cancel_turn(request_id, device_id='desktop')
             except (KeyError, PermissionError):
                 pass
+        self._drag_offset = None
+        self._clamp_to_screen()
         self.controller.save_position(self.x(), self.y())
         self._unsubscribe()
         self.controller.close()
