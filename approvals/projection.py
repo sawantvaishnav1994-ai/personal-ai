@@ -49,7 +49,6 @@ class ApprovalsProjection:
             'expires_at': ticket.expires_at,
             'destination': str(ticket.destination or '')[:1000],
             'data_classification': str(ticket.data_classification or 'internal')[:40],
-            'security_epoch': int(ticket.security_epoch),
             'device_bound': ticket.device_id is not None,
             'session_bound': ticket.session_id is not None,
             'dispatch_started_at': record.get('dispatch_started_at'),
@@ -78,7 +77,6 @@ class ApprovalsProjection:
             'created_at': row['created_at'], 'expires_at': row['expires_at'],
             'destination': str(row.get('destination') or '')[:200],
             'data_classification': str(row.get('data_classification') or 'internal')[:40],
-            'security_epoch': int(row.get('security_epoch') or 0),
             'device_bound': row.get('device_id') is not None,
             'session_bound': row.get('session_id') is not None,
         } for row in rows[:limit]]
