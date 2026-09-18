@@ -239,7 +239,15 @@ class FloatingPresence(QWidget):
         super().mouseReleaseEvent(event)
 
     def _screen_geometry(self):
-        screen = self.screen(); return screen.availableGeometry() if screen else None
+        screen = self.screen()
+        if screen is None:
+            return None
+        return screen.availableGeometry()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self._drag_offset is None:
+            self._clamp_to_screen()
 
     def _clamp_to_screen(self):
         geometry = self._screen_geometry()
