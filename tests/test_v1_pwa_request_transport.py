@@ -86,7 +86,7 @@ def test_client_adapter_keeps_pending_request_until_terminal_result():
 
 
 
-def test_request_aware_voice_state_supersedes_prior_turn_cooperatively_and_durably(monkeypatch):
+def test_request_aware_voice_state_supersedes_prior_turn_cooperatively_without_claiming_durable_authority(monkeypatch):
     current = {'request_id': '11111111-1111-4111-8111-111111111111'}
     cancelled = []
     monkeypatch.setattr(request_state_module, 'current_logical_request_id', lambda: current['request_id'])
@@ -103,7 +103,7 @@ def test_request_aware_voice_state_supersedes_prior_turn_cooperatively_and_durab
 
     assert first.is_set()
     assert not second.is_set()
-    assert cancelled == ['11111111-1111-4111-8111-111111111111']
+    assert cancelled == []
 
 
 def test_request_aware_voice_cancel_is_bound_to_exact_active_request(monkeypatch):
