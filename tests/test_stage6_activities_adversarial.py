@@ -184,3 +184,31 @@ def test_reload_reconstructs_same_snapshot_cursor_from_canonical_audit(tmp_path)
     reloaded_projection = ActivitiesProjection(MemoryStore(store.path))
     second = reloaded_projection.page(limit=3, cursor=first['next_cursor'])
     assert not set(_ids(first)) & set(_ids(second))
+
+
+def test_conflicting_broad_correlation_does_not_merge_unrelated_execution():
+    rows = [
+        {'id': 'a1', 'category': 'agent', 'action': 'started', 'created_at': '1',
+         'payload': {'conversation_id': 'c1', 'request_id': 'r1', 'execution_id': 'e1'}},
+        {'id': 'a2', 'category': 'tool', 'action': 'completed', 'created_at': '2',
+         'payload': {'conversation_id': 'c1', 'request_id': 'r1', 'execution_id': 'e1'}},
+        {'id': 'a3', 'category': 'tool', 'action': 'completed', 'created_at': '3',
+         'payload': {'conversation_id': 'c1', 'request_id': 'r1', 'execution_id': 'e2'}},
+    ]
+    class Store:
+        def audit_entries(self, category=None, limit=1000): return list(reversed(rows))
+    detail = ActivitiesProjection(Store()).detail('a1')
+    assert [event['id'] for event in detail['timeline']] == ['a1', 'a2']
+
+
+def test_execution_identity_does_not_require_weaker_identifiers_on_every_event():
+    rows = [
+        {'id': 'a1', 'category': 'agent', 'action': 'started', 'created_at': '1',
+         'payload': {'request_id': 'r1', 'execution_id': 'e1'}},
+        {'id': 'a2', 'category': 'verification', 'action': 'completed', 'created_at': '2',
+         'payload': {'execution_id': 'e1'}},
+    ]
+    class Store:
+        def audit_entries(self, category=None, limit=1000): return list(reversed(rows))
+    detail = ActivitiesProjection(Store()).detail('a1')
+    assert [event['id'] for event in detail['timeline']] == ['a1', 'a2']
