@@ -61,7 +61,7 @@ class RealtimeToolBridge:
         params = self.parse_arguments(arguments)
         if confirmed:
             raise PermissionError('direct confirmed Realtime calls are disabled; approve the pending one-use ticket')
-        decision = self.tools.authorize(tool, confirmed=False)
+        decision = self.tools.authorize(tool, confirmed=False, parameters=params)
         if not decision.allowed:
             execution_id = f'realtime:{call_id}'
             ticket = self.approvals.create(execution_id, tool_name, params)
