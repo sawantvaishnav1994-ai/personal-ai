@@ -126,3 +126,50 @@ def test_19_concurrent_routing_confusion_does_not_cross_policy():
 def test_20_emergency_stop_bypass_denied():
     with pytest.raises(ModelUnavailable,match='Emergency Stop'):
         HybridPolicy.validate_request(HybridRequest(emergency_stop=True,consequential=True))
+
+
+def test_21_canonical_chat_inherits_owner_local_only_policy():
+    s = settings()
+    s.model_privacy_mode = 'local_only'
+    r = GovernedModelRouter(s)
+    seen = []
+
+    def chat_call(provider, messages, temperature):
+        seen.append(provider.id)
+        if provider.id == 'self_hosted':
+            raise ModelUnavailable(provider=provider.id)
+        return 'external-must-not-run'
+
+    r._chat_call = chat_call
+    with pytest.raises(ModelUnavailable):
+        r.chat('owner request')
+    assert seen == ['self_hosted']
+
+
+def test_22_canonical_calls_inherit_owner_provider_allowlist():
+    s = settings()
+    s.model_privacy_mode = 'external_allowed'
+    s.model_allowed_providers = ('openai',)
+    r = GovernedModelRouter(s)
+    seen = []
+    r._chat_call = lambda provider, messages, temperature: seen.append(provider.id) or provider.id
+    assert r.chat('owner request') == 'openai'
+    assert seen == ['openai']
+
+
+def test_23_invalid_owner_privacy_mode_fails_closed_to_local_only():
+    s = settings()
+    s.model_privacy_mode = 'not-a-real-policy'
+    r = GovernedModelRouter(s)
+    seen = []
+
+    def chat_call(provider, messages, temperature):
+        seen.append(provider.id)
+        if provider.id == 'self_hosted':
+            raise ModelUnavailable(provider=provider.id)
+        return 'external-must-not-run'
+
+    r._chat_call = chat_call
+    with pytest.raises(ModelUnavailable):
+        r.chat('owner request')
+    assert seen == ['self_hosted']
