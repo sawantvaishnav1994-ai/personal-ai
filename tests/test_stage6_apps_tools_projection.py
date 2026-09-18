@@ -84,7 +84,7 @@ def test_app_projection_is_bounded_and_does_not_forward_credentials():
     item = AppsToolsProjection(Tools([]), Integrations(rows)).apps_list()[0]
     assert len(item['capabilities']) == 100
     assert len(item['missing_scopes']) == 100
-    assert len(item['last_error']) == 500
+    assert item['last_error'] == 'Connector reported an error'
     for secret in ('access_token','refresh_token','client_secret','credential'):
         assert secret not in item
 
@@ -114,3 +114,24 @@ def test_malicious_metadata_remains_plain_bounded_text():
     assert item['name'] == bad
     assert len(item['description']) <= 1000
     assert '<script>' in item['name']  # API returns data, never executable markup.
+
+
+def test_emergency_stop_is_visible_and_blocks_tool_availability():
+    registry = Tools([tool(name='local.action', risk=Risk.READ_ONLY)])
+    registry.emergency_stop = True
+    item = AppsToolsProjection(registry, Integrations([])).tools_list()[0]
+    assert item['availability'] == 'EMERGENCY_STOP'
+    assert item['approval_policy'] == 'blocked_by_emergency_stop'
+
+
+def test_free_form_provider_error_cannot_echo_secrets():
+    secret = 'Bearer super-secret-access-token'
+    rows = [{
+        'id':'gmail','name':'Gmail','provider':'google','configured':True,'state':'degraded',
+        'last_error':f'Authorization: {secret}; https://example.invalid/?token={secret}',
+        'last_error_code':'provider_error',
+    }]
+    item = AppsToolsProjection(Tools([]), Integrations(rows)).apps_list()[0]
+    assert secret not in str(item)
+    assert item['last_error'] == 'Connector reported an error'
+    assert item['last_error_code'] == 'provider_error'
