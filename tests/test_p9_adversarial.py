@@ -215,5 +215,5 @@ def test_26_embedding_content_cannot_external_failover():
         return Response()
     r._request=request
     with pytest.raises(ModelUnavailable):
-        r.embed('stored owner memory')
+        r.embed('stored owner memory', sensitivity='sensitive')
     assert seen==['self_hosted']
