@@ -13,8 +13,15 @@ from server.owner_product import owner_product_router
 
 
 class Executor:
+    def __init__(self):
+        self.cancelled = []
+
     def chat(self, prompt, cancel_event=None, **kwargs):
         return f'done:{prompt}'
+
+    def cancel_active_turns(self, *, reason='emergency_stop'):
+        self.cancelled.append(reason)
+        return 1
 
 
 class Models:
@@ -28,19 +35,25 @@ class Tools:
     def all(self):
         return []
 
+    def set_emergency_stop(self, enabled):
+        self.emergency_stop = bool(enabled)
+        return self.emergency_stop
+
 
 def make_client(tmp_path):
     registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
     device, token = registry.enroll('Owner iPhone', 'ios-pwa')
     registry.set_permissions(device['id'], registry.OWNER_SCOPES)
     memory = MemoryStore(tmp_path / 'memory.sqlite3')
-    automations = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=Executor())
+    executor = Executor()
+    automations = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=executor)
     runtime = {
         'device_registry': registry,
         'memory': memory,
         'second_brain': SecondBrain(memory),
         'knowledge': KnowledgeStore(tmp_path / 'knowledge.sqlite3', tmp_path / 'objects'),
         'automations': automations,
+        'executor': executor,
         'p3_qualification': P3QualificationProgram(tmp_path / 'qualification.sqlite3'),
         'models': Models(),
         'tools': Tools(),
@@ -264,3 +277,17 @@ def test_retention_removes_memory_and_vector(tmp_path):
     assert result['matched'] == 1
     assert store.get(memory_id) is None
     assert vector.deleted == [memory_id]
+
+
+def test_stage8_owner_emergency_stop_cancels_canonical_turns(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+
+    stopped = client.post('/iphone/api/system/emergency-stop', json={'enabled': True})
+    assert stopped.status_code == 200
+    assert runtime['tools'].emergency_stop is True
+    assert runtime['executor'].cancelled == ['emergency_stop']
+
+    resumed = client.post('/iphone/api/system/emergency-stop', json={'enabled': False})
+    assert resumed.status_code == 200
+    assert runtime['tools'].emergency_stop is False
+    assert runtime['executor'].cancelled == ['emergency_stop']
