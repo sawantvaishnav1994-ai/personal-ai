@@ -81,3 +81,12 @@ def test_web_companion_never_embeds_privileged_secret():
 def test_cloud_runtime_defaults_fail_closed():
     from core.config import Settings
     s=Settings();assert s.cloud_runtime_enabled is False
+
+
+def test_stage7_emergency_stop_converges_tool_and_approval_guards():
+    from pathlib import Path
+    source = Path('cloud_runtime/relay.py').read_text(encoding='utf-8')
+    assert "tools.set_emergency_stop(enabled)" in source
+    assert "if enabled and hasattr(self.executor, 'invalidate_pending_approvals')" in source
+    assert "if enabled and hasattr(self.executor, 'cancel_active_turns')" in source
+    assert "self.events.emit('emergency.stop', enabled=enabled)" in source
