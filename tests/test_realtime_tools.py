@@ -52,3 +52,29 @@ def test_realtime_bridge_fails_closed_without_canonical_approval_authority():
     ex.memory=Memory()
     with pytest.raises(RuntimeError, match='canonical approval authority'):
         RealtimeToolBridge(ex)
+
+
+def test_realtime_approval_survives_bridge_reconstruction_and_dispatches_once():
+    ex=build_executor('ask')
+    first=RealtimeToolBridge(ex)
+    required=first.invoke('reload-call','change_state','{"value":11}')
+    approval_id=required['approval_id']
+    reloaded=RealtimeToolBridge(ex)
+    approved=reloaded.approve('reload-call',approval_id=approval_id)
+    assert approved['ok'] is True
+    assert approved['result']['changed']==11
+    assert approved['verified'] is True
+    replay=reloaded.approve('reload-call',approval_id=approval_id)
+    assert replay['status']=='completed'
+    assert replay['result']['changed']==11
+
+
+def test_realtime_reconnect_requires_exact_approval_identity():
+    ex=build_executor('ask')
+    first=RealtimeToolBridge(ex)
+    required=first.invoke('bound-call','change_state','{"value":12}')
+    reloaded=RealtimeToolBridge(ex)
+    with pytest.raises(PermissionError):
+        reloaded.approve('bound-call')
+    with pytest.raises(PermissionError):
+        reloaded.approve('wrong-call',approval_id=required['approval_id'])
