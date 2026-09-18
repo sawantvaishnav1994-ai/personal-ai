@@ -132,8 +132,8 @@ class RealtimeToolBridge:
                     'error_type': type(exc).__name__,
                 },
             )
-            self._emit('voice.tool.failed', call_id=call_id, tool=tool.name, error=str(exc))
-            return {'status': 'completed', 'ok': False, 'error': str(exc)}
+            self._emit('voice.tool.failed', call_id=call_id, tool=tool.name, error_type=type(exc).__name__)
+            return {'status': 'completed', 'ok': False, 'error': 'Tool execution failed.', 'error_type': type(exc).__name__}
 
     def _pending_item(self, call_id: str, approval_id: str | None = None):
         item = self.pending.get(call_id)
