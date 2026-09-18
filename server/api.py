@@ -14,35 +14,35 @@ from core.security import PairingManager
 
 
 class PairConfirm(BaseModel):
-    token: str
-    code: str
-    name: str = 'Device'
-    platform: str = 'unknown'
+    token: str = Field(min_length=16, max_length=256)
+    code: str = Field(min_length=4, max_length=32)
+    name: str = Field(default='Device', max_length=120)
+    platform: str = Field(default='unknown', max_length=80)
 
 
 class PairedCommand(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=8000)
 
 
 class SessionStart(BaseModel):
-    device_id: str
-    device_token: str
+    device_id: str = Field(min_length=1, max_length=200)
+    device_token: str = Field(min_length=16, max_length=512)
 
 
 class CloudCommand(BaseModel):
-    text: str
-    nonce: str
+    text: str = Field(min_length=1, max_length=8000)
+    nonce: str = Field(min_length=16, max_length=256)
 
 
 class MemoryQuery(BaseModel):
-    query: str = ''
+    query: str = Field(default='', max_length=2000)
     include_sensitive: bool = False
 
 
 class ApprovalDecision(BaseModel):
-    approval_id: str
-    decision: str
-    nonce: str
+    approval_id: str = Field(min_length=1, max_length=200)
+    decision: str = Field(min_length=1, max_length=32)
+    nonce: str = Field(min_length=16, max_length=256)
 
 
 class EmergencyStopBody(BaseModel):
@@ -50,42 +50,42 @@ class EmergencyStopBody(BaseModel):
 
 
 class ContinuityResumeBody(BaseModel):
-    thread_id: str | None = None
+    thread_id: str | None = Field(default=None, max_length=200)
     event_limit: int = Field(default=30, ge=1, le=200)
 
 
 class ContinuityAppendBody(BaseModel):
-    thread_id: str
-    kind: str
+    thread_id: str = Field(min_length=1, max_length=200)
+    kind: str = Field(min_length=1, max_length=80)
     payload: dict = Field(default_factory=dict)
 
 
 class ContinuityContextBody(BaseModel):
-    thread_id: str
+    thread_id: str = Field(min_length=1, max_length=200)
     patch: dict = Field(default_factory=dict)
 
 
 class ContinuityHandoffBody(BaseModel):
-    thread_id: str
-    to_device: str
+    thread_id: str = Field(min_length=1, max_length=200)
+    to_device: str = Field(min_length=1, max_length=200)
 
 
 class ProactiveConsiderBody(BaseModel):
-    source: str
+    source: str = Field(min_length=1, max_length=120)
     payload: dict = Field(default_factory=dict)
     context: dict = Field(default_factory=dict)
 
 
 class WorkflowCreateBody(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=240)
     trigger: dict = Field(default_factory=dict)
-    steps: list[dict]
+    steps: list[dict] = Field(min_length=1, max_length=50)
     next_run_at: str | None = None
     interval_seconds: int | None = Field(default=None, ge=1)
 
 
 class WorkflowRunBody(BaseModel):
-    workflow_id: str
+    workflow_id: str = Field(min_length=1, max_length=200)
 
 
 class WorkflowPauseBody(BaseModel):
@@ -169,6 +169,40 @@ def create_app(
         value = runtime.get(name) if runtime else None
         if value is None:
             raise HTTPException(503, f'{name} unavailable')
+        return value
+
+    def bounded_mapping(value, *, max_bytes=65536, max_depth=8, max_items=256, max_string=12000):
+        if not isinstance(value, dict):
+            raise HTTPException(422, 'Expected a JSON object')
+        nodes = 0
+        stack = [(value, 0)]
+        while stack:
+            current, depth = stack.pop()
+            if depth > max_depth:
+                raise HTTPException(413, 'JSON object nesting exceeds limit')
+            if isinstance(current, dict):
+                if len(current) > max_items:
+                    raise HTTPException(413, 'JSON object contains too many fields')
+                for key, child in current.items():
+                    if len(str(key)) > 256:
+                        raise HTTPException(413, 'JSON object key is too long')
+                    stack.append((child, depth + 1))
+            elif isinstance(current, list):
+                if len(current) > max_items:
+                    raise HTTPException(413, 'JSON collection contains too many items')
+                for child in current:
+                    stack.append((child, depth + 1))
+            elif isinstance(current, str) and len(current) > max_string:
+                raise HTTPException(413, 'JSON string exceeds limit')
+            nodes += 1
+            if nodes > 4096:
+                raise HTTPException(413, 'JSON object is too complex')
+        try:
+            encoded = json.dumps(value, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, 'JSON object contains unsupported values') from exc
+        if len(encoded) > max_bytes:
+            raise HTTPException(413, 'JSON object exceeds maximum size')
         return value
 
     def require_loopback(request):
@@ -288,7 +322,8 @@ def create_app(
         active = service.active_for_device(device_id)
         if active and active['id'] != body.thread_id:
             raise HTTPException(403, 'Device is not active in the requested continuity thread')
-        return service.append(body.thread_id, device_id=device_id, kind=body.kind, payload=body.payload)
+        payload = bounded_mapping(body.payload)
+        return service.append(body.thread_id, device_id=device_id, kind=body.kind, payload=payload)
 
     @app.post('/continuity/context')
     def continuity_context(
@@ -301,7 +336,8 @@ def create_app(
         active = service.active_for_device(device_id)
         if not active or active['id'] != body.thread_id:
             raise HTTPException(403, 'Device is not active in the requested continuity thread')
-        return {'thread_id': body.thread_id, 'context': service.update_context(body.thread_id, body.patch)}
+        patch = bounded_mapping(body.patch)
+        return {'thread_id': body.thread_id, 'context': service.update_context(body.thread_id, patch)}
 
     @app.post('/continuity/handoff')
     def continuity_handoff(
@@ -325,8 +361,9 @@ def create_app(
         x_device_id: str | None = Header(default=None),
     ):
         device_id = auth_device(authorization, x_device_id)
-        context = {**body.context, 'device_id': device_id}
-        return require_runtime('proactive').consider(body.source, body.payload, context=context).__dict__
+        payload = bounded_mapping(body.payload)
+        context = {**bounded_mapping(body.context), 'device_id': device_id}
+        return require_runtime('proactive').consider(body.source, payload, context=context).__dict__
 
     @app.get('/proactive/history')
     def proactive_history(
@@ -362,10 +399,12 @@ def create_app(
         x_device_id: str | None = Header(default=None),
     ):
         auth_device(authorization, x_device_id)
+        trigger = bounded_mapping(body.trigger)
+        steps = [bounded_mapping(step, max_bytes=32768) for step in body.steps]
         workflow_id = require_runtime('automations').create_workflow(
             body.title,
-            body.trigger,
-            body.steps,
+            trigger,
+            steps,
             next_run_at=body.next_run_at,
             interval_seconds=body.interval_seconds,
         )
@@ -622,11 +661,12 @@ def create_app(
                 if message.get('type') == 'continuity_event' and continuity:
                     thread = continuity.active_for_device(device_id)
                     if thread:
+                        payload = bounded_mapping(dict(message.get('payload') or {}))
                         continuity.append(
                             thread['id'],
                             device_id=device_id,
-                            kind=str(message.get('kind', 'device_event')),
-                            payload=dict(message.get('payload') or {}),
+                            kind=str(message.get('kind', 'device_event'))[:80],
+                            payload=payload,
                         )
                 if device_gateway:
                     device_gateway.receive(device_id, message)
