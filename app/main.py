@@ -60,6 +60,8 @@ def build_runtime():
     if hasattr(executor,'attach_autonomy'): executor.attach_autonomy(future.autonomy)
     benchmark=CapabilityBenchmark(settings.data_dir/'capability-benchmark.sqlite3',runtime=runtime); model_evaluation=ModelDialogueEvaluation(settings.data_dir/'model-dialogue-evaluation.sqlite3',models,audit=memory.audit); scenarios=CompetitiveScenarioSuite(runtime,benchmark); runtime.update({'benchmark':benchmark,'model_evaluation':model_evaluation,'capability_scenarios':scenarios}); benchmark_tools.register(tools,benchmark,scenarios)
     def append_continuity(kind,text,device_id=None,conversation_id=None,event_id=None):
+        # Canonical request-aware surfaces persist their own conversation events.
+        # Legacy/unscoped emitters fall back to the active continuity thread here.
         if not text or conversation_id:return
         source_device=str(device_id or 'desktop')
         try:
