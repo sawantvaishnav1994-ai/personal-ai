@@ -206,8 +206,9 @@ class AgentExecutor:
             answer = self.models.chat(
                 text,
                 history=history[:-1],
-                system=self._grounded_system(context),
+                system=self._grounded_system(''),
                 sensitivity=sensitivity,
+                private_context=context,
             )
             self._observe('model.chat_ms', start)
             self._check_cancel(cancel_event)
@@ -628,15 +629,17 @@ class AgentExecutor:
                 f"User request: {text}\nTool results: {json.dumps(results, default=str)[:12000]}\n"
                 f"Retrieved context: {grounding}\n"
                 "Report verified actions as completed. For verified=false results, explicitly say the action was attempted but not verified; never imply success. Mention rollback availability when relevant.",
-                system=self._grounded_system(grounding),
-                sensitivity=sensitivity,
+                system=self._grounded_system(''),
+                sensitivity='sensitive',
+                private_context=grounding,
             )
         else:
             answer = self.models.chat(
                 text,
                 history=history[:-1],
-                system=self._grounded_system(grounding),
+                system=self._grounded_system(''),
                 sensitivity=sensitivity,
+                private_context=grounding,
             )
         self._observe('model.chat_ms', start)
         self._check_cancel(cancel_event)
