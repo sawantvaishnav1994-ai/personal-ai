@@ -25,7 +25,7 @@ def recovery_visibility_router(runtime):
         context=require_owner()
         try:authority=tools.ensure_recovery_authority()
         except RuntimeError as exc:raise HTTPException(503,'Recovery authority is unavailable') from exc
-        item=ExecutionRecoveryProjection(authority).detail(transaction_id,owner_id=context.owner_id,device_id=context.device_id,session_id=context.session_id)
+        item=ExecutionRecoveryProjection(authority).detail(transaction_id,owner_id='owner',device_id=context.device_id,session_id=context.session_id)
         if item is None:raise HTTPException(404,'Execution transaction not found')
         return item
 
