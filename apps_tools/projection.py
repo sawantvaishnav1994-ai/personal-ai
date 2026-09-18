@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from activities.projection import ActivitiesProjection
+from security.projection_redaction import sanitize_sensitive_text
 
 
 class AppsToolsProjection:
@@ -20,7 +21,7 @@ class AppsToolsProjection:
 
     @staticmethod
     def _text(value, limit=500):
-        return str(value or '')[:limit]
+        return sanitize_sensitive_text(str(value or ''))[:limit]
 
     @staticmethod
     def _category(name: str, connector_id: str | None = None) -> str:
