@@ -169,3 +169,14 @@ def test_p2_api_workflow_proactive_and_benchmark_require_device_identity(tmp_pat
     assert benchmark.json()['label'] in {'Prototype', 'Functional'}
 
     assert client.get('/benchmark').status_code == 401
+
+
+def test_stage7_continuity_sync_accepts_reconnect_cursor_without_advancing_truth():
+    from pathlib import Path
+    continuity = Path('devices/continuity.py').read_text(encoding='utf-8')
+    api = Path('server/api.py').read_text(encoding='utf-8')
+    assert 'after_sequence: int | None = None' in continuity
+    assert 'requested_after = stored_after if after_sequence is None else max(0, int(after_sequence))' in continuity
+    assert 'after = min(requested_after, stored_after)' in continuity
+    assert 'after_sequence: int | None = None' in api
+    assert 'after_sequence=after_sequence' in api
