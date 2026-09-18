@@ -1,7 +1,9 @@
 from types import SimpleNamespace
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from automation.engine import AutomationEngine
 from devices.registry import DeviceRegistry
@@ -10,6 +12,7 @@ from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from qualification.program import P3QualificationProgram
 from server.owner_product import owner_product_router
+from security.request_context import TrustedRequestContext, set_trusted_request, reset_trusted_request
 
 
 class Executor:
@@ -57,7 +60,7 @@ class GatewayProbe:
         self.disconnected.append(device_id)
 
 
-def make_client(tmp_path):
+def make_client(tmp_path, *, reauthenticated_at=None):
     registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
     device, token = registry.enroll('Owner iPhone', 'ios-pwa')
     registry.set_permissions(device['id'], registry.OWNER_SCOPES)
@@ -81,6 +84,16 @@ def make_client(tmp_path):
         'future_intelligence': SimpleNamespace(status=lambda: {}),
     }
     app = FastAPI()
+    fresh_at = time.time() if reauthenticated_at is None else reauthenticated_at
+    class TrustedContextMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            device_id = request.cookies.get('pa_device') or device['id']
+            token = set_trusted_request(TrustedRequestContext(device_id, 'test-session', fresh_at))
+            try:
+                return await call_next(request)
+            finally:
+                reset_trusted_request(token)
+    app.add_middleware(TrustedContextMiddleware)
     app.include_router(owner_product_router(runtime))
     client = TestClient(app, base_url='https://testserver')
     client.cookies.set('pa_device', device['id'])
@@ -315,3 +328,28 @@ def test_stage8_owner_emergency_stop_cancels_canonical_turns(tmp_path):
     assert resumed.status_code == 200
     assert runtime['tools'].emergency_stop is False
     assert runtime['executor'].cancelled == ['emergency_stop']
+
+
+def test_stage8_stale_reauthentication_blocks_security_controls(tmp_path):
+    client, runtime, _ = make_client(tmp_path, reauthenticated_at=time.time() - 1000)
+    other, _ = runtime['device_registry'].enroll('Other', 'web')
+
+    permissions = client.patch(
+        f"/iphone/api/devices/{other['id']}/permissions",
+        json={'scopes': ['ai:chat']},
+    )
+    assert permissions.status_code == 401
+    assert permissions.json()['detail']['code'] == 'reauthentication_required'
+
+    revoke = client.post(f"/iphone/api/devices/{other['id']}/revoke", json={'confirm': True})
+    assert revoke.status_code == 401
+    assert runtime['device_registry'].is_active(other['id']) is True
+
+    runtime['tools'].set_emergency_stop(True)
+    release = client.post('/iphone/api/system/emergency-stop', json={'enabled': False})
+    assert release.status_code == 401
+    assert runtime['tools'].emergency_stop is True
+
+    stop_again = client.post('/iphone/api/system/emergency-stop', json={'enabled': True})
+    assert stop_again.status_code == 200
+    assert runtime['tools'].emergency_stop is True
