@@ -25,3 +25,13 @@ def test_owner_control_projects_existing_model_and_preference_authorities():
     assert "rt['preferences'].snapshot()" in source
     assert "'reduce_motion':prefs.get('reduce_motion')" in source
     assert "'autonomy_mode':prefs.get('autonomy_mode')" in source
+
+
+def test_owner_control_privacy_view_is_truthful_and_non_authoritative():
+    source = Path('ui/control_panel.py').read_text(encoding='utf-8')
+    assert "'Privacy & Data'" in source
+    assert "'sensitive_memory_remote_access':'scope-gated'" in source
+    assert "'secret_store_exported_in_backups':False" in source
+    assert "'device_presence':'live-evidence-only'" in source
+    assert "'permission_default':'deny'" in source
+    assert "'privacy_mode_control':'not implemented'" in source
