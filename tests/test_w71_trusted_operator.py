@@ -11,7 +11,7 @@ from vision.computer_intelligence import ComputerIntelligence
 
 
 class Models:
-    def json(self, prompt, system=''):
+    def json(self, prompt, system='', **kwargs):
         return {'summary':'click the safe test button','steps':[{'kind':'click','params':{'x':10,'y':20},'reason':'test action','verify':'the test state changed'}]}
 
 
