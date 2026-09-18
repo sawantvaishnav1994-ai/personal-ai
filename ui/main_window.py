@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
         events.subscribe("state", self.on_state)
         events.subscribe("voice.transcript", self._on_voice_transcript)
         events.subscribe("voice.reply", self._on_voice_reply)
+        events.subscribe("voice.session.stopped", self._on_voice_session_stopped)
         events.subscribe(
             "voice.wake",
             lambda event: self._append_chat(
@@ -801,14 +802,13 @@ class MainWindow(QMainWindow):
         voice = self.runtime.get("voice")
         if not voice:
             return
-        if self.voice_running:
+        running = bool(getattr(voice, "running", self.voice_running))
+        if running:
             voice.stop()
-            self.voice_running = False
-            self._set_state("idle")
         else:
             voice.start()
-            self.voice_running = True
-            self._set_state("active")
+        self.voice_running = bool(getattr(voice, "running", not running))
+        self._set_state("active" if self.voice_running else "idle")
         self._update_voice_buttons()
 
     def _set_state(self, state):
@@ -839,6 +839,10 @@ class MainWindow(QMainWindow):
             self._append_chat("AI", text)
             self._set_state("speaking")
             QTimer.singleShot(1000, lambda: self._set_state("idle"))
+
+    def _on_voice_session_stopped(self, event):
+        self.voice_running = False
+        self._update_voice_buttons()
 
     def _append_chat(self, who, text):
         if not text:
