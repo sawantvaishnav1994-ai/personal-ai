@@ -14,6 +14,15 @@ class Devices:
         return device_id == 'device-1'
 
 
+class AutomationProbe:
+    def __init__(self):
+        self.cancelled_sessions = []
+
+    def cancel_session_runs(self, session_id, *, reason='session_revoked'):
+        self.cancelled_sessions.append((session_id, reason))
+        return 1
+
+
 def make_client(tmp_path):
     sessions = PwaSessionStore(tmp_path / 'pwa-sessions.sqlite3', ttl_seconds=600)
     owner = OwnerAccessStore(tmp_path / 'owner-access.sqlite3')
@@ -28,12 +37,13 @@ def make_client(tmp_path):
         response.set_cookie('pa_token', 'device-bearer', secure=True, httponly=True, samesite='strict', path='/iphone')
         return {'ok': True}
 
-    app.include_router(pwa_security_router({'pwa_sessions': sessions, 'owner_access': owner}))
-    return TestClient(app, base_url='https://testserver'), sessions
+    automations = AutomationProbe()
+    app.include_router(pwa_security_router({'pwa_sessions': sessions, 'owner_access': owner, 'automations': automations}))
+    return TestClient(app, base_url='https://testserver'), sessions, automations
 
 
 def test_password_reauth_updates_only_current_session(tmp_path):
-    client, sessions = make_client(tmp_path)
+    client, sessions, _ = make_client(tmp_path)
     client.post('/iphone/api/access/password/login')
     current = client.get('/iphone/api/sessions').json()['current_session_id']
     before = sessions.get(current).reauthenticated_at
@@ -47,7 +57,7 @@ def test_password_reauth_updates_only_current_session(tmp_path):
 
 
 def test_session_list_and_revoke_others_are_device_scoped(tmp_path):
-    client, sessions = make_client(tmp_path)
+    client, sessions, _ = make_client(tmp_path)
     client.post('/iphone/api/access/password/login')
     current = client.get('/iphone/api/sessions').json()['current_session_id']
     _, other = sessions.issue('device-1')
@@ -65,10 +75,23 @@ def test_session_list_and_revoke_others_are_device_scoped(tmp_path):
 
 
 def test_cannot_revoke_session_from_another_device(tmp_path):
-    client, sessions = make_client(tmp_path)
+    client, sessions, _ = make_client(tmp_path)
     client.post('/iphone/api/access/password/login')
     _, foreign = sessions.issue('device-2')
 
     response = client.post(f'/iphone/api/sessions/{foreign.id}/revoke')
     assert response.status_code == 404
     assert sessions.get(foreign.id) is not None
+
+
+def test_stage8_session_revocation_cancels_bound_automation(tmp_path):
+    client, sessions, automations = make_client(tmp_path)
+    client.post('/iphone/api/access/password/login')
+    current = client.get('/iphone/api/sessions').json()['current_session_id']
+    _, other = sessions.issue('device-1')
+
+    response = client.post(f'/iphone/api/sessions/{other.id}/revoke')
+    assert response.status_code == 200
+    assert response.json()['cancelled_workflows'] == 1
+    assert automations.cancelled_sessions == [(other.id, 'session_revoked')]
+    assert sessions.get(current) is not None
