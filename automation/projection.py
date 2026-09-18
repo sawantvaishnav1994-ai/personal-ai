@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from security.projection_redaction import sanitize_sensitive_text
+
 
 class AutomationWorkflowProjection:
     """Owner-safe read projection over the existing AutomationEngine.
@@ -37,7 +39,7 @@ class AutomationWorkflowProjection:
         if isinstance(value, (list, tuple)):
             return [cls._safe(item, depth=depth + 1) for item in list(value)[:60]]
         if isinstance(value, str):
-            return value[:cls.MAX_TEXT]
+            return sanitize_sensitive_text(value)[:cls.MAX_TEXT]
         if value is None or isinstance(value, (bool, int, float)):
             return value
         return str(value)[:cls.MAX_TEXT]
