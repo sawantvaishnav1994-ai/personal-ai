@@ -130,7 +130,7 @@ def test_realtime_pending_approval_is_invalidated_by_global_emergency_stop_epoch
 def test_realtime_failure_does_not_expose_exception_secret_in_result_event_or_audit():
     ex=build_executor('auto')
     tool=ex.tools.get('read_status')
-    ex.tools.permissions.set(tool.permission, 'auto')
+    ex.tools.set_autonomy_mode('act')
     secret='provider-secret-must-not-leak'
     tool.handler=lambda params: (_ for _ in ()).throw(RuntimeError(secret))
     captured=[]
