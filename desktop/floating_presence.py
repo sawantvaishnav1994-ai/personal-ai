@@ -135,8 +135,9 @@ class FloatingPresence(QWidget):
         self.shell.setStyleSheet('QFrame#presenceShell{background:rgba(3,4,5,224);border:1px solid rgba(85,125,140,95);border-radius:22px;}QLineEdit{background:#070a0d;border:1px solid #17252d;border-radius:12px;padding:8px;color:#edf3f6;}QPushButton{background:#090d10;border:1px solid #17252d;border-radius:10px;padding:7px;color:#aab9c0;}QLabel{color:#dbe6ea;}')
         outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.addWidget(self.shell)
         layout = QVBoxLayout(self.shell); layout.setContentsMargins(8, 8, 8, 8); layout.setSpacing(6)
-        self.core = PulseWidget(); self.core.setAccessibleName('Personal AI core state'); self.core.setFixedSize(self.CORE_SIZE - 16, self.CORE_SIZE - 16)
-        self.core.mouseDoubleClickEvent = lambda event: self.toggle_panel(); layout.addWidget(self.core, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.core = PulseWidget(); self.core.setAccessibleName('Personal AI core state'); self.core.setAccessibleDescription('Press Enter or Space to open quick controls'); self.core.setFixedSize(self.CORE_SIZE - 16, self.CORE_SIZE - 16)
+        self.core.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.core.mouseDoubleClickEvent = lambda event: self.toggle_panel(); self.core.keyPressEvent = self._core_key_press; layout.addWidget(self.core, alignment=Qt.AlignmentFlag.AlignCenter)
         self.panel = QWidget(); panel = QVBoxLayout(self.panel); panel.setContentsMargins(2, 2, 2, 2)
         self.status = QLabel('Connecting'); self.status.setAccessibleName('Current Personal AI state'); panel.addWidget(self.status)
         self.input = QLineEdit(); self.input.setAccessibleName('Quick message to Personal AI'); self.input.setPlaceholderText('Speak or type…'); self.input.returnPressed.connect(self.submit); panel.addWidget(self.input)
@@ -144,7 +145,7 @@ class FloatingPresence(QWidget):
         self.voice = QPushButton('Voice'); self.voice.setAccessibleName('Toggle voice'); self.voice.clicked.connect(self.toggle_voice); actions.addWidget(self.voice)
         self.cancel = QPushButton('Cancel'); self.cancel.setAccessibleName('Cancel current work'); self.cancel.clicked.connect(self.cancel_work); actions.addWidget(self.cancel)
         self.pin = QPushButton('Unpin'); self.pin.setAccessibleName('Toggle always on top'); self.pin.clicked.connect(self.toggle_always_on_top); actions.addWidget(self.pin)
-        self.collapse = QPushButton('Collapse'); self.collapse.clicked.connect(self.toggle_panel); actions.addWidget(self.collapse)
+        self.collapse = QPushButton('Collapse'); self.collapse.setAccessibleName('Collapse quick controls'); self.collapse.clicked.connect(self.toggle_panel); actions.addWidget(self.collapse)
         panel.addLayout(actions); self.panel.setVisible(False); layout.addWidget(self.panel)
 
     def _render_snapshot(self):
@@ -191,6 +192,21 @@ class FloatingPresence(QWidget):
             self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
         else:
             self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.core.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def _core_key_press(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.toggle_panel()
+            event.accept()
+            return
+        QWidget.keyPressEvent(self.core, event)
+
+    def keyPressEvent(self, event):
+        if self._expanded and event.key() == Qt.Key.Key_Escape:
+            self.toggle_panel()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def submit(self):
         text = self.input.text().strip()
