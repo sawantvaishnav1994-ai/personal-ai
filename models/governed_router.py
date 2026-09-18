@@ -165,10 +165,7 @@ class GovernedModelRouter(ModelRouter):
             raise InvalidModelResponse('Model JSON response must be an object', provider=getattr(self, '_last', {}).get('provider'))
         return value
 
-    def embed(self, text: str) -> list[float]:
-        # Embeddings are commonly generated from Memory/Knowledge content.
-        # Keep them on private/local providers until callers provide a narrower
-        # classification contract; external failover would leak stored context.
+    def embed(self, text: str, *, sensitivity: str = 'internal') -> list[float]:
         def call(provider):
             model = str(getattr(self.settings, 'embedding_model', '') or provider.model)
             response = self._request(provider, 'POST', '/embeddings', json={'model': model, 'input': text})
@@ -176,7 +173,7 @@ class GovernedModelRouter(ModelRouter):
                 return list(map(float, response.json()['data'][0]['embedding']))
             except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise InvalidModelResponse('Invalid embedding response', provider=provider.id) from exc
-        return self._run('embedding', call, sensitivity='sensitive')
+        return self._run('embedding', call, sensitivity=sensitivity)
 
     def _chat_call(self, provider, messages, temperature):
         response=self._request(provider,'POST','/chat/completions',json={'model':provider.model,'messages':messages,'temperature':temperature})
