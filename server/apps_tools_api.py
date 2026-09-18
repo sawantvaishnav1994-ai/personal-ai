@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 
 from apps_tools.projection import AppsToolsProjection
 from security.request_context import current_trusted_request
@@ -28,7 +28,7 @@ def apps_tools_router(runtime):
         return {'tools': projection.tools_list()}
 
     @router.get('/tools/{tool_id}')
-    def tool_detail(tool_id: str):
+    def tool_detail(tool_id: str = Path(..., min_length=1, max_length=200)):
         require_owner()
         item = projection.tool_detail(tool_id)
         if item is None:
@@ -41,7 +41,7 @@ def apps_tools_router(runtime):
         return {'apps': projection.apps_list()}
 
     @router.get('/apps/{app_id}')
-    def app_detail(app_id: str):
+    def app_detail(app_id: str = Path(..., min_length=1, max_length=200)):
         require_owner()
         item = projection.app_detail(app_id)
         if item is None:
