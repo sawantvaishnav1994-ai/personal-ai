@@ -97,3 +97,9 @@ def test_activities_transport_rejects_out_of_bounds_inputs(tmp_path):
     assert client.get('/iphone/api/activities',params={'category':'x'*101}).status_code == 422
     assert client.get('/iphone/api/activities',params={'status':'x'*81}).status_code == 422
     assert client.get('/iphone/api/activities',params={'cursor':'x'*769}).status_code == 422
+
+
+def test_apps_tools_transport_rejects_oversized_identifiers(tmp_path):
+    client,_=apps_tools_app(tmp_path,Devices(active=True,scopes={'device:read'}))
+    assert client.get('/iphone/api/apps-tools/tools/' + ('x'*201)).status_code == 422
+    assert client.get('/iphone/api/apps-tools/apps/' + ('x'*201)).status_code == 422
