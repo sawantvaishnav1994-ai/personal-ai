@@ -10,14 +10,18 @@ class Models:
         self.plan_prompt = ''
         self.chat_system = ''
         self.sensitivity = None
+        self.plan_private_context = ''
+        self.chat_private_context = ''
 
-    def json(self, prompt, *, system='', sensitivity='internal'):
+    def json(self, prompt, *, system='', sensitivity='internal', private_context=''):
         self.plan_prompt = prompt
+        self.plan_private_context = private_context
         self.sensitivity = sensitivity
         return {'steps': []}
 
     def chat(self, prompt, *, system='', history=None, sensitivity='internal', **kwargs):
         self.chat_system = system
+        self.chat_private_context = kwargs.get('private_context', '')
         self.sensitivity = sensitivity
         return 'Grounded answer [Launch facts, chunk 0]'
 
@@ -58,8 +62,9 @@ def test_final_answer_receives_memory_and_cited_knowledge_context(tmp_path):
     answer = executor.chat('Where does Aurora launch?')
 
     assert answer.startswith('Grounded answer')
-    assert 'Aurora is the owner project' in models.plan_prompt
-    assert 'owner-upload:test' in models.chat_system
+    assert 'Aurora is the owner project' not in models.plan_prompt
+    assert 'Aurora is the owner project' in models.plan_private_context
+    assert 'owner-upload:test' in models.chat_private_context
     assert 'Never invent a memory or citation' in models.chat_system
 
 
