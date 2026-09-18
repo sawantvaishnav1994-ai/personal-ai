@@ -45,6 +45,7 @@ class FullDuplexVoiceSession:
         self._play_thread = None
         self._response_thread = None
         self._lifecycle_lock = threading.RLock()
+        self._session_stopped_emitted = False
         self.metrics = {
             'utterances': 0,
             'barge_ins': 0,
@@ -67,6 +68,13 @@ class FullDuplexVoiceSession:
             if request_id:
                 payload['request_id'] = request_id
             self.events.emit(name, **payload)
+
+    def _emit_session_stopped_once(self):
+        with self._lifecycle_lock:
+            if self._session_stopped_emitted:
+                return
+            self._session_stopped_emitted = True
+        self._emit('voice.session.stopped')
 
     def _is_current(self, request_id: str) -> bool:
         with self._lifecycle_lock:
@@ -121,6 +129,7 @@ class FullDuplexVoiceSession:
             self._turn_cancel = None
             self._current_request_id = None
             self._stop.clear()
+            self._session_stopped_emitted = False
             self.thread = threading.Thread(target=self._run, daemon=True, name='personal-ai-full-duplex')
             self.thread.start()
 
@@ -136,7 +145,7 @@ class FullDuplexVoiceSession:
         if cancel_event is not None and request_id:
             try:
                 self._cancel_canonical_turn(request_id)
-            except (KeyError, PermissionError) as exc:
+            except Exception as exc:
                 self._emit('voice.turn.cancel_failed', request_id=request_id, error_type=type(exc).__name__)
         for worker in workers:
             if worker and worker is not threading.current_thread():
@@ -151,7 +160,7 @@ class FullDuplexVoiceSession:
                 self._play_thread = None
             if self.thread and not self.thread.is_alive():
                 self.thread = None
-        self._emit('voice.session.stopped')
+        self._emit_session_stopped_once()
 
     def barge_in(self):
         with self._lifecycle_lock:
@@ -286,6 +295,7 @@ class FullDuplexVoiceSession:
             import soundfile as sf
         except Exception as exc:
             self._emit('voice.session.error', error_type=type(exc).__name__)
+            self._emit_session_stopped_once()
             return
 
         speech = []
@@ -297,6 +307,7 @@ class FullDuplexVoiceSession:
                 input_device = self.devices.resolve(self.input_device_name, kind='input')
         except Exception as exc:
             self._emit('voice.session.error', error_type=type(exc).__name__)
+            self._emit_session_stopped_once()
             return
 
         def cb(indata, frames, time_info, status):
@@ -392,4 +403,4 @@ class FullDuplexVoiceSession:
         except Exception as exc:
             self._emit('voice.session.error', error_type=type(exc).__name__)
         finally:
-            self._emit('voice.session.stopped')
+            self._emit_session_stopped_once()
