@@ -113,7 +113,7 @@ class AutomationWorkflowProjection:
                 'started_at': row.get('started_at'),
                 'updated_at': row.get('updated_at'),
                 'completed_at': row.get('completed_at'),
-                'error': str(row.get('error') or '')[:500] or None,
+                # Engine errors may originate in providers and can echo URLs, headers or credentials.\n                # Keep the owner semantic without forwarding arbitrary provider text.\n                'error': 'Workflow run reported an error' if row.get('error') else None,
                 'result': self._json(row.get('result_json'), None),
                 'budget': self._safe(row.get('budget')),
             })
