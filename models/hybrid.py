@@ -95,7 +95,10 @@ class HybridPolicy:
                 continue
             result.append(provider)
         if request.privacy == PrivacyMode.LOCAL_PREFERRED:
-            # Prefer local/private targets while preserving the owner's configured\n            # primary/fallback order within each partition. Routing cost metadata\n            # must not silently override explicit provider precedence.\n            result.sort(key=lambda provider: not (provider.id == cls.LOCAL_PROVIDER or provider.private))
+            # Prefer local/private targets while preserving the owner's configured
+            # primary/fallback order within each partition. Routing cost metadata
+            # must not silently override explicit provider precedence.
+            result.sort(key=lambda provider: not (provider.id == cls.LOCAL_PROVIDER or provider.private))
         return result
 
     @staticmethod
