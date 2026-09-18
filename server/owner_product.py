@@ -583,6 +583,15 @@ def owner_product_router(runtime):
     def emergency_stop(body: EmergencyStopBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
         runtime['tools'].set_emergency_stop(body.enabled)
+        # ToolRegistry is the canonical E-stop authority and advances the
+        # security epoch. Also cancel active canonical turns so this owner
+        # surface converges with the cloud owner E-stop semantics.
+        executor = runtime.get('executor')
+        if body.enabled and executor is not None and hasattr(executor, 'cancel_active_turns'):
+            executor.cancel_active_turns(reason='emergency_stop')
+        events = runtime.get('events')
+        if events is not None:
+            events.emit('emergency.stop', enabled=body.enabled)
         autonomy = runtime.get('advanced_autonomy')
         if autonomy is not None:
             autonomy.emergency_stop('owner requested from trusted device') if body.enabled else autonomy.clear_emergency_stop()
