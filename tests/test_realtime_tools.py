@@ -228,3 +228,27 @@ def test_stage8_realtime_post_dispatch_failure_requires_recovery():
     record = ex.approvals.record(required['approval_id'])
     assert record is not None
     assert record['status'] == 'recovery_required'
+
+
+def test_stage8_realtime_provider_error_is_redacted():
+    settings = SimpleNamespace(
+        openai_api_key='x', realtime_provider='openai', realtime_model='gpt-realtime',
+        realtime_safety_identifier='', realtime_instructions='x',
+        realtime_reasoning_effort='low', realtime_sample_rate=24000,
+        realtime_voice='alloy',
+    )
+    captured = []
+    class Events:
+        def emit(self, name, **data):
+            captured.append((name, data))
+
+    session = OpenAIRealtimeVoiceSession(settings, events=Events(), executor=None)
+    session.handle_event({
+        'type': 'error',
+        'error': 'Authorization: Bearer super-secret-token?token=leak',
+    })
+
+    assert 'super-secret-token' not in session.metrics['last_error']
+    assert 'token=leak' not in session.metrics['last_error']
+    assert 'super-secret-token' not in repr(captured)
+    assert '[redacted]' in session.metrics['last_error']
