@@ -31,7 +31,11 @@ class PulseWidget(QWidget):
         key=str(state or "").strip().lower().replace("-","_").replace(" ","_")
         return cls.STATE_ALIASES.get(key,key if key in cls.STATE_SPEEDS else "warning")
 
-    def set_state(self,state): self.state=self.normalize_state(state); self.update()
+    def set_state(self,state):
+        self.state=self.normalize_state(state)
+        interval=120 if self.reduce_motion else (100 if self.state=="background" else 16)
+        if self.timer.interval()!=interval:self.timer.setInterval(interval)
+        self.update()
     def set_memory_labels(self,labels):
         cleaned=[str(i).strip() for i in labels if str(i).strip()]
         if cleaned:self.memory_labels=tuple(cleaned[:4])
