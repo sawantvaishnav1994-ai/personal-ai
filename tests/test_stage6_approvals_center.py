@@ -71,3 +71,17 @@ def test_read_api_exposes_no_decision_or_dispatch_route(tmp_path):
     assert paths=={'/iphone/api/approvals-center','/iphone/api/approvals-center/{approval_id}'}
     assert methods['/iphone/api/approvals-center']=={'GET'}
     assert methods['/iphone/api/approvals-center/{approval_id}']=={'GET'}
+
+
+def test_approval_projection_redacts_generic_tokens_headers_prompts_and_unsafe_destination(tmp_path):
+    m=manager(tmp_path)
+    t=m.create('e1','tool',{},device_id='d',session_id='s',destination='javascript:alert(1)')
+    m.approve(t.id,'e1','tool',{},device_id='d',session_id='s')
+    m.begin_dispatch(t.id)
+    m.complete_dispatch(t.id,{'token':'secret','headers':{'Authorization':'Bearer x'},'raw_prompt':'hidden','safe':'ok'})
+    item=ApprovalsProjection(m).detail(t.id,device_id='d',session_id='s')
+    assert item['destination']=='[redacted]'
+    assert item['outcome']['token']=='[redacted]'
+    assert item['outcome']['headers']=='[redacted]'
+    assert item['outcome']['raw_prompt']=='[redacted]'
+    assert item['outcome']['safe']=='ok'
