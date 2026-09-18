@@ -116,7 +116,8 @@ def test_stage7_command_and_approval_revalidate_live_session_at_use_time():
     from pathlib import Path
     source = Path('cloud_runtime/relay.py').read_text(encoding='utf-8')
     assert 'def _live_session(self, session):' in source
-    assert 'self.sessions.session(session.id)' in source
+    assert "lookup = getattr(self.sessions, 'session', None)" in source
+    assert 'current = lookup(session.id) if callable(lookup) else session' in source
     assert 'self.device_registry.is_active(current.device_id)' in source
     assert "return RelayResult(401, {'error': 'session_expired_or_revoked'})" in source
     command = source.index('def command(self, session, text: str, nonce: str):')
