@@ -32,6 +32,7 @@ from webauthn.helpers.structs import (
 from agent.executor import ConfirmationRequired, ExecutionCancelled
 from models.router import ModelError
 from security.owner_access import OwnerAccessStore
+from security.request_context import current_trusted_request
 
 
 class OwnerEnrollBody(BaseModel):
@@ -208,6 +209,25 @@ def iphone_pwa_router(runtime, settings):
             raise HTTPException(403, 'This device is not permitted to use conversation or voice')
         return device_id
 
+    def require_fresh_owner_verification(device_id: str):
+        # The production cloud app installs PwaSessionMiddleware and provides
+        # pwa_sessions. Isolated compatibility routers may intentionally omit it.
+        if runtime.get('pwa_sessions') is None:
+            return
+        context = current_trusted_request()
+        ttl = int(getattr(runtime.get('agent_executor'), 'reauth_ttl_seconds', 300) or 300)
+        ttl = max(30, min(ttl, 900))
+        stamp = getattr(context, 'reauthenticated_at', None) if context is not None else None
+        try:
+            age = time.time() - float(stamp)
+        except (TypeError, ValueError):
+            age = ttl + 1
+        if context is None or context.device_id != device_id or age < 0 or age > ttl:
+            raise HTTPException(401, {
+                'code': 'reauthentication_required',
+                'message': 'Fresh owner verification is required for this security-sensitive action.',
+            })
+
     def emit(name: str, **payload):
         if events:
             events.emit(name, **payload)
@@ -367,6 +387,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         try:
             owner_access.set_password(body.password)
         except ValueError as exc:
@@ -394,6 +415,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         codes = owner_access.regenerate_recovery_codes()
         emit('owner.recovery.regenerated', device_id=device_id, count=len(codes))
         return {'codes': codes, 'message': 'Save these codes now. Each code works only once.'}
@@ -417,6 +439,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         require_https(request)
         rp_id, origin = request_identity(request)
         exclude = [
@@ -450,6 +473,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         require_https(request)
         challenge = owner_access.consume_challenge(body.challenge_id, 'registration', device_id=device_id)
         if not challenge:
