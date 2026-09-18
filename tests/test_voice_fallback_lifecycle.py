@@ -158,6 +158,8 @@ def test_stop_durably_cancels_inflight_canonical_voice_turn():
 
     assert cancel.is_set()
     assert executor.cancelled == [('voice-request-stop', 'desktop')]
+    stopped = [payload for name, payload in session.events.rows if name == 'voice.session.stopped']
+    assert stopped == [{'request_id': 'voice-request-stop'}]
     assert session.running is False
 
 
