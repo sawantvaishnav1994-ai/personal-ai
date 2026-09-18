@@ -245,3 +245,61 @@ def test_backup_rejects_traversal(tmp_path):
         zipped.writestr('manifest.json', json.dumps({'version': 1, 'files': []}))
     with pytest.raises(BackupError, match='unsafe backup path'):
         service(tmp_path / 'data').inspect(archive)
+
+
+def _write_security_db(path: Path, value: str):
+    with sqlite3.connect(path) as con:
+        con.execute('create table if not exists state(v text)')
+        con.execute('delete from state')
+        con.execute('insert into state values(?)', (value,))
+
+
+def _read_security_db(path: Path) -> str:
+    with sqlite3.connect(path) as con:
+        return con.execute('select v from state').fetchone()[0]
+
+
+def test_stage8_restore_does_not_resurrect_security_state(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    _write_security_db(source / 'devices.sqlite3', 'trusted-before-revocation')
+    _write_security_db(source / 'pwa-sessions.sqlite3', 'active-before-revocation')
+    _write_security_db(source / 'trusted-actions.sqlite3', 'security-epoch-1')
+    (source / 'note.txt').write_text('backup-note')
+    archive = service(source).create('security-state.paibackup')
+
+    target = tmp_path / 'target'
+    target.mkdir()
+    _write_security_db(target / 'devices.sqlite3', 'revoked-current')
+    _write_security_db(target / 'pwa-sessions.sqlite3', 'revoked-session-current')
+    _write_security_db(target / 'trusted-actions.sqlite3', 'security-epoch-9')
+    (target / 'note.txt').write_text('changed-note')
+
+    result = service(target).restore(archive)
+
+    assert result['ok'] is True
+    assert (target / 'note.txt').read_text() == 'backup-note'
+    assert _read_security_db(target / 'devices.sqlite3') == 'revoked-current'
+    assert _read_security_db(target / 'pwa-sessions.sqlite3') == 'revoked-session-current'
+    assert _read_security_db(target / 'trusted-actions.sqlite3') == 'security-epoch-9'
+    assert set(result['skipped_security_state']) >= {
+        'devices.sqlite3', 'pwa-sessions.sqlite3', 'trusted-actions.sqlite3',
+    }
+
+
+def test_stage8_restore_to_empty_target_does_not_create_archived_security_authority(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    _write_security_db(source / 'devices.sqlite3', 'trusted-old')
+    _write_security_db(source / 'owner-access.sqlite3', 'old-owner-auth')
+    (source / 'memory.txt').write_text('recoverable owner data')
+    archive = service(source).create('empty-target.paibackup')
+
+    target = tmp_path / 'target'
+    target.mkdir()
+    result = service(target).restore(archive)
+
+    assert (target / 'memory.txt').read_text() == 'recoverable owner data'
+    assert not (target / 'devices.sqlite3').exists()
+    assert not (target / 'owner-access.sqlite3').exists()
+    assert set(result['skipped_security_state']) >= {'devices.sqlite3', 'owner-access.sqlite3'}
