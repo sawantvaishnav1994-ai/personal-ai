@@ -253,14 +253,24 @@ def conversation_voice_router(runtime, executor):
     @router.post('/voice/operation/cancel')
     def cancel_canonical_operation(body: CanonicalCancelBody):
         context = require_owner()
+        cooperative = transport_state.cancel(context.device_id, request_id=body.request_id)
+        # Canonical cancellation is idempotent. Call the durable authority here as
+        # well so the response returns the authoritative turn even when no local
+        # transport lease exists (for example after a reload/process handoff).
         result = executor.cancel_turn(body.request_id)
         emit(
             'voice.operation.cancel_requested',
             request_id=body.request_id,
             device_id=context.device_id,
             source='iphone-pwa',
+            cooperative_cancelled=cooperative,
         )
-        return {'ok': True, 'request_id': body.request_id, 'turn': result}
+        return {
+            'ok': True,
+            'request_id': body.request_id,
+            'cooperative_cancelled': cooperative,
+            'turn': result,
+        }
 
     @router.post('/voice/client-event')
     def voice_client_event(body: VoiceClientEventBody):
