@@ -63,7 +63,8 @@ def test_realtime_approval_survives_bridge_reconstruction_and_dispatches_once():
     approved=reloaded.approve('reload-call',approval_id=approval_id)
     assert approved['ok'] is True
     assert approved['result']['changed']==11
-    assert approved['verified'] is True
+    assert approved['verified'] is False
+    assert approved['verification_reason']
     replay=reloaded.approve('reload-call',approval_id=approval_id)
     assert replay['status']=='completed'
     assert replay['result']['changed']==11
