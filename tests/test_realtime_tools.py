@@ -205,3 +205,10 @@ def test_stage8_realtime_auto_execution_reports_verification_truth():
     assert result['ok'] is True
     assert result['verified'] is False
     assert result['verification_reason']
+
+
+def test_stage8_realtime_does_not_advertise_prohibited_compatibility_tools():
+    ex = build_executor('ask')
+    ex.tools.register(Tool('legacy_unsafe', 'disabled compatibility path', lambda p: None, Risk.READ_ONLY, prohibited=True))
+    names = {item['name'] for item in RealtimeToolBridge(ex).definitions()}
+    assert 'legacy_unsafe' not in names
