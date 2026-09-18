@@ -36,7 +36,19 @@ class ExecutionRecoveryProjection:
         if recovery in {'compensation_available','compensation_requires_approval'}:return 'COMPENSATION_PENDING'
         return recovery.upper() if recovery else 'ACTIVE'
 
-    def detail(self,transaction_id):
+    def detail(self,transaction_id,*,owner_id=None,device_id=None,session_id=None):
+        # Visibility is fail-closed when a request binding is supplied. Read the
+        # canonical W7.1 transaction binding; never infer ownership from the ID.
+        if any(value is not None for value in (owner_id,device_id,session_id)):
+            if not all(value for value in (owner_id,device_id,session_id)):
+                return None
+            try:
+                with self.authority._con() as con:
+                    tx=con.execute('SELECT owner_id,device_id,session_id FROM operator_transactions WHERE transaction_id=?',(str(transaction_id),)).fetchone()
+            except Exception:
+                return None
+            if not tx or str(tx['owner_id'])!=str(owner_id) or str(tx['device_id'])!=str(device_id) or str(tx['session_id'])!=str(session_id):
+                return None
         try:view=self.authority.owner_view(transaction_id)
         except KeyError:return None
         safe=self._safe(view)
