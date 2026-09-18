@@ -43,8 +43,7 @@ class ExecutionRecoveryProjection:
             if not all(value for value in (owner_id,device_id,session_id)):
                 return None
             try:
-                with self.authority._con() as con:
-                    tx=con.execute('SELECT owner_id,device_id,session_id FROM operator_transactions WHERE transaction_id=?',(str(transaction_id),)).fetchone()
+                tx=self.authority.transaction_binding(transaction_id)
             except Exception:
                 return None
             if not tx or str(tx['owner_id'])!=str(owner_id) or str(tx['device_id'])!=str(device_id) or str(tx['session_id'])!=str(session_id):
