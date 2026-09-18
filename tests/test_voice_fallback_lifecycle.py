@@ -230,3 +230,29 @@ def test_desktop_voice_surfaces_use_public_runtime_lifecycle_contract():
     assert 'running = bool(getattr(voice, "running", self.voice_running))' in window
     assert 'events.subscribe("voice.session.stopped", self._on_voice_session_stopped)' in window
     assert "callable(getattr(self.runtime.get('voice'), 'barge_in', None))" in benchmark
+
+
+
+def test_fatal_audio_worker_exit_cancels_inflight_canonical_turn(monkeypatch):
+    import sounddevice as sd
+
+    events = Events()
+    executor = CanonicalCancelProbe()
+    session = FullDuplexVoiceSession(Models(), executor, events)
+    cancel = threading.Event()
+    session._current_request_id = 'voice-request-audio-failure'
+    session._turn_cancel = cancel
+
+    def fail_input_stream(**kwargs):
+        raise RuntimeError('audio device disappeared')
+
+    monkeypatch.setattr(sd, 'InputStream', fail_input_stream)
+    session._run()
+
+    assert cancel.is_set()
+    assert executor.cancelled == [('voice-request-audio-failure', 'desktop')]
+    assert session.running is False
+    names = [name for name, _ in events.rows]
+    assert 'voice.session.error' in names
+    stopped = [payload for name, payload in events.rows if name == 'voice.session.stopped']
+    assert stopped == [{'request_id': 'voice-request-audio-failure'}]
