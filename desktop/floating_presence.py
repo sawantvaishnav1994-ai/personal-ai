@@ -165,7 +165,7 @@ class FloatingPresence(QWidget):
             return
         self._rendered_sequence = sequence
         self.core.set_state(presentation.visual)
-        self.core.setAccessibleDescription(presentation.label)
+        self.core.setAccessibleDescription(f'{presentation.label}. Press Enter or Space to open quick controls')
         self.status.setText(presentation.label)
 
     def _apply_window_flags(self):
