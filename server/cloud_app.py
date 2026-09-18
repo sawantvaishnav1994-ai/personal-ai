@@ -8,7 +8,8 @@ from core.storage import validate_runtime_storage
 from security.pwa_sessions import PwaSessionStore
 from server.api import create_app
 from server.activities_api import activities_router
-from server.apps_tools_api import apps_tools_router\nfrom server.devices_presence_api import devices_presence_router
+from server.apps_tools_api import apps_tools_router
+from server.devices_presence_api import devices_presence_router
 from server.approval_api import approval_router
 from server.approvals_center_api import approvals_center_router
 from server.automation_visibility_api import automation_visibility_router
