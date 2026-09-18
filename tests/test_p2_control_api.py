@@ -209,3 +209,40 @@ def test_stage8_revoked_websocket_cannot_mutate_continuity(tmp_path):
     after = runtime['continuity'].events_for_thread(thread_id, limit=50)
     assert after == before
     assert device['id'] not in runtime['device_gateway'].online()
+
+
+def test_stage8_legacy_api_rejects_nested_and_oversized_payloads(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    device, token = registry.enroll('Phone', 'android')
+    headers = auth_headers(device, token)
+    thread = runtime['continuity'].resume(device['id'])['thread']['id']
+
+    nested = {}
+    cursor = nested
+    for index in range(12):
+        cursor['next'] = {}
+        cursor = cursor['next']
+    response = client.post(
+        '/continuity/append',
+        json={'thread_id': thread, 'kind': 'context_ref', 'payload': nested},
+        headers=headers,
+    )
+    assert response.status_code == 413
+
+    oversized = client.post(
+        '/continuity/context',
+        json={'thread_id': thread, 'patch': {'text': 'x' * 13000}},
+        headers=headers,
+    )
+    assert oversized.status_code == 413
+
+    too_many_steps = client.post(
+        '/workflows/create',
+        json={
+            'title': 'bounded',
+            'trigger': {'type': 'manual'},
+            'steps': [{'kind': 'prompt', 'prompt': 'x'} for _ in range(51)],
+        },
+        headers=headers,
+    )
+    assert too_many_steps.status_code == 422
