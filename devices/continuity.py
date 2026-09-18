@@ -299,7 +299,7 @@ class ContinuityService:
             })
         return history
 
-    def sync(self, device_id: str, *, limit: int = 200):
+    def sync(self, device_id: str, *, limit: int = 200, after_sequence: int | None = None):
         thread = self.active_for_device(device_id)
         if not thread:
             return self.resume(device_id, event_limit=limit)
@@ -308,7 +308,9 @@ class ContinuityService:
                 'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
                 (device_id,),
             ).fetchone()
-        after = int(state['last_event_id']) if state and state['active_thread_id'] == thread['id'] else 0
+        stored_after = int(state['last_event_id']) if state and state['active_thread_id'] == thread['id'] else 0
+        requested_after = stored_after if after_sequence is None else max(0, int(after_sequence))
+        after = min(requested_after, stored_after) if after_sequence is not None else stored_after
         events = self.events_for_thread(thread['id'], after_sequence=after, limit=limit)
         if events:
             last = int(events[-1]['sequence'])
