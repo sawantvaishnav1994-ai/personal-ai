@@ -90,3 +90,13 @@ def test_stage7_emergency_stop_converges_tool_and_approval_guards():
     assert "if enabled and hasattr(self.executor, 'invalidate_pending_approvals')" in source
     assert "if enabled and hasattr(self.executor, 'cancel_active_turns')" in source
     assert "self.events.emit('emergency.stop', enabled=enabled)" in source
+
+
+def test_stage7_cloud_approval_reconnect_projects_canonical_identity():
+    from pathlib import Path
+    source = Path('server/api.py').read_text(encoding='utf-8')
+    assert "@app.get('/cloud/approval/{approval_id}')" in source
+    assert "cloud_auth(authorization, 'approval:read')" in source
+    assert "executor.approval_context(approval_id)" in source
+    assert "context.get('device_id') not in (None, session.device_id)" in source
+    assert "'approval_id','execution_id','device_id','conversation_id','tool','expires_at','security_epoch','destination','data_classification'" in source
