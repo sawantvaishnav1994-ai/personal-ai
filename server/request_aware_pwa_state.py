@@ -18,8 +18,17 @@ class RequestAwareIphonePwaState:
         self._active: dict[str, dict] = {}
         self._cancel_turn = cancel_turn
 
+    def _cancel_durable(self, request_id: str | None):
+        if not request_id or not callable(self._cancel_turn):
+            return None
+        try:
+            return self._cancel_turn(request_id)
+        except Exception:
+            return None
+
     def begin_turn(self, device_id: str) -> threading.Event:
         request_id = current_logical_request_id()
+        previous_request_id = None
         with self._lock:
             previous = self._active.get(device_id)
             if previous and request_id and previous.get('request_id') == request_id:
@@ -27,27 +36,28 @@ class RequestAwareIphonePwaState:
                 return previous['event']
             if previous:
                 previous['event'].set()
+                previous_request_id = previous.get('request_id')
             current = threading.Event()
             self._active[device_id] = {
                 'request_id': request_id,
                 'event': current,
                 'leases': 1,
             }
-            return current
+        if previous_request_id and previous_request_id != request_id:
+            self._cancel_durable(previous_request_id)
+        return current
 
-    def cancel(self, device_id: str) -> bool:
+    def cancel(self, device_id: str, *, request_id: str | None = None) -> bool:
         with self._lock:
             active = self._active.get(device_id)
             if not active:
                 return False
+            active_request_id = active.get('request_id')
+            if request_id and active_request_id and str(active_request_id) != str(request_id):
+                return False
             event = active['event']
-            request_id = active.get('request_id')
             event.set()
-        if request_id and callable(self._cancel_turn):
-            try:
-                self._cancel_turn(request_id)
-            except Exception:
-                pass
+        self._cancel_durable(active_request_id)
         return True
 
     def finish(self, device_id: str, event: threading.Event):
