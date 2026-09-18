@@ -212,3 +212,23 @@ def test_execution_identity_does_not_require_weaker_identifiers_on_every_event()
         def audit_entries(self, category=None, limit=1000): return list(reversed(rows))
     detail = ActivitiesProjection(Store()).detail('a1')
     assert [event['id'] for event in detail['timeline']] == ['a1', 'a2']
+
+
+def test_activity_detail_preserves_cross_surface_canonical_correlations_after_reload(tmp_path):
+    store=MemoryStore(tmp_path/'memory.sqlite3')
+    activity_id=store.audit('tool','completed',{
+        'request_id':'req-1','turn_id':'turn-1','conversation_id':'conv-1',
+        'plan_id':'plan-1','workflow_id':'workflow-1','execution_id':'exec-1',
+        'operation_id':'op-1','approval_id':'approval-1','tool_id':'tool-1',
+        'parent_activity_id':'parent-1',
+    })
+    reloaded=ActivitiesProjection(MemoryStore(store.path))
+    detail=reloaded.detail(activity_id)
+    assert detail['activity_id']==activity_id
+    assert detail['correlations']=={
+        'request_id':'req-1','turn_id':'turn-1','conversation_id':'conv-1',
+        'plan_id':'plan-1','workflow_id':'workflow-1','execution_id':'exec-1',
+        'operation_id':'op-1','approval_id':'approval-1','tool_id':'tool-1',
+        'parent_activity_id':'parent-1',
+    }
+    assert [row['activity_id'] for row in detail['timeline']]==[activity_id]
