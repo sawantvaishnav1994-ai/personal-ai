@@ -468,8 +468,27 @@ def owner_product_router(runtime):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
         if not registry.revoke(target_device_id):
             raise HTTPException(404, 'Device not found')
-        audit('device.revoked', device_id=device_id, target_device_id=target_device_id)
-        return {'ok': True, 'revoked_device_id': target_device_id, 'current_device_revoked': target_device_id == device_id}
+        revoked_sessions = {}
+        for key in ('pwa_sessions', 'cloud_sessions'):
+            store = runtime.get(key)
+            revoke_device = getattr(store, 'revoke_device', None)
+            if callable(revoke_device):
+                revoked_sessions[key] = int(revoke_device(target_device_id))
+        gateway = runtime.get('device_gateway')
+        if gateway is not None:
+            gateway.disconnect(target_device_id)
+        audit(
+            'device.revoked',
+            device_id=device_id,
+            target_device_id=target_device_id,
+            revoked_sessions=revoked_sessions,
+        )
+        return {
+            'ok': True,
+            'revoked_device_id': target_device_id,
+            'current_device_revoked': target_device_id == device_id,
+            'revoked_sessions': revoked_sessions,
+        }
 
     @router.get('/workflows')
     def workflows(pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
