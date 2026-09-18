@@ -212,3 +212,19 @@ def test_stage8_realtime_does_not_advertise_prohibited_compatibility_tools():
     ex.tools.register(Tool('legacy_unsafe', 'disabled compatibility path', lambda p: None, Risk.READ_ONLY, prohibited=True))
     names = {item['name'] for item in RealtimeToolBridge(ex).definitions()}
     assert 'legacy_unsafe' not in names
+
+
+def test_stage8_realtime_post_dispatch_failure_requires_recovery():
+    ex = build_executor('ask')
+    secret = 'side-effect-may-have-happened'
+    tool = ex.tools.get('change_state')
+    tool.handler = lambda params: (_ for _ in ()).throw(RuntimeError(secret))
+    bridge = RealtimeToolBridge(ex)
+    required = bridge.invoke('uncertain-call', 'change_state', '{"value":44}')
+
+    with pytest.raises(RuntimeError, match='recovery review'):
+        bridge.approve('uncertain-call', approval_id=required['approval_id'])
+
+    record = ex.approvals.record(required['approval_id'])
+    assert record is not None
+    assert record['status'] == 'recovery_required'
