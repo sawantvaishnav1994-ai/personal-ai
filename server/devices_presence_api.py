@@ -52,7 +52,7 @@ def devices_presence_router(runtime: dict) -> APIRouter:
     def revoke_device(device_id: str):
         ctx = require('device:admin')
         require_fresh_reauthentication(ctx)
-        if not device_id or len(device_id) > projection.MAX_IDENTIFIER:
+        if not device_id or len(device_id) > 200:
             raise HTTPException(status_code=404, detail='Device not found')
         item = projection.detail(device_id)
         if item is None:
