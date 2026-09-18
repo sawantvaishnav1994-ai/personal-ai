@@ -86,3 +86,11 @@ def test_floating_presence_source_uses_canonical_turn_cancellation():
     assert "cancel_event=cancel_event" in source
     assert "self.executor.cancel_turn(request_id, device_id='desktop')" in source
     assert "presence.cancel.requested" not in source
+
+
+def test_floating_presence_window_policy_is_owner_controllable():
+    source = Path('desktop/floating_presence.py').read_text(encoding='utf-8')
+    assert "self._always_on_top = True" in source
+    assert "def toggle_always_on_top" in source
+    assert "Qt.WindowType.WindowStaysOnTopHint" in source
+    assert "self.pin.setText('Unpin' if self._always_on_top else 'Pin')" in source
