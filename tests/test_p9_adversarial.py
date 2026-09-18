@@ -173,3 +173,47 @@ def test_23_invalid_owner_privacy_mode_fails_closed_to_local_only():
     with pytest.raises(ModelUnavailable):
         r.chat('owner request')
     assert seen == ['self_hosted']
+
+
+def test_24_private_context_never_reaches_external_failover():
+    r=GovernedModelRouter(settings())
+    captured={}
+    def chat_call(provider,messages,temperature):
+        captured.setdefault(provider.id,[]).append(messages)
+        if provider.id=='self_hosted':
+            raise ModelUnavailable(provider=provider.id)
+        return 'external-answer'
+    r._chat_call=chat_call
+    assert r.chat(
+        'current owner request',
+        private_context='PRIVATE-MEMORY-MUST-NOT-LEAK',
+    )=='external-answer'
+    assert 'PRIVATE-MEMORY-MUST-NOT-LEAK' in repr(captured['self_hosted'])
+    assert 'PRIVATE-MEMORY-MUST-NOT-LEAK' not in repr(captured['openai'])
+    assert 'current owner request' in repr(captured['openai'])
+
+
+def test_25_private_context_is_available_to_local_provider():
+    r=GovernedModelRouter(settings())
+    captured={}
+    r._chat_call=lambda provider,messages,temperature: captured.setdefault(provider.id,messages) or 'ok'
+    result=r.chat('question',private_context='LOCAL-PRIVATE-CONTEXT')
+    assert result
+    assert 'LOCAL-PRIVATE-CONTEXT' in repr(captured['self_hosted'])
+
+
+def test_26_embedding_content_cannot_external_failover():
+    r=GovernedModelRouter(settings())
+    seen=[]
+    class Response:
+        def json(self):
+            return {'data':[{'embedding':[1.0]}]}
+    def request(provider,*args,**kwargs):
+        seen.append(provider.id)
+        if provider.id=='self_hosted':
+            raise ModelUnavailable(provider=provider.id)
+        return Response()
+    r._request=request
+    with pytest.raises(ModelUnavailable):
+        r.embed('stored owner memory')
+    assert seen==['self_hosted']
