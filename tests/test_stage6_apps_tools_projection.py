@@ -135,3 +135,16 @@ def test_free_form_provider_error_cannot_echo_secrets():
     assert secret not in str(item)
     assert item['last_error'] == 'Connector reported an error'
     assert item['last_error_code'] == 'provider_error'
+
+
+def test_apps_tools_projection_never_invokes_execution_preparation(tmp_path):
+    registry=make_registry(tmp_path)
+    prepared={'count':0}
+    def prepare(parameters, context=None):
+        prepared['count'] += 1
+        raise AssertionError('metadata projection must not prepare execution')
+    tool=Tool('prepared_tool','safe metadata',lambda p:{'ok':True},Risk.READ_ONLY,prepare=prepare)
+    registry.register(tool)
+    rows=AppsToolsProjection(registry,IntegrationRegistry()).tools_list()
+    assert any(row['tool_id']=='prepared_tool' for row in rows)
+    assert prepared['count']==0
