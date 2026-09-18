@@ -43,12 +43,14 @@ class AppsToolsProjection:
 
     @staticmethod
     def _approval_summary(tool, registry) -> str:
+        if bool(getattr(registry, 'emergency_stop', False)):
+            return 'blocked_by_emergency_stop'
         if bool(getattr(tool, 'prohibited', False)):
             return 'blocked_by_policy'
         if bool(getattr(tool, 'requires_reauth', False)):
             return 'reauth_required'
         try:
-            decision = registry.permissions.decide(int(tool.risk), confirmed=False)
+            decision = registry.authorize(tool, confirmed=False) if hasattr(registry, 'authorize') else registry.permissions.decide(int(tool.risk), confirmed=False)
         except Exception:
             return 'policy_evaluation_required'
         if not decision.allowed and bool(getattr(decision, 'needs_confirmation', False)):
@@ -66,7 +68,9 @@ class AppsToolsProjection:
         connector_id = self._text(getattr(tool, 'connector_id', None), 100) or None
         connector = connectors.get(connector_id) if connector_id else None
         prohibited = bool(getattr(tool, 'prohibited', False))
-        if prohibited:
+        if bool(getattr(self.tools, 'emergency_stop', False)):
+            availability = 'EMERGENCY_STOP'
+        elif prohibited:
             availability = 'PERMISSION_BLOCKED'
         elif connector:
             state = str(connector.get('state') or 'disconnected')
@@ -136,7 +140,10 @@ class AppsToolsProjection:
                 'missing_scopes': [self._text(x, 500) for x in list(item.get('missing_scopes') or [])[:100]],
                 'last_success_at': item.get('last_success_at'),
                 'last_checked_at': item.get('last_checked_at'),
-                'last_error': self._text(item.get('last_error'), 500) or None,
+                # Provider errors are not a credential surface. Expose a bounded
+                # stable code; do not forward free-form provider text which may
+                # echo tokens, URLs, headers, or other secrets.
+                'last_error': 'Connector reported an error' if item.get('last_error') else None,
                 'last_error_code': self._text(item.get('last_error_code'), 100) or None,
                 'revocation_status': self._text(item.get('revocation_status'), 100) or 'none',
                 'read_only': bool(item.get('read_only')),
