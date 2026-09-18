@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from tools.registry import ToolRegistry,Tool,Risk
 from tools import browser as legacy_browser_tools
-from tools import advanced_control, files as legacy_files, web
+from tools import advanced_control, files as legacy_files, screen as legacy_screen, web
 
 def test_ask_mode():
     r=ToolRegistry(SimpleNamespace(autonomy_mode="ask")); assert r.automatic(Tool("r","",lambda p:None,Risk.READ_ONLY)); assert not r.automatic(Tool("w","",lambda p:None,Risk.REVERSIBLE))
@@ -59,3 +59,17 @@ def test_stage8_legacy_file_mutations_are_disabled(tmp_path):
             assert False, name
         except PermissionError:
             pass
+
+
+def test_stage8_raw_screenshot_compatibility_path_is_disabled(tmp_path):
+    reg = ToolRegistry(SimpleNamespace(autonomy_mode='ask', data_dir=tmp_path))
+    legacy_screen.register(reg, tmp_path)
+    tool = reg.get('screenshot')
+    assert tool.prohibited is True
+    assert reg.authorize(tool, confirmed=True).allowed is False
+    try:
+        tool.handler({'path': str(tmp_path / 'leak.png')})
+        assert False, 'legacy raw screenshot must not execute'
+    except PermissionError:
+        pass
+    assert not (tmp_path / 'leak.png').exists()
