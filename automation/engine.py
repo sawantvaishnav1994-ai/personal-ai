@@ -322,6 +322,11 @@ class AutomationEngine:
             except KeyError: item['budget']=None
             out.append(item)
         return out
+    def run_binding(self,run_id):
+        """Read canonical workflow owner/device/session binding without exposing prompts or reauthentication data."""
+        with self._con() as con:
+            row=con.execute('SELECT owner_id,device_id,session_id FROM workflow_runs WHERE id=?',(str(run_id),)).fetchone()
+        return dict(row) if row else None
     def budget_status(self,run_id): return self.budgets.status(run_id)
     def override_run_budget(self,run_id,updates,*,owner_id=None,device_id=None,session_id=None,reauthenticated_at=None):
         run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
