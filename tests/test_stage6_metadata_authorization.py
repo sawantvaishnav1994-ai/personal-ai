@@ -88,3 +88,12 @@ def test_apps_tools_detail_not_found_is_safe(tmp_path):
     client=apps_tools_app(tmp_path,Devices(active=True,scopes={'device:read'}))
     assert client.get('/iphone/api/apps-tools/tools/missing').status_code == 404
     assert client.get('/iphone/api/apps-tools/apps/missing').status_code == 404
+
+
+def test_activities_transport_rejects_out_of_bounds_inputs(tmp_path):
+    client,_=activities_app(tmp_path,Devices(active=True,scopes={'activities:read'}))
+    assert client.get('/iphone/api/activities?limit=0').status_code == 422
+    assert client.get('/iphone/api/activities?limit=201').status_code == 422
+    assert client.get('/iphone/api/activities',params={'category':'x'*101}).status_code == 422
+    assert client.get('/iphone/api/activities',params={'status':'x'*81}).status_code == 422
+    assert client.get('/iphone/api/activities',params={'cursor':'x'*769}).status_code == 422
