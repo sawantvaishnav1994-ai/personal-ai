@@ -81,8 +81,17 @@ def personal_operations_router(runtime):
         pa_device: str | None = Cookie(default=None),
         pa_token: str | None = Cookie(default=None),
     ):
-        authenticate(pa_device, pa_token)
-        return {'operations': operations.operations(status=status, limit=limit), 'status': operations.safe_status()}
+        device_id = authenticate(pa_device, pa_token)
+        auth = authority(device_id)
+        binding = {
+            'owner_id': auth['owner_id'],
+            'device_id': auth['device_id'],
+            'session_id': auth['session_id'],
+        }
+        return {
+            'operations': operations.operations(status=status, limit=limit, **binding),
+            'status': operations.safe_status(**binding),
+        }
 
     @router.post('/plans')
     def create_plan(
@@ -156,8 +165,14 @@ def personal_operations_router(runtime):
         pa_device: str | None = Cookie(default=None),
         pa_token: str | None = Cookie(default=None),
     ):
-        authenticate(pa_device, pa_token)
-        value = operations.operation(operation_id)
+        device_id = authenticate(pa_device, pa_token)
+        auth = authority(device_id)
+        value = operations.operation(
+            operation_id,
+            owner_id=auth['owner_id'],
+            device_id=auth['device_id'],
+            session_id=auth['session_id'],
+        )
         if not value:
             raise HTTPException(404, 'Operation not found')
         return value
