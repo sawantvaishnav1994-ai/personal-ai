@@ -239,7 +239,9 @@ class ContinuitySync:
     def status(self, *, device_id: str, session_id: str) -> dict[str, Any]:
         device_id = self._assert_device(device_id)
         epoch = self._current_epoch()
-        thread = self.continuity.active_for_device(device_id)
+        thread = self.continuity.active_for_device(
+            device_id, authority_guard=lambda: self._assert_device(device_id)
+        )
         state = self._state(device_id)
         return {
             'p8_allowed': True,
@@ -434,7 +436,9 @@ class ContinuitySync:
     def handoff(self, *, device_id: str, session_id: str, to_device: str, thread_id: str | None = None) -> dict[str, Any]:
         source = self._assert_device(device_id)
         target = self._assert_device(to_device)
-        thread = self.continuity.thread(thread_id) if thread_id else self.continuity.active_for_device(source)
+        thread = self.continuity.thread(thread_id) if thread_id else self.continuity.active_for_device(
+            source, authority_guard=lambda: self._assert_device(source)
+        )
         if not thread or thread.get('closed_at'):
             raise KeyError('active continuity thread not found')
         # Connection-time trust is not durable authority. Revalidate both
