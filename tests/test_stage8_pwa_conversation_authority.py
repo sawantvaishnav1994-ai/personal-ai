@@ -78,7 +78,7 @@ def test_stage8_conversation_lifecycle_requires_current_ai_chat_scope(tmp_path):
     # owner conversation lifecycle surface.
     allowed = client.get(f'/iphone/api/conversations/{export_thread}/export')
     assert allowed.status_code == 200
-    assert allowed.json()['thread']['id'] == export_thread
+    assert allowed.json()['conversation']['id'] == export_thread
 
     # Permission revocation does not revoke the device or browser session.
     # Every subsequent conversation read/mutation must re-check current
