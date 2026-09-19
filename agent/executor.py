@@ -10,6 +10,7 @@ from agent.planner import Planner
 from models.router import ModelError
 from security.action_audit import TrustedActionAudit
 from security.approvals import ApprovalManager, parameter_hash
+from security.projection_redaction import sanitize_external_value
 from tools.registry import Risk
 
 
@@ -625,8 +626,9 @@ class AgentExecutor:
         self._check_cancel(cancel_event)
         start = time.perf_counter()
         if results:
+            projected_results = sanitize_external_value(results)
             answer = self.models.chat(
-                f"User request: {text}\nTool results: {json.dumps(results, default=str)[:12000]}\n"
+                f"User request: {text}\nTool results: {json.dumps(projected_results, default=str)[:12000]}\n"
                 f"Retrieved context: {grounding}\n"
                 "Report verified actions as completed. For verified=false results, explicitly say the action was attempted but not verified; never imply success. Mention rollback availability when relevant.",
                 system=self._grounded_system(''),
