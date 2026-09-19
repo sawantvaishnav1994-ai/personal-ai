@@ -117,12 +117,17 @@ class ContinuityService:
         self._emit('continuity.thread.renamed', thread_id=thread_id, title=clean)
         return self.thread(thread_id)
 
-    def set_active(self, device_id: str, thread_id: str):
+    def set_active(self, device_id: str, thread_id: str, *, authority_guard=None):
         thread = self.thread(thread_id)
         if not thread or thread.get('closed_at'):
             raise KeyError('active continuity thread not found')
         stamp = now()
         with self.lock, self._con() as con:
+            # For governed cross-device handoff, authority must be checked inside
+            # the same guarded mutation boundary, not only by the caller before
+            # entering set_active().
+            if authority_guard is not None:
+                authority_guard()
             current = con.execute(
                 'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
                 (device_id,),
