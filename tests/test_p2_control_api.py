@@ -320,7 +320,13 @@ def test_stage8_continuity_handoff_rejects_target_without_ai_chat_scope(tmp_path
     source, source_token = registry.enroll('Source', 'ios')
     target, _ = registry.enroll('Target', 'windows')
     registry.set_permissions(target['id'], {'device:read'})
-    target_before = runtime['continuity'].active_for_device(target['id'])
+    # Snapshot the target binding without calling active_for_device(), because that
+    # compatibility helper intentionally binds an unbound device to the latest thread.
+    with runtime['continuity']._con() as con:
+        target_before = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (target['id'],),
+        ).fetchone()
     thread_id = runtime['continuity'].resume(source['id'])['thread']['id']
 
     response = client.post(
@@ -329,7 +335,12 @@ def test_stage8_continuity_handoff_rejects_target_without_ai_chat_scope(tmp_path
         headers=auth_headers(source, source_token),
     )
     assert response.status_code == 403
-    assert runtime['continuity'].active_for_device(target['id']) == target_before
+    with runtime['continuity']._con() as con:
+        target_after = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (target['id'],),
+        ).fetchone()
+    assert target_after == target_before
 
 
 def test_stage8_legacy_command_requires_and_forwards_stable_request_identity(tmp_path):
