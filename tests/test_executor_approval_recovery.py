@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent.durable_executor import DurableAgentExecutor
 from agent.executor import AgentExecutor, ConfirmationRequired
 from core.events import EventBus
 from memory.store import MemoryStore
@@ -32,7 +33,7 @@ class Planner:
         }
 
 
-def build_executor(tmp_path, calls):
+def build_executor(tmp_path, calls, executor_cls=AgentExecutor):
     settings = SimpleNamespace(autonomy_mode='ask', data_dir=tmp_path)
     tools = ToolRegistry(settings)
     tools.register(Tool(
@@ -41,7 +42,7 @@ def build_executor(tmp_path, calls):
         lambda params: calls.append(dict(params)) or {'verified': True},
         Risk.EXTERNAL_SIDE_EFFECT,
     ))
-    executor = AgentExecutor(
+    executor = executor_cls(
         models=Models(),
         tools=tools,
         memory=MemoryStore(tmp_path / 'assistant.sqlite3'),
@@ -138,3 +139,34 @@ def test_emergency_stop_invalidates_approval_even_after_stop_is_cleared(tmp_path
     with pytest.raises(PermissionError):
         executor.approve(approval_id, device_id='device-1', session_id='session-1')
     assert calls == []
+
+
+def test_stage8_post_dispatch_security_audit_failure_requires_recovery(tmp_path):
+    calls = []
+    executor = build_executor(tmp_path, calls, executor_cls=DurableAgentExecutor)
+
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it', device_id='device-1', session_id='session-1')
+    approval_id = proposed.value.approval_id
+
+    original_append = executor.action_audit.append
+
+    def fail_tool_execution_audit(category, action, payload=None):
+        if category == 'tool' and action == 'execute':
+            raise OSError('isolated audit storage failure')
+        return original_append(category, action, payload)
+
+    executor.action_audit.append = fail_tool_execution_audit
+
+    with pytest.raises(OSError, match='audit storage failure'):
+        executor.approve(
+            approval_id,
+            device_id='device-1',
+            session_id='session-1',
+            owner_id='owner',
+        )
+
+    assert calls == [{'destination': 'example.com', 'value': 7}]
+    record = executor.approvals.record(approval_id)
+    assert record['status'] == 'recovery_required'
+    assert record['failure_code'] == 'OSError_after_dispatch'
