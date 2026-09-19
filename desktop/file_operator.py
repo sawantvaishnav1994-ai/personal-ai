@@ -77,15 +77,18 @@ class SafeFileAdapter:
         return target
 
     @classmethod
-    def _revalidate_parent(cls, path: Path, roots: list[str], expected_parent: Path) -> None:
+    def _revalidate_parent(cls, path: Path, roots: list[str], expected_parent: Path, expected_identity=None) -> None:
         # Mutations must still target the same confined parent immediately
         # before commit. This closes parent-directory replacement races.
         cls._reject_link_components(str(path.parent))
         current=Path(canonical_path(str(path.parent),roots))
         cls._reject_reparse_or_mount(current,roots)
         try:
-            a=expected_parent.stat(); b=current.stat()
-            if (a.st_dev,a.st_ino)!=(b.st_dev,b.st_ino):
+            b=current.stat()
+            identity=expected_identity
+            if identity is None:
+                a=expected_parent.stat(); identity=(a.st_dev,a.st_ino)
+            if tuple(identity)!=(b.st_dev,b.st_ino):
                 raise TargetValidationError('path_changed','destination parent changed before mutation')
         except TargetValidationError: raise
         except OSError as exc:
@@ -130,10 +133,11 @@ class SafeFileAdapter:
         if len(data)>self.max_bytes: raise TargetValidationError('file_too_large','file exceeds configured limit')
         if self._free_space(p)<len(data)+1024*1024: raise OSError('insufficient_disk_space')
         parent=p.parent
+        pst=parent.stat(); parent_identity=(pst.st_dev,pst.st_ino)
         fd,tmp=tempfile.mkstemp(prefix='.pai-',dir=str(parent)); os.close(fd); tmp_path=Path(tmp)
         try:
             tmp_path.write_bytes(data)
-            self._revalidate_parent(p,roots,parent)
+            self._revalidate_parent(p,roots,parent,parent_identity)
             if p.exists(): raise FileExistsError('destination_exists')
             os.replace(tmp_path,p)
             if claimed_mime: validate_file_metadata(str(p),claimed_mime=claimed_mime,max_bytes=self.max_bytes)
@@ -154,12 +158,13 @@ class SafeFileAdapter:
         source_hash=self.checksum(src); size=src.stat().st_size
         if self._free_space(dst)<size+1024*1024: raise OSError('insufficient_disk_space')
         parent=dst.parent
+        pst=parent.stat(); parent_identity=(pst.st_dev,pst.st_ino)
         fd,tmp=tempfile.mkstemp(prefix='.pai-copy-',dir=str(parent)); os.close(fd); tmp_path=Path(tmp)
         try:
             with src.open('rb') as r,tmp_path.open('wb') as w: shutil.copyfileobj(r,w,1024*1024)
             if self.checksum(src)!=source_hash: raise PermissionError('path_changed')
             if self.checksum(tmp_path)!=source_hash: raise IOError('checksum_mismatch')
-            self._revalidate_parent(dst,roots,parent)
+            self._revalidate_parent(dst,roots,parent,parent_identity)
             if dst.exists(): raise FileExistsError('destination_exists')
             os.replace(tmp_path,dst)
         except Exception:
