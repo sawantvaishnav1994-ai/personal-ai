@@ -111,6 +111,9 @@ def test_upload_dispatch_rejects_file_changed_after_authorization(tmp_path):
     path.write_text('substituted',encoding='utf-8')
     action=BrowserAction('upload','tx-upload',target_id='file',upload_path=str(path),parameters={'_validated_upload_sha256':expected})
     fake_locator=type('Locator',(),{'set_input_files':lambda self,*args,**kwargs: (_ for _ in ()).throw(AssertionError('changed file must not be uploaded'))})()
+    fake_page=object()
+    op.browser=type('Browser',(),{'start':lambda self: None})()
+    op.browser.page=fake_page
     op._target=lambda obs,target_id: {'target_id':target_id}
     op._resolve_target=lambda page,target,action: ('dom',fake_locator)
     with pytest.raises(PermissionError,match='changed after authorization'):
