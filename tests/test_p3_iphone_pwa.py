@@ -71,7 +71,7 @@ class Recorder:
         return [{'id': 'session-1'}]
 
 
-def make_client(tmp_path: Path, allow_insecure=False, google_signin=False, server_sessions=False):
+def make_client(tmp_path: Path, allow_insecure=False, google_signin=False, server_sessions=False, include_legacy_runtime_routes=True):
     settings = SimpleNamespace(
         base_dir=Path(__file__).resolve().parent.parent,
         iphone_owner_enrollment_code='this-is-a-long-owner-code',
@@ -98,8 +98,27 @@ def make_client(tmp_path: Path, allow_insecure=False, google_signin=False, serve
             device_registry=runtime['device_registry'],
             cookie_max_age=600,
         )
-    app.include_router(iphone_pwa_router(runtime, settings))
+    app.include_router(iphone_pwa_router(runtime, settings, include_legacy_runtime_routes=include_legacy_runtime_routes))
     return TestClient(app, base_url='https://testserver'), runtime
+
+
+def test_production_router_can_exclude_legacy_canonical_runtime_overlaps(tmp_path):
+    client, _ = make_client(tmp_path, include_legacy_runtime_routes=False)
+    enrolled = client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
+    assert enrolled.status_code == 200
+
+    # These paths are owned by the Stage 2/3 canonical routers in cloud_app.
+    # The legacy compatibility router must not register a second authority.
+    assert client.post('/iphone/api/voice/turn', json={'transcript': 'hello'}).status_code == 404
+    assert client.post('/iphone/api/approval/example/approve', json={}).status_code == 404
+    assert client.post('/iphone/api/approval/example/reject', json={}).status_code == 404
+    assert client.get('/iphone/api/conversations').status_code == 404
+    assert client.get('/iphone/api/conversations/example').status_code == 404
+    assert client.post('/iphone/api/voice/barge', json={'speaking': True}).status_code == 404
+    assert client.post('/iphone/api/voice/client-event', json={'event': 'tts_started'}).status_code == 404
+
+    # Non-overlapping owner-access routes remain available.
+    assert client.get('/iphone/api/status').status_code == 200
 
 
 def test_owner_enrollment_requires_correct_code_and_sets_secure_cookies(tmp_path):
