@@ -470,15 +470,17 @@ def owner_product_router(runtime):
         try:
             result = registry.set_permissions(target_device_id, body.scopes)
             cancelled_turns = cancelled_workflows = 0
-            if 'ai:chat' not in set(result.get('scopes') or ()):
+            granted_scopes = set(result.get('scopes') or ())
+            if 'ai:chat' not in granted_scopes:
                 executor = runtime.get('executor')
                 cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
                 if callable(cancel_device_turns):
                     cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_permission_revoked'))
+            if 'workflow:write' not in granted_scopes:
                 automations = runtime.get('automations')
                 cancel_device_runs = getattr(automations, 'cancel_device_runs', None)
                 if callable(cancel_device_runs):
-                    cancelled_workflows = int(cancel_device_runs(target_device_id, reason='device_permission_revoked'))
+                    cancelled_workflows = int(cancel_device_runs(target_device_id, reason='workflow_permission_revoked'))
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
