@@ -36,6 +36,7 @@ def test_sensitive_value_redaction_preserves_normal_owner_text():
 def test_false_negative_matrix_and_idempotency():
     variants=[
         f'Authorization: Bearer {SECRET_BEARER}', f'authorization:\t bearer {SECRET_BEARER}',
+        f'Authorization: Basic {SECRET_BEARER}', f'AUTHORIZATION:\tBASIC   {SECRET_BEARER}',
         f'Bearer {SECRET_BEARER}', f'bearer {SECRET_BEARER}', f'api_key={SECRET_API}',
         f'api-key={SECRET_API}', f'apikey={SECRET_API}', f'API_KEY="{SECRET_API}"',
         f'access_token={SECRET_QUERY}', f'refresh_token={SECRET_QUERY}', f'session_token={SECRET_QUERY}',
@@ -82,3 +83,24 @@ def test_large_hostile_string_is_bounded_by_projection_before_exposure():
     value=('safe-prefix '*1000)+HOSTILE
     projected=ActivitiesProjection.project_entry({'id':'a','category':'tool','action':'failed','created_at':'now','payload':{'message':value}})
     assert len(projected['details']['message'])<=1000
+
+
+def test_basic_authorization_redaction_covers_nested_projection_and_audit_paths(tmp_path):
+    variants=[
+        f'Authorization: Basic {SECRET_BEARER}',
+        f'authorization: basic {SECRET_BEARER}',
+        f'AUTHORIZATION:\tBASIC   {SECRET_BEARER}',
+    ]
+    audit=__import__('security.action_audit',fromlist=['TrustedActionAudit']).TrustedActionAudit(tmp_path/'audit.sqlite3')
+    for value in variants:
+        clean=sanitize_sensitive_text(value)
+        assert SECRET_BEARER not in clean
+        assert sanitize_sensitive_text(clean)==clean
+        nested={'error':{'message':value},'detail':[{'provider_error':value}]}
+        assert_clean(AutomationWorkflowProjection._safe(nested))
+        assert_clean(ExecutionRecoveryProjection._safe(nested))
+        projected=ActivitiesProjection.project_entry({'id':'basic','category':'provider','action':'failed','created_at':'now','payload':nested})
+        assert_clean(projected)
+        audit.append('provider','failed',nested)
+    assert_clean(audit.entries(10))
+    assert audit.verify_chain()['ok'] is True
