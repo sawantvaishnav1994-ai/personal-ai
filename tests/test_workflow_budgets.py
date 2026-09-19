@@ -4,10 +4,14 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 import pytest
 
 from automation.budget import WorkflowBudgetError, WorkflowBudgetManager, WorkflowRecoveryRequired, normalize_policy
 from automation.engine import AutomationEngine
+from tools.registry import ToolRegistry
+from desktop.operator_transactions import OperatorTransactionStore
+from recovery.operator_recovery import VerificationRecord
 
 class Memory:
     def audit(self,*a,**k): return None
@@ -260,3 +264,46 @@ def test_stage8_engine_resume_cannot_turn_uncertain_dispatch_into_redispatch(tmp
     after=reopened.budget_status(rid)
     assert after['dispatches'][0]['status']=='uncertain'
     assert after['stop_reason']==evidence['stop_reason']
+
+
+class RecoveryExecutor(Executor):
+    def __init__(self,tmp_path):
+        self.memory=Memory(); self.models=ModelStub(); self.tools=ToolRegistry(SimpleNamespace(autonomy_mode='ask',data_dir=tmp_path)); self.calls=0
+
+
+def test_stage8_workflow_uncertainty_links_to_w7_and_verified_effect_advances_without_redispatch(tmp_path):
+    OperatorTransactionStore(tmp_path/'operator-transactions.sqlite3')
+    ex=RecoveryExecutor(tmp_path); path=tmp_path/'workflow.sqlite3'; engine=AutomationEngine(path,executor=ex)
+    wid=workflow(engine,steps=[{'kind':'prompt','prompt':'external consequence','retries':0}])
+    rid=engine.run_workflow(wid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+    with sqlite3.connect(path) as con:
+        con.execute("UPDATE workflow_runs SET status='running',current_step=0,completed_steps_json='[]',completed_at=NULL WHERE id=?",(rid,))
+    with engine.budgets._con() as con:
+        con.execute("DELETE FROM workflow_dispatches WHERE run_id=?",(rid,))
+        con.execute("UPDATE workflow_budget_runs SET reserved_concurrency=1,released_at=NULL,stop_reason=NULL WHERE run_id=?",(rid,))
+    with engine.budgets.enter(rid,0,0):
+        source_dispatch=engine.budgets.begin_dispatch('tool','external-write:stable-hash')
+    calls_before=ex.calls
+    reopened=AutomationEngine(path,executor=ex)
+    assert reopened._run(rid)['status']=='recovery_required'
+    linked=reopened.link_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+    txid=linked['recovery_transaction_id']; authority=ex.tools.ensure_recovery_authority()
+    with authority._con() as con:
+        dispatch=dict(con.execute('SELECT * FROM operator_dispatch_attempts WHERE transaction_id=?',(txid,)).fetchone())
+    action_id=dispatch['action_id']; stamp=time.time()
+    authority.record_verification(VerificationRecord(
+        transaction_id=txid,action_id=action_id,dispatch_id=dispatch['dispatch_id'],
+        idempotency_key=source_dispatch,operation_class='application_input',target=dispatch['target'],destination='',
+        precondition={'workflow_run':rid},expected_postcondition={'effect':'occurred'},observed_postcondition={'effect':'occurred'},
+        verifier_identity='stage8-test-observer',verifier_version='1',evidence_references=('audit:test',),evidence_checksum='',
+        verification_timestamp=stamp,verification_fresh_until=stamp+300,result='verified_success',
+        explanation='external effect independently observed',confidence=1.0))
+    refreshed=reopened.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert refreshed['status']=='recovery_required'
+    assert reopened._run(rid)['current_step']==1
+    assert reopened.budget_status(rid)['dispatches'][0]['status']=='reconciled_effect'
+    assert ex.calls==calls_before
+    resumed=reopened.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert resumed['resumed'] is True
+    assert reopened._run(rid)['status']=='completed'
+    assert ex.calls==calls_before
