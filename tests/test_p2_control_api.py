@@ -390,3 +390,40 @@ def test_stage8_manual_workflow_retry_reuses_one_durable_run(tmp_path):
     assert second.json()['run_id'] == first.json()['run_id']
     runs = [row for row in runtime['automations'].runs(workflow_id, 20) if row['idempotency_key'] == body['idempotency_key']]
     assert len(runs) == 1
+
+
+def test_stage8_legacy_workflow_run_listing_respects_persisted_device_binding(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    first, first_token = registry.enroll('First workflow device', 'android')
+    second, second_token = registry.enroll('Second workflow device', 'android')
+    registry.set_permissions(first['id'], {'workflow:read', 'workflow:write'})
+    registry.set_permissions(second['id'], {'workflow:read'})
+
+    workflow_id = runtime['automations'].create_workflow(
+        'Device-bound legacy run',
+        {'type': 'manual'},
+        [{'kind': 'set', 'key': 'x', 'value': 'y'}],
+    )
+    created = client.post(
+        '/workflows/run',
+        json={'workflow_id': workflow_id, 'idempotency_key': 'stage8-device-bound-run'},
+        headers=auth_headers(first, first_token),
+    )
+    assert created.status_code == 200
+    run_id = created.json()['run_id']
+
+    own = client.get(
+        '/workflows/runs',
+        params={'workflow_id': workflow_id},
+        headers=auth_headers(first, first_token),
+    )
+    assert own.status_code == 200
+    assert run_id in {row['id'] for row in own.json()}
+
+    foreign = client.get(
+        '/workflows/runs',
+        params={'workflow_id': workflow_id},
+        headers=auth_headers(second, second_token),
+    )
+    assert foreign.status_code == 200
+    assert run_id not in {row['id'] for row in foreign.json()}
