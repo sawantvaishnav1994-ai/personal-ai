@@ -314,10 +314,10 @@ def test_stage8_handoff_target_revoked_at_precommit_boundary_fails_closed(tmp_pa
     registry, first, second, continuity, _, _, sync = fixture(tmp_path)
     thread=continuity.create_thread('handoff-race',device_id=first['id'])
     original_set_active=continuity.set_active
-    def revoke_before_commit(device_id, thread_id):
+    def revoke_before_commit(device_id, thread_id, *, authority_guard=None):
         if device_id==second['id']:
             registry.revoke(second['id'])
-        return original_set_active(device_id,thread_id)
+        return original_set_active(device_id,thread_id,authority_guard=authority_guard)
     monkeypatch.setattr(continuity,'set_active',revoke_before_commit)
     with pytest.raises(PermissionError,match='trusted active device'):
         sync.handoff(device_id=first['id'],session_id='s1',to_device=second['id'],thread_id=thread)
