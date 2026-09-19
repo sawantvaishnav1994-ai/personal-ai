@@ -498,3 +498,40 @@ def test_stage8_owner_workflow_read_respects_persisted_device_session_binding(tm
     own_approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
     assert own_approve.status_code == 409
     assert 'not waiting' in own_approve.text.lower()
+
+
+def test_stage8_owner_workflow_approval_state_hidden_from_foreign_device(tmp_path):
+    client, runtime, owner = make_client(tmp_path)
+    owner_token = client.cookies.get('pa_token')
+    engine = runtime['automations']
+    workflow_id = engine.create_workflow(
+        'Stage8 owner-bound approval state',
+        {'type': 'manual'},
+        [{'kind': 'set', 'key': 'stage8', 'value': 'completed'}],
+    )
+    run_id = engine.run_workflow(
+        workflow_id,
+        background=False,
+        owner_id='owner',
+        device_id=owner['id'],
+        session_id='test-session',
+        idempotency_key='stage8-owner-approval-state',
+    )
+
+    foreign, foreign_token = runtime['device_registry'].enroll('Foreign approval browser', 'web')
+    runtime['device_registry'].set_permissions(foreign['id'], {'workflow:approve'})
+    client.cookies.set('pa_device', foreign['id'])
+    client.cookies.set('pa_token', foreign_token)
+
+    approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    reject = client.post(f'/iphone/api/workflows/runs/{run_id}/reject')
+    for response in (approve, reject):
+        assert response.status_code == 403
+        assert run_id not in response.text
+        assert 'not waiting' not in response.text.lower()
+
+    client.cookies.set('pa_device', owner['id'])
+    client.cookies.set('pa_token', owner_token)
+    own = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    assert own.status_code == 409
+    assert 'not waiting' in own.text.lower()
