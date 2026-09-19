@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import time
 import threading
@@ -138,6 +139,9 @@ def iphone_pwa_router(runtime, settings, *, include_legacy_runtime_routes: bool 
     pending_approvals_lock = threading.RLock()
     failed_access_attempts: dict[str, list[float]] = {}
     access_attempts_lock = threading.RLock()
+    access_failure_window_seconds = 300
+    per_client_failure_limit = 5
+    global_method_failure_limit = 25
 
     def device_cookie_kwargs():
         cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
@@ -165,28 +169,47 @@ def iphone_pwa_router(runtime, settings, *, include_legacy_runtime_routes: bool 
         rp_id = host.rsplit(':', 1)[0] if host.count(':') == 1 else host.strip('[]')
         return rp_id, f'{proto}://{host}'
 
-    def access_attempt_key(request: Request, method: str):
+    def access_attempt_keys(request: Request, method: str):
         forwarded = request.headers.get('x-forwarded-for', '').split(',')[0].strip()
-        address = forwarded or (request.client.host if request.client else 'unknown')
-        return f'{method}:{address}'
+        try:
+            address = str(ipaddress.ip_address(forwarded)) if forwarded else ''
+        except ValueError:
+            address = ''
+        if not address:
+            peer = request.client.host if request.client else 'unknown'
+            try:
+                address = str(ipaddress.ip_address(peer))
+            except ValueError:
+                address = str(peer or 'unknown')[:80]
+        method = str(method)[:40]
+        return (f'client:{method}:{address}', f'global:{method}')
 
     def allow_access_attempt(request: Request, method: str):
-        key = access_attempt_key(request, method)
-        cutoff = time.monotonic() - 300
+        keys = access_attempt_keys(request, method)
+        cutoff = time.monotonic() - access_failure_window_seconds
         with access_attempts_lock:
-            attempts = [stamp for stamp in failed_access_attempts.get(key, []) if stamp >= cutoff]
-            failed_access_attempts[key] = attempts
-        if len(attempts) >= 5:
+            for stored_key in list(failed_access_attempts):
+                attempts = [stamp for stamp in failed_access_attempts[stored_key] if stamp >= cutoff]
+                if attempts:
+                    failed_access_attempts[stored_key] = attempts
+                else:
+                    failed_access_attempts.pop(stored_key, None)
+            client_attempts = failed_access_attempts.get(keys[0], [])
+            global_attempts = failed_access_attempts.get(keys[1], [])
+        if len(client_attempts) >= per_client_failure_limit or len(global_attempts) >= global_method_failure_limit:
             raise HTTPException(429, 'Too many unsuccessful attempts. Wait five minutes and try again.')
-        return key
+        return keys
 
-    def failed_access_attempt(key: str):
+    def failed_access_attempt(keys):
+        stamp = time.monotonic()
         with access_attempts_lock:
-            failed_access_attempts.setdefault(key, []).append(time.monotonic())
+            for key in keys:
+                failed_access_attempts.setdefault(key, []).append(stamp)
 
-    def clear_access_attempts(key: str):
+    def clear_access_attempts(keys):
         with access_attempts_lock:
-            failed_access_attempts.pop(key, None)
+            for key in keys:
+                failed_access_attempts.pop(key, None)
 
     def trust_browser(response: Response, name: str, platform: str = 'web-pwa'):
         device, token = registry.enroll(str(name or 'Owner browser').strip()[:120], platform)
