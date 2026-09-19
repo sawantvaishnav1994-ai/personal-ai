@@ -424,7 +424,7 @@ def owner_product_router(runtime):
                 media_type=body.media_type,
                 source=body.source,
                 access_class=body.access_class,
-                metadata=body.metadata,
+                metadata=_bounded_mapping(body.metadata),
             )
         except (KnowledgeError, binascii.Error) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -453,7 +453,10 @@ def owner_product_router(runtime):
         if body.access_class == 'private' and 'private' not in knowledge_access(device_id):
             raise HTTPException(403, 'This device cannot mark knowledge private')
         try:
-            document = knowledge.update(document_id, **body.model_dump(exclude_none=True))
+            changes = body.model_dump(exclude_none=True)
+            if 'metadata' in changes:
+                changes['metadata'] = _bounded_mapping(changes['metadata'])
+            document = knowledge.update(document_id, **changes)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except KnowledgeError as exc:
@@ -712,7 +715,7 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'qualification:record')
-        environment = {**body.environment, 'device_id': device_id, 'surface': 'ios-pwa'}
+        environment = {**_bounded_mapping(body.environment), 'device_id': device_id, 'surface': 'ios-pwa'}
         try:
             session_id = runtime['p3_qualification'].start_session(
                 body.stage,
@@ -732,14 +735,15 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'qualification:record')
-        evidence = {**body.evidence, 'device_id': device_id}
+        evidence = {**_bounded_mapping(body.evidence), 'device_id': device_id}
+        metrics = _bounded_mapping(body.metrics)
         try:
             trial = runtime['p3_qualification'].record_trial(
                 session_id,
                 body.task,
                 passed=body.passed,
                 latency_ms=body.latency_ms,
-                metrics=body.metrics,
+                metrics=metrics,
                 evidence=evidence,
             )
         except (KeyError, ValueError) as exc:
