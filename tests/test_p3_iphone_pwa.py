@@ -107,15 +107,24 @@ def test_production_router_can_exclude_legacy_canonical_runtime_overlaps(tmp_pat
     enrolled = client.post('/iphone/api/enroll', json={'code': 'this-is-a-long-owner-code'})
     assert enrolled.status_code == 200
 
-    # These paths are owned by the Stage 2/3 canonical routers in cloud_app.
-    # The legacy compatibility router must not register a second authority.
-    assert client.post('/iphone/api/voice/turn', json={'transcript': 'hello'}).status_code == 404
-    assert client.post('/iphone/api/approval/example/approve', json={}).status_code == 404
-    assert client.post('/iphone/api/approval/example/reject', json={}).status_code == 404
-    assert client.get('/iphone/api/conversations').status_code == 404
-    assert client.get('/iphone/api/conversations/example').status_code == 404
-    assert client.post('/iphone/api/voice/barge', json={'speaking': True}).status_code == 404
-    assert client.post('/iphone/api/voice/client-event', json={'event': 'tts_started'}).status_code == 404
+    # These method/path signatures are owned by the Stage 2/3 canonical routers
+    # in cloud_app. Inspect the actual route table because a legitimate
+    # non-overlapping method on the same path can correctly produce HTTP 405.
+    registered = {
+        (method, getattr(route, 'path', ''))
+        for route in client.app.routes
+        for method in (getattr(route, 'methods', None) or ())
+    }
+    forbidden = {
+        ('POST', '/iphone/api/voice/turn'),
+        ('POST', '/iphone/api/approval/{approval_id}/approve'),
+        ('POST', '/iphone/api/approval/{approval_id}/reject'),
+        ('GET', '/iphone/api/conversations'),
+        ('GET', '/iphone/api/conversations/{conversation_id}'),
+        ('POST', '/iphone/api/voice/barge'),
+        ('POST', '/iphone/api/voice/client-event'),
+    }
+    assert registered.isdisjoint(forbidden)
 
     # Non-overlapping owner-access routes remain available.
     assert client.get('/iphone/api/status').status_code == 200
