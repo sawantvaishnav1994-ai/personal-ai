@@ -14,6 +14,7 @@ from automation.budget import DEFAULT_POLICY, WorkflowBudgetError, WorkflowBudge
 from automation.conditions import evaluate_condition
 from security.projection_redaction import sanitize_external_value, sanitize_sensitive_text
 from desktop.operator_transactions import OperatorBinding, OperatorTransactionStore
+from desktop.operator_transactions import OperatorBinding, OperatorTransactionStore
 
 
 def now():
@@ -74,6 +75,8 @@ class AutomationEngine:
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
             con.execute('CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id,started_at)')
             con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency ON workflow_runs(workflow_id,idempotency_key) WHERE idempotency_key IS NOT NULL')
+            for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
+                if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
             for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
 
