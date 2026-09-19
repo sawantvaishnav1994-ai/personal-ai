@@ -5,6 +5,8 @@ import io
 import json
 import re
 import sqlite3
+import stat
+import zipfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +31,10 @@ class KnowledgeStore:
     MAX_FILE_BYTES = 10 * 1024 * 1024
     MAX_IMAGE_PIXELS = 24_000_000
     MAX_IMAGE_DIMENSION = 12_000
+    MAX_ARCHIVE_MEMBERS = 2048
+    MAX_ARCHIVE_EXPANDED_BYTES = 64 * 1024 * 1024
+    MAX_ARCHIVE_MEMBER_BYTES = 32 * 1024 * 1024
+    MAX_ARCHIVE_COMPRESSION_RATIO = 250
     TEXT_EXTENSIONS = {'.txt', '.md', '.markdown', '.csv', '.json', '.pdf', '.docx', '.xlsx'}
     IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.tif', '.tiff'}
     ALLOWED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS
@@ -143,9 +149,41 @@ class KnowledgeStore:
         return [chunk for chunk in chunks if chunk]
 
     @classmethod
+    def _validate_office_archive(cls, data: bytes):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                members = archive.infolist()
+                if len(members) > cls.MAX_ARCHIVE_MEMBERS:
+                    raise KnowledgeError('Office archive contains too many members')
+                expanded = 0
+                for member in members:
+                    name = str(member.filename or '').replace('\\', '/')
+                    parts = [part for part in name.split('/') if part not in {'', '.'}]
+                    if name.startswith('/') or '..' in parts:
+                        raise KnowledgeError('Office archive contains an unsafe path')
+                    mode = (int(member.external_attr) >> 16) & 0o170000
+                    if mode == stat.S_IFLNK:
+                        raise KnowledgeError('Office archive contains a symbolic link')
+                    size = int(member.file_size or 0)
+                    compressed = int(member.compress_size or 0)
+                    if size > cls.MAX_ARCHIVE_MEMBER_BYTES:
+                        raise KnowledgeError('Office archive member exceeds the configured safety limit')
+                    expanded += size
+                    if expanded > cls.MAX_ARCHIVE_EXPANDED_BYTES:
+                        raise KnowledgeError('Office archive expanded size exceeds the configured safety limit')
+                    if compressed > 0 and size > 0 and size / compressed > cls.MAX_ARCHIVE_COMPRESSION_RATIO:
+                        raise KnowledgeError('Office archive compression ratio exceeds the configured safety limit')
+        except KnowledgeError:
+            raise
+        except (zipfile.BadZipFile, OSError, ValueError) as exc:
+            raise KnowledgeError('The uploaded Office archive is malformed or unsafe') from exc
+
+    @classmethod
     def _text_segments(cls, filename: str, data: bytes):
         suffix = Path(filename).suffix.lower()
         try:
+            if suffix in {'.docx', '.xlsx'}:
+                cls._validate_office_archive(data)
             if suffix == '.pdf':
                 from pypdf import PdfReader
                 segments = []
