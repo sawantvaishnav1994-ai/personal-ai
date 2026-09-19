@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import threading
 
 import pytest
 
@@ -170,3 +171,27 @@ def test_stage8_post_dispatch_security_audit_failure_requires_recovery(tmp_path)
     record = executor.approvals.record(approval_id)
     assert record['status'] == 'recovery_required'
     assert record['failure_code'] == 'OSError_after_dispatch'
+
+
+def test_stage8_late_success_after_estop_is_recovery_not_false_cancellation(tmp_path):
+    calls=[]; started=threading.Event(); release=threading.Event()
+    settings=SimpleNamespace(autonomy_mode='ask',data_dir=tmp_path); tools=ToolRegistry(settings)
+    def late_success(params):
+        started.set(); release.wait(2); calls.append(dict(params)); return {'verified':True}
+    tools.register(Tool('dangerous','external action',late_success,Risk.EXTERNAL_SIDE_EFFECT))
+    executor=DurableAgentExecutor(models=Models(),tools=tools,memory=MemoryStore(tmp_path/'assistant.sqlite3'),events=EventBus())
+    executor.planner=Planner()
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it',device_id='device-1',session_id='session-1',owner_id='owner')
+    approval_id=proposed.value.approval_id
+    outcome={}
+    def approve():
+        try: outcome['reply']=executor.approve(approval_id,device_id='device-1',session_id='session-1',owner_id='owner')
+        except Exception as exc: outcome['error']=exc
+    worker=threading.Thread(target=approve);worker.start();assert started.wait(2)
+    executor.tools.set_emergency_stop(True);release.set();worker.join(2)
+    assert calls==[{'destination':'example.com','value':7}]
+    record=executor.approvals.record(approval_id)
+    assert record['status']=='recovery_required'
+    assert record['status']!='rejected'
+    assert record.get('failure_code')
