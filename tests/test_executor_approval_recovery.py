@@ -263,3 +263,42 @@ def test_stage8_verifier_interruption_after_side_effect_requires_recovery(tmp_pa
     assert calls==[{'destination':'example.com','value':7}]
     assert record['status']=='recovery_required'
     assert record['failure_code']=='TimeoutError_after_dispatch'
+
+
+def test_stage8_approved_scope_parameter_or_tool_substitution_never_dispatches(tmp_path):
+    calls=[]
+    executor=build_executor(tmp_path,calls,executor_cls=DurableAgentExecutor)
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it',device_id='device-1',session_id='session-1',owner_id='owner')
+    approval_id=proposed.value.approval_id
+    paused=executor._load_paused(approval_id)
+    original=dict(paused['plan']['steps'][paused['index']]['parameters'])
+
+    for mutated in (
+        {'destination':'evil.example','value':7},
+        {'destination':'example.com','value':999},
+        {'destination':'example.com','value':7,'path':'/tmp/evil'},
+        {'destination':'example.com','value':7,'url':'https://evil.test'},
+    ):
+        paused['plan']['steps'][paused['index']]['parameters']=mutated
+        with pytest.raises(PermissionError,match='scope|destination'):
+            executor.approve(approval_id,device_id='device-1',session_id='session-1',owner_id='owner')
+        assert calls==[]
+        assert executor.approvals.record(approval_id)['status']=='pending'
+
+    paused['plan']['steps'][paused['index']]['parameters']=original
+    paused['plan']['steps'][paused['index']]['tool']='missing-substitute'
+    with pytest.raises(KeyError):
+        executor.approve(approval_id,device_id='device-1',session_id='session-1',owner_id='owner')
+    assert calls==[]
+    assert executor.approvals.record(approval_id)['status']=='pending'
+
+
+def test_stage8_computer_prepared_plan_parameter_substitution_fails_before_physical_dispatch(tmp_path):
+    from copy import deepcopy
+    from vision.computer_intelligence import ComputerIntelligence
+    source=__import__('inspect').getsource(ComputerIntelligence.execute_prepared)
+    assert '_validate_prepared_binding(params,tx,plan)' in source
+    assert source.index('_validate_prepared_binding(params,tx,plan)') < source.index('self.transactions.execute(')
+    assert "digest!=params.get('_operator_plan_digest')" in __import__('inspect').getsource(ComputerIntelligence._validate_prepared_binding)
+    assert "tx.get('plan')!=plan" in __import__('inspect').getsource(ComputerIntelligence._validate_prepared_binding)
