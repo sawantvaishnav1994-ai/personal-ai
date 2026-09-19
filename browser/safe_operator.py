@@ -185,6 +185,15 @@ class SafeBrowserOperator:
         if tx['state'] in {'policy_check','approval_required'}: self.transactions.transition(txid,'permitted')
         elif tx['state']!='permitted': raise RuntimeError(f'invalid browser transaction state {tx["state"]}')
 
+    @staticmethod
+    def _download_root_identity(path):
+        raw=Path(path).expanduser()
+        if not raw.exists() or not raw.is_dir() or raw.is_symlink():
+            raise PermissionError('download root must be an existing regular directory')
+        resolved=raw.resolve(strict=True)
+        st=resolved.stat()
+        return {'resolved':str(resolved),'dev':int(st.st_dev),'ino':int(st.st_ino)}
+
     def _policy_ops(self,a,obs,op_class):
         url=a.url or obs['raw']['normalized_url']; rawobs=obs['raw']
         ops=[PolicyOperation(op_class,self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'domain',{'url':url},None,url,self._safe_params(a),a.data_classification)]
@@ -194,7 +203,9 @@ class SafeBrowserOperator:
             a.parameters['_validated_upload_sha256']=upload_digest
             ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':upload_digest},a.data_classification))
         if a.kind=='download':
-            canonical_path(a.download_root,[a.download_root])
+            root_identity=self._download_root_identity(a.download_root)
+            a.parameters['_validated_download_root_identity']=root_identity
+            canonical_path(root_identity['resolved'],[root_identity['resolved']])
             ops.append(PolicyOperation('download',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.download_root,'approved_roots':[a.download_root]},None,a.download_root,{'root_digest':digest(a.download_root)},a.data_classification))
         return ops
 
@@ -275,7 +286,12 @@ class SafeBrowserOperator:
             return {'uploaded':True,'file_sha256':current_digest,'dispatch_mode':mode}
         if a.kind=='download':
             with p.expect_download(timeout=a.timeout_ms) as event:loc.click(timeout=a.timeout_ms)
-            dl=event.value;name=sanitize_download_filename(dl.suggested_filename);root=Path(a.download_root).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
+            dl=event.value;name=sanitize_download_filename(dl.suggested_filename)
+            expected_root=dict((a.parameters or {}).get('_validated_download_root_identity') or {})
+            current_root=self._download_root_identity(a.download_root)
+            if expected_root and current_root!=expected_root:
+                raise PermissionError('download root changed after authorization')
+            root=Path(current_root['resolved'])
             dest=root/name;stem,suffix=dest.stem,dest.suffix;n=1
             while dest.exists():dest=root/f'{stem} ({n}){suffix}';n+=1
             dl.save_as(str(dest))
