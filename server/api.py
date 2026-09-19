@@ -350,6 +350,8 @@ def create_app(
         device_id = auth_device(authorization, x_device_id)
         if not device_registry.is_active(body.to_device):
             raise HTTPException(404, 'Target device is not trusted/active')
+        if hasattr(device_registry, 'authorize') and not device_registry.authorize(body.to_device, 'ai:chat'):
+            raise HTTPException(403, 'Target device is not permitted to receive continuity handoff')
         service = require_runtime('continuity')
         active = service.active_for_device(device_id)
         if not active or active['id'] != body.thread_id:
@@ -635,6 +637,9 @@ def create_app(
         if not device_registry or not token or not device_registry.authenticate(device_id, token):
             await ws.close(code=4401)
             return
+        if hasattr(device_registry, 'authorize') and not device_registry.authorize(device_id, 'ai:chat'):
+            await ws.close(code=4403)
+            return
         await ws.accept()
         if device_gateway:
             device_gateway.connect(device_id, ws)
@@ -651,6 +656,11 @@ def create_app(
                     if device_gateway:
                         device_gateway.disconnect(device_id)
                     await ws.close(code=4401)
+                    break
+                if hasattr(device_registry, 'authorize') and not device_registry.authorize(device_id, 'ai:chat'):
+                    if device_gateway:
+                        device_gateway.disconnect(device_id)
+                    await ws.close(code=4403)
                     break
                 if message.get('type') == 'push_registration' and message.get('provider') == 'apns' and message.get('token'):
                     device_registry.set_metadata(device_id, 'push.apns.token', str(message['token']).strip())
