@@ -1,14 +1,14 @@
 import webbrowser, urllib.parse
 from tools.registry import Tool, Risk
+from security.policy_targets import normalize_origin, TargetValidationError
 
 
 def _safe_web_url(raw):
     value = str(raw or '').strip()
-    parsed = urllib.parse.urlsplit(value)
-    if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
-        raise ValueError('only http/https web URLs are allowed')
-    if parsed.username is not None or parsed.password is not None:
-        raise ValueError('embedded URL credentials are not allowed')
+    try:
+        normalize_origin(value)
+    except TargetValidationError as exc:
+        raise ValueError(str(exc)) from exc
     return value
 
 
