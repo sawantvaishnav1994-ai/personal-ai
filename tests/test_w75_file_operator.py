@@ -84,3 +84,32 @@ def test_parent_identity_revalidation_detects_replacement(tmp_path):
     with pytest.raises(TargetValidationError) as exc:
         SafeFileAdapter._revalidate_parent(destination,[str(root)],expected_parent,expected_identity)
     assert exc.value.reason_code=='path_changed'
+
+
+def test_move_revalidates_destination_parent_before_replace(tmp_path, monkeypatch):
+    root=tmp_path/'root';root.mkdir();src=root/'src.txt';src.write_text('x')
+    parent=root/'dest';parent.mkdir();dst=parent/'out.txt'
+    original=SafeFileAdapter._revalidate_parent
+    def substitute(cls,path,roots,expected_parent,expected_identity=None):
+        moved=root/'dest-authorized'
+        parent.rename(moved);parent.mkdir()
+        return original(path,roots,expected_parent,expected_identity)
+    monkeypatch.setattr(SafeFileAdapter,'_revalidate_parent',classmethod(substitute))
+    with pytest.raises(TargetValidationError) as exc:
+        SafeFileAdapter().move(str(src),str(dst),[str(root)])
+    assert exc.value.reason_code=='path_changed'
+    assert src.exists() and not dst.exists()
+
+def test_trash_revalidates_destination_parent_before_replace(tmp_path, monkeypatch):
+    root=tmp_path/'root';root.mkdir();src=root/'src.txt';src.write_text('x')
+    trash=root/'trash';trash.mkdir()
+    original=SafeFileAdapter._revalidate_parent
+    def substitute(cls,path,roots,expected_parent,expected_identity=None):
+        moved=root/'trash-authorized'
+        trash.rename(moved);trash.mkdir()
+        return original(path,roots,expected_parent,expected_identity)
+    monkeypatch.setattr(SafeFileAdapter,'_revalidate_parent',classmethod(substitute))
+    with pytest.raises(TargetValidationError) as exc:
+        SafeFileAdapter().trash(str(src),[str(root)],str(trash))
+    assert exc.value.reason_code=='path_changed'
+    assert src.exists()
