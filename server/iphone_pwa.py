@@ -124,7 +124,7 @@ class IphonePwaState:
                 self._cancel.pop(device_id, None)
 
 
-def iphone_pwa_router(runtime, settings):
+def iphone_pwa_router(runtime, settings, *, include_legacy_runtime_routes: bool = True):
     router = APIRouter(prefix='/iphone', tags=['iphone-pwa'])
     state = IphonePwaState()
     web_dir = Path(settings.base_dir) / 'pwa'
@@ -969,5 +969,26 @@ def iphone_pwa_router(runtime, settings):
         if recorder is None:
             raise HTTPException(503, 'Voice qualification recorder unavailable')
         return {'sessions': recorder.sessions()}
+
+    if not include_legacy_runtime_routes:
+        # Stage 3/Stage 2 canonical routers own these production paths. Keep the
+        # historical handlers available only for isolated compatibility/P3 tests,
+        # never as order-dependent competing cloud authorities.
+        canonical_runtime_routes = {
+            ('POST', '/iphone/api/voice/turn'),
+            ('POST', '/iphone/api/approval/{approval_id}/approve'),
+            ('POST', '/iphone/api/approval/{approval_id}/reject'),
+            ('GET', '/iphone/api/conversations'),
+            ('GET', '/iphone/api/conversations/{conversation_id}'),
+            ('POST', '/iphone/api/voice/barge'),
+            ('POST', '/iphone/api/voice/client-event'),
+        }
+        router.routes[:] = [
+            route for route in router.routes
+            if not any(
+                (method, getattr(route, 'path', '')) in canonical_runtime_routes
+                for method in (getattr(route, 'methods', None) or ())
+            )
+        ]
 
     return router
