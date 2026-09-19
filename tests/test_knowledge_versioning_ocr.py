@@ -153,13 +153,16 @@ def test_reverting_to_historical_checksum_is_valid_and_restart_safe(tmp_path):
 
 def test_office_archive_expansion_and_paths_are_bounded(tmp_path):
     knowledge = store(tmp_path)
-    knowledge.MAX_ARCHIVE_MEMBER_BYTES = 1024
+    original_member_limit = KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES
+    KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES = 1024
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('[Content_Types].xml', '<Types/>')
         archive.writestr('word/document.xml', 'x' * 2048)
     with pytest.raises(KnowledgeError, match='member exceeds'):
         knowledge.ingest(filename='oversized.docx', data=output.getvalue())
+
+    KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES = original_member_limit
 
     traversal = io.BytesIO()
     with zipfile.ZipFile(traversal, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
