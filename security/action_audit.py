@@ -15,6 +15,7 @@ REDACTED = '[REDACTED]'
 SENSITIVE_KEY_PARTS = (
     'password', 'passwd', 'secret', 'token', 'authorization', 'cookie', 'credential',
     'api_key', 'apikey', 'private_key', 'root_key', 'signing_key', 'recovery_code',
+    'session_id', 'sessionid', 'session_cookie',
 )
 
 
