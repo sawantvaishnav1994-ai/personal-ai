@@ -77,8 +77,6 @@ class AutomationEngine:
             con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency ON workflow_runs(workflow_id,idempotency_key) WHERE idempotency_key IS NOT NULL')
             for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
-            for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
-                if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
 
     def _halt_for_emergency_stop(self):
         with self._con() as con:
