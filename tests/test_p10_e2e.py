@@ -121,3 +121,55 @@ def test_model_proposal_rejects_invalid_json_and_stale_session(tmp_path):
     with pytest.raises(ValueError): a.propose_plan_with_model(g['id'])
     good=Models(json.dumps({'tasks':[{'id':'a'}]})); b=make(tmp_path/'other',models=good); g2=b.create_goal('x')
     b.propose_plan_with_model(g2['id'],session_fresh=False); assert good.calls[0][1]['request'].session_fresh is False
+
+def test_p10_persisted_p6_operation_cannot_resume_after_security_epoch_advance(tmp_path):
+    from tests.p6_support import Harness
+    from future_intelligence.autonomy import AdvancedAutonomy
+
+    h=Harness(tmp_path/'governed',mode='act')
+    try:
+        side=h.side_tool('p10_epoch_send')
+        a=AdvancedAutonomy(gate=h.gate,path=tmp_path/'p10-epoch.db',operations=h.operations)
+        goal=a.create_goal('epoch-bound consequential task')
+        p10=a.create_plan(goal['id'],[{
+            'id':'send',
+            'objective':'send once',
+            'requested_tool':'p10_epoch_send',
+            'parameters':{'reference':'epoch-bound'},
+            'consequential':True,
+        }])
+
+        original_run=h.operations._run
+        h.operations._run=lambda operation_id,**kwargs: h.operations._delegation(operation_id)
+        try:
+            staged=a.execute_task(
+                p10['id'],'send',owner_id='owner',device_id='device-1',session_id='session-1'
+            )
+        finally:
+            h.operations._run=original_run
+
+        task=next(x for x in staged['tasks'] if x['id']=='send')
+        operation=h.operations._by_plan(task['operation_plan_id'])
+        epoch_n=operation['security_epoch']
+        assert operation['status']=='queued'
+        assert side.value==0
+
+        h.executor.invalidate_pending_approvals()
+        assert h.executor.approvals.current_security_epoch()>epoch_n
+
+        resumed=h.operations._run(operation['operation_id'])
+        assert side.value==0
+        assert resumed['status']=='failed'
+        assert resumed['outcome_state']=='FAILED'
+        assert resumed.get('approval_id') is None
+
+        replay=h.operations.execute(
+            task['operation_plan_id'],owner_id='owner',device_id='device-1',session_id='session-1'
+        )['operation']
+        assert side.value==0
+        assert replay['status']=='failed'
+        assert replay['outcome_state']=='FAILED'
+        assert replay['security_epoch']==epoch_n
+    finally:
+        h.close()
+
