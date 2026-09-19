@@ -5,7 +5,7 @@ from typing import Any
 
 # Narrow credential-context redaction for externally influenced owner-facing text.
 # Ordinary long identifiers are preserved unless they occur in a credential structure.
-_AUTHORIZATION = re.compile(r'(?i)(authorization\s*:\s*)(?:bearer\s+)?([^\s,;]+)')
+_AUTHORIZATION = re.compile(r'(?i)(authorization\s*:\s*)(?:(?:bearer|basic)\s+)?([^\s,;]+)')
 _BEARER = re.compile(r'(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{8,})')
 _NAMED_SECRET = re.compile(
     r'(?i)\b(api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|credential|session[_-]?(?:token|secret))\b(\s*[:=]\s*)(["\']?)([^\s&;,"\']+)(["\']?)'
