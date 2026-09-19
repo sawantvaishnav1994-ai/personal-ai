@@ -102,6 +102,7 @@ class WorkflowCreateBody(BaseModel):
 
 class WorkflowRunBody(BaseModel):
     context: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=16, max_length=160)
 
 
 class EmergencyStopBody(BaseModel):
@@ -112,6 +113,41 @@ class UiPreferencesBody(BaseModel):
     continuous_voice: bool = True
     voice_rate: float = Field(default=1.0, ge=0.75, le=1.35)
     quiet_hours: bool = True
+
+
+def _bounded_mapping(value, *, max_bytes=65536, max_depth=8, max_items=256, max_string=12000):
+    if not isinstance(value, dict):
+        raise HTTPException(422, 'Expected a JSON object')
+    nodes = 0
+    stack = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            raise HTTPException(413, 'JSON object nesting exceeds limit')
+        if isinstance(current, dict):
+            if len(current) > max_items:
+                raise HTTPException(413, 'JSON object contains too many fields')
+            for key, child in current.items():
+                if len(str(key)) > 256:
+                    raise HTTPException(413, 'JSON object key is too long')
+                stack.append((child, depth + 1))
+        elif isinstance(current, list):
+            if len(current) > max_items:
+                raise HTTPException(413, 'JSON collection contains too many items')
+            for child in current:
+                stack.append((child, depth + 1))
+        elif isinstance(current, str) and len(current) > max_string:
+            raise HTTPException(413, 'JSON string exceeds limit')
+        nodes += 1
+        if nodes > 4096:
+            raise HTTPException(413, 'JSON object is too complex')
+    try:
+        encoded = json.dumps(value, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, 'JSON object contains unsupported values') from exc
+    if len(encoded) > max_bytes:
+        raise HTTPException(413, 'JSON object exceeds maximum size')
+    return value
 
 
 def owner_product_router(runtime):
@@ -541,8 +577,10 @@ def owner_product_router(runtime):
     def workflow_create(body: WorkflowCreateBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
+            trigger = _bounded_mapping(body.trigger)
+            steps = [_bounded_mapping(step, max_bytes=32768) for step in body.steps]
             workflow_id = runtime['automations'].create_workflow(
-                body.title, body.trigger, body.steps,
+                body.title, trigger, steps,
                 next_run_at=body.next_run_at, interval_seconds=body.interval_seconds,
             )
         except (TypeError, ValueError) as exc:
@@ -554,10 +592,12 @@ def owner_product_router(runtime):
     def workflow_run(workflow_id: str, body: WorkflowRunBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
+            context = _bounded_mapping(body.context)
             run_id = runtime['automations'].run_workflow(
                 workflow_id,
-                context=body.context,
+                context=context,
                 background=True,
+                idempotency_key=body.idempotency_key,
                 **workflow_authority(device_id),
             )
         except PermissionError as exc:
