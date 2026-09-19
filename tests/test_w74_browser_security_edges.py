@@ -114,4 +114,4 @@ def test_upload_dispatch_rejects_file_changed_after_authorization(tmp_path):
     op._target=lambda obs,target_id: {'target_id':target_id}
     op._resolve_target=lambda page,target,action: ('dom',fake_locator)
     with pytest.raises(PermissionError,match='changed after authorization'):
-        op._dispatch(action,object(),_obs())
+        op._dispatch(action,_obs())
