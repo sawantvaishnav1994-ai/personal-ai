@@ -169,7 +169,16 @@ def test_p10_persisted_p6_operation_cannot_resume_after_security_epoch_advance(t
         assert side.value==0
         assert replay['status']=='failed'
         assert replay['outcome_state']=='FAILED'
-        assert replay['security_epoch']==epoch_n
+        assert replay.get('approval_id') is None
+
+        # The public operation projection intentionally omits security_epoch.
+        # Verify the authoritative persisted delegation did not acquire the
+        # newer epoch during resume/replay.
+        durable_after_replay=h.operations._delegation(operation['operation_id'])
+        assert durable_after_replay['security_epoch']==epoch_n
+        assert durable_after_replay['status']=='failed'
+        assert durable_after_replay['outcome_state']=='FAILED'
+        assert durable_after_replay.get('approval_id') is None
     finally:
         h.close()
 
