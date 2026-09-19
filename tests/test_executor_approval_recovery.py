@@ -195,3 +195,35 @@ def test_stage8_late_success_after_estop_is_recovery_not_false_cancellation(tmp_
     assert record['status']=='recovery_required'
     assert record['status']!='rejected'
     assert record.get('failure_code')
+
+
+def test_stage8_dispatch_success_without_verification_stays_unverified(tmp_path):
+    calls=[]
+    settings=SimpleNamespace(autonomy_mode='ask',data_dir=tmp_path);tools=ToolRegistry(settings)
+    tools.register(Tool('dangerous','external action',lambda params:calls.append(dict(params)) or {'accepted':True},Risk.EXTERNAL_SIDE_EFFECT))
+    executor=DurableAgentExecutor(models=Models(),tools=tools,memory=MemoryStore(tmp_path/'assistant.sqlite3'),events=EventBus());executor.planner=Planner()
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it',device_id='device-1',session_id='session-1',owner_id='owner')
+    approval_id=proposed.value.approval_id
+    assert executor.approve(approval_id,device_id='device-1',session_id='session-1',owner_id='owner')=='completed'
+    record=executor.approvals.record(approval_id)
+    assert calls==[{'destination':'example.com','value':7}]
+    assert record['status']=='completed'
+    assert record['outcome']['verified'] is False
+    assert 'no result verification contract' in record['outcome']['verification_reason'].lower()
+
+
+def test_stage8_required_verification_failure_after_dispatch_requires_recovery(tmp_path):
+    calls=[]
+    settings=SimpleNamespace(autonomy_mode='ask',data_dir=tmp_path);tools=ToolRegistry(settings)
+    tools.register(Tool('dangerous','external action',lambda params:calls.append(dict(params)) or {'accepted':True},Risk.EXTERNAL_SIDE_EFFECT,verification_required=True))
+    executor=DurableAgentExecutor(models=Models(),tools=tools,memory=MemoryStore(tmp_path/'assistant.sqlite3'),events=EventBus());executor.planner=Planner()
+    with pytest.raises(ConfirmationRequired) as proposed:
+        executor.chat('perform it',device_id='device-1',session_id='session-1',owner_id='owner')
+    approval_id=proposed.value.approval_id
+    with pytest.raises(RuntimeError,match='verification failed'):
+        executor.approve(approval_id,device_id='device-1',session_id='session-1',owner_id='owner')
+    record=executor.approvals.record(approval_id)
+    assert calls==[{'destination':'example.com','value':7}]
+    assert record['status']=='recovery_required'
+    assert record['failure_code']=='RuntimeError_after_dispatch'
