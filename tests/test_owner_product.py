@@ -426,3 +426,26 @@ def test_stage8_owner_workflow_payloads_are_bounded(tmp_path):
         json={'context': nested, 'idempotency_key': 'owner-run-request-0002'},
     )
     assert run.status_code == 413
+
+
+def test_stage8_owner_structured_metadata_is_bounded(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    nested = {}
+    cursor = nested
+    for _ in range(12):
+        cursor['next'] = {}
+        cursor = cursor['next']
+
+    knowledge = client.post('/iphone/api/knowledge', json={
+        'filename': 'bounded.txt',
+        'text': 'safe content',
+        'metadata': nested,
+    })
+    assert knowledge.status_code == 413
+
+    qualification = client.post('/iphone/api/qualification/stages', json={
+        'stage': 'P3.5',
+        'evidence_class': 'real_device',
+        'environment': nested,
+    })
+    assert qualification.status_code == 413
