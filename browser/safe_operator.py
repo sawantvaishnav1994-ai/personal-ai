@@ -270,7 +270,19 @@ class SafeBrowserOperator:
             dl=event.value;name=sanitize_download_filename(dl.suggested_filename);root=Path(a.download_root).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
             dest=root/name;stem,suffix=dest.stem,dest.suffix;n=1
             while dest.exists():dest=root/f'{stem} ({n}){suffix}';n+=1
-            dl.save_as(str(dest));canonical_path(str(dest),[str(root)]);validate_file_metadata(str(dest),claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
+            dl.save_as(str(dest))
+            try:
+                canonical_path(str(dest),[str(root)])
+                validate_file_metadata(str(dest),claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
+            except Exception:
+                # A rejected or malformed download must not survive validation
+                # as an untrusted file inside an owner-approved directory.
+                try:
+                    if dest.exists() and dest.is_file():
+                        dest.unlink()
+                except OSError:
+                    pass
+                raise
             return {'download_sha256':self._file_digest(str(dest)),'download_size':dest.stat().st_size,'download_name':dest.name,'dispatch_mode':mode}
         raise ValueError('unsupported action')
 
