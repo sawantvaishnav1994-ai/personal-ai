@@ -296,3 +296,30 @@ def test_sqlite_integrity_and_duplicate_suppression_under_repeated_sync(tmp_path
         assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert con.execute('SELECT COUNT(*) FROM continuity_sync_receipts').fetchone()[0] == 30
     assert len([e for e in continuity.events_for_thread(thread, limit=1000) if e['kind'] == 'user_message']) == 30
+
+
+def test_stage8_live_permission_removal_blocks_established_continuity(tmp_path):
+    registry, first, _, continuity, _, epoch, sync = fixture(tmp_path)
+    thread=continuity.create_thread('live',device_id=first['id'])
+    assert sync.status(device_id=first['id'],session_id='s1')['device_id']==first['id']
+    registry.set_permissions(first['id'], {'workflow:read'})
+    with pytest.raises(PermissionError,match='ai:chat'):
+        sync.reconcile(device_id=first['id'],session_id='s1',security_epoch=epoch[0],thread_id=thread,events=[
+            {'client_event_id':'revoked-1','client_sequence':1,'kind':'user_message','payload':{'text':'must not commit'}}
+        ])
+    assert [e for e in continuity.events_for_thread(thread) if e['kind']=='user_message']==[]
+
+
+def test_stage8_handoff_target_revoked_at_precommit_boundary_fails_closed(tmp_path,monkeypatch):
+    registry, first, second, continuity, _, _, sync = fixture(tmp_path)
+    thread=continuity.create_thread('handoff-race',device_id=first['id'])
+    original_set_active=continuity.set_active
+    def revoke_before_commit(device_id, thread_id):
+        if device_id==second['id']:
+            registry.revoke(second['id'])
+        return original_set_active(device_id,thread_id)
+    monkeypatch.setattr(continuity,'set_active',revoke_before_commit)
+    with pytest.raises(PermissionError,match='trusted active device'):
+        sync.handoff(device_id=first['id'],session_id='s1',to_device=second['id'],thread_id=thread)
+    assert continuity.active_for_device(second['id']) is None
+    assert [e for e in continuity.events_for_thread(thread) if e['kind']=='handoff']==[]
