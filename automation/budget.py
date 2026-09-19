@@ -265,6 +265,25 @@ class WorkflowBudgetManager:
     def finish_dispatch(self,dispatch_id,*,status='completed',uncertainty=None):
         if not dispatch_id: return
         with self._con() as con: con.execute('BEGIN IMMEDIATE'); con.execute('UPDATE workflow_dispatches SET status=?,uncertainty=?,updated_at=? WHERE dispatch_id=?',(status,uncertainty,_now(),dispatch_id)); con.commit()
+    def reconcile_uncertain_dispatch(self, run_id, dispatch_id, *, resolution):
+        """Clear the workflow fence only from an externally verified recovery outcome."""
+        allowed={'verified_effect','verified_no_effect'}
+        if resolution not in allowed: raise WorkflowRecoveryRequired('workflow recovery outcome is not eligible for reconciliation')
+        stamp=_now()
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row=con.execute("SELECT status FROM workflow_dispatches WHERE dispatch_id=? AND run_id=?",(dispatch_id,run_id)).fetchone()
+            if not row: con.rollback(); raise KeyError('workflow dispatch not found')
+            if row['status'] not in {'uncertain','reconciled_effect','verified_no_effect'}: con.rollback(); raise WorkflowRecoveryRequired('workflow dispatch is not awaiting recovery')
+            new_status='reconciled_effect' if resolution=='verified_effect' else 'verified_no_effect'
+            con.execute("UPDATE workflow_dispatches SET status=?,uncertainty=NULL,updated_at=? WHERE dispatch_id=?",(new_status,stamp,dispatch_id))
+            remaining=con.execute("SELECT COUNT(*) c FROM workflow_dispatches WHERE run_id=? AND status='uncertain'",(run_id,)).fetchone()['c']
+            if not remaining:
+                con.execute("UPDATE workflow_budget_runs SET stop_reason=NULL,updated_at=? WHERE run_id=?",(stamp,run_id))
+            con.commit()
+        self._record_decision(run_id,'recovery_reconciled',resolution,dispatch_type='recovery')
+        return self.status(run_id)
+
     def record_input_estimate(self,payload):
         ctx=current_budget_context()
         if ctx is None or ctx.manager is not self: return 0
