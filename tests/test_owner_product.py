@@ -449,3 +449,52 @@ def test_stage8_owner_structured_metadata_is_bounded(tmp_path):
         'environment': nested,
     })
     assert qualification.status_code == 413
+
+
+def test_stage8_owner_workflow_read_respects_persisted_device_session_binding(tmp_path):
+    client, runtime, owner = make_client(tmp_path)
+    owner_token = client.cookies.get('pa_token')
+    engine = runtime['automations']
+    workflow_id = engine.create_workflow(
+        'Stage8 owner-bound visibility',
+        {'type': 'manual'},
+        [{'kind': 'set', 'key': 'stage8', 'value': 'owner-only-run'}],
+    )
+    run_id = engine.run_workflow(
+        workflow_id,
+        background=False,
+        owner_id='owner',
+        device_id=owner['id'],
+        session_id='test-session',
+        idempotency_key='stage8-owner-visibility-run',
+    )
+
+    own = client.get('/iphone/api/workflows')
+    assert own.status_code == 200
+    assert run_id in {row['id'] for row in own.json()['runs']}
+
+    foreign, foreign_token = runtime['device_registry'].enroll('Foreign workflow browser', 'web')
+    runtime['device_registry'].set_permissions(
+        foreign['id'],
+        {'workflow:read', 'workflow:approve'},
+    )
+    client.cookies.set('pa_device', foreign['id'])
+    client.cookies.set('pa_token', foreign_token)
+
+    foreign_list = client.get('/iphone/api/workflows')
+    assert foreign_list.status_code == 200
+    assert run_id not in {row['id'] for row in foreign_list.json()['runs']}
+
+    foreign_approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    foreign_reject = client.post(f'/iphone/api/workflows/runs/{run_id}/reject')
+    for response in (foreign_approve, foreign_reject):
+        assert response.status_code == 403
+        assert run_id not in response.text
+        assert 'not waiting' not in response.text.lower()
+
+    # Positive control: the correctly bound owner gets the real run-state answer.
+    client.cookies.set('pa_device', owner['id'])
+    client.cookies.set('pa_token', owner_token)
+    own_approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    assert own_approve.status_code == 409
+    assert 'not waiting' in own_approve.text.lower()
