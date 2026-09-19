@@ -118,16 +118,19 @@ class ContinuityService:
         return self.thread(thread_id)
 
     def set_active(self, device_id: str, thread_id: str, *, authority_guard=None):
-        thread = self.thread(thread_id)
-        if not thread or thread.get('closed_at'):
-            raise KeyError('active continuity thread not found')
         stamp = now()
         with self.lock, self._con() as con:
-            # For governed cross-device handoff, authority must be checked inside
-            # the same guarded mutation boundary, not only by the caller before
-            # entering set_active().
+            # Governed activation is one transaction: validate current authority
+            # after BEGIN IMMEDIATE and before any durable continuity mutation.
+            con.execute('BEGIN IMMEDIATE')
             if authority_guard is not None:
                 authority_guard()
+            thread = con.execute(
+                'SELECT closed_at FROM continuity_threads WHERE id=?',
+                (thread_id,),
+            ).fetchone()
+            if not thread or thread['closed_at']:
+                raise KeyError('active continuity thread not found')
             current = con.execute(
                 'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
                 (device_id,),
