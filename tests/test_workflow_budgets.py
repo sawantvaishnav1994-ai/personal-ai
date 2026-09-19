@@ -200,3 +200,32 @@ def test_owner_override_requires_policy_binding_and_recent_reauth(tmp_path):
     with pytest.raises(PermissionError):e.override_run_budget(r,{'max_model_calls':2},owner_id='owner',device_id='d1',session_id='bad',reauthenticated_at=time.time())
     with pytest.raises(PermissionError):e.override_run_budget(r,{'max_model_calls':2},owner_id='owner',device_id='d1',session_id='s1')
     assert e.override_run_budget(r,{'max_model_calls':2},owner_id='owner',device_id='d1',session_id='s1',reauthenticated_at=time.time())['policy']['max_model_calls']==2
+
+
+def test_restart_fences_inflight_consequential_dispatch_and_blocks_redispatch(tmp_path):
+    path=tmp_path/'budget.sqlite3'
+    first=WorkflowBudgetManager(path)
+    first.reserve_run('r','w',normalize_policy({'max_concurrent_runs':1}))
+    with first.enter('r',0,0):
+        dispatch_id=first.begin_dispatch('tool','external-write:stable-hash')
+    before=first.status('r')
+    assert before['reserved_concurrency'] is True
+    assert before['dispatch'][0]['status']=='dispatching'
+
+    reopened=WorkflowBudgetManager(path)
+    recovered=reopened.status('r')
+    assert recovered['reserved_concurrency'] is False
+    assert recovered['dispatch'][0]['dispatch_id']==dispatch_id
+    assert recovered['dispatch'][0]['status']=='uncertain'
+    assert recovered['dispatch'][0]['uncertainty']=='runtime_restart_before_dispatch_completion'
+    assert 'verification/recovery required' in recovered['stop_reason'].lower()
+    assert any(x.get('decision')=='recovery_required' for x in recovered['decision_history'])
+
+    with reopened.enter('r',0,0):
+        with pytest.raises(WorkflowBudgetError):
+            reopened.begin_dispatch('tool','external-write:stable-hash')
+
+    # Recovery evidence remains durable and inspectable after another restart.
+    again=WorkflowBudgetManager(path).status('r')
+    assert again['dispatch'][0]['status']=='uncertain'
+    assert again['reserved_concurrency'] is False
