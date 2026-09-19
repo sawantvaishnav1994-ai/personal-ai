@@ -151,3 +151,54 @@ def test_stage8_connector_knowledge_authorized_positive_control(tmp_path):
         'knowledge.ingestion.completed',
     ]
     assert SENTINEL not in repr(drive.events)
+
+
+def test_stage8_connector_private_knowledge_requires_private_capability(tmp_path):
+    client, knowledge, drive, store = make_client(
+        tmp_path / 'private-blocked',
+        {'knowledge:write'},
+    )
+
+    response = client.post(
+        '/iphone/api/connectors/drive/files/private-file/knowledge',
+        json={'approved': True, 'access_class': 'private'},
+    )
+
+    assert response.status_code == 403
+    assert 'knowledge:private' in response.json()['detail']
+    assert drive.read_count == 0
+    assert drive.events == []
+    assert knowledge.sources() == []
+    assert knowledge.list() == []
+    assert knowledge.search(SENTINEL) == []
+    assert durable_counts(store) == {
+        'sources': 0,
+        'source_documents': 0,
+        'sync_requests': 0,
+        'documents': 0,
+        'chunks': 0,
+    }
+    assert list(store.object_dir.iterdir()) == []
+
+
+def test_stage8_connector_private_knowledge_authorized_positive_control(tmp_path):
+    client, knowledge, drive, store = make_client(
+        tmp_path / 'private-allowed',
+        {'knowledge:write', 'knowledge:private'},
+    )
+
+    response = client.post(
+        '/iphone/api/connectors/drive/files/private-file/knowledge',
+        json={'approved': True, 'access_class': 'private'},
+    )
+
+    assert response.status_code == 200
+    document = response.json()
+    assert document['access_class'] == 'private'
+    assert drive.read_count == 1
+    assert knowledge.detail(document['id'])['access_class'] == 'private'
+    counts = durable_counts(store)
+    assert counts['sources'] == 1
+    assert counts['source_documents'] == 1
+    assert counts['documents'] == 1
+    assert counts['chunks'] >= 1
