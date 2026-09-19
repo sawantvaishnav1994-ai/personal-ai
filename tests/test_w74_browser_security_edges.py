@@ -72,6 +72,24 @@ def test_navigation_verification_uses_normalized_origin_objects():
     assert ok and reason=='navigation_verified'
 
 
+@pytest.mark.parametrize('url', [
+    'file:///etc/passwd',
+    'http://127.0.0.1/admin',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://[::1]/',
+    'https://user:password@example.com/',
+])
+def test_navigation_rejects_unsafe_or_private_targets_before_dispatch(url):
+    op=object.__new__(SafeBrowserOperator)
+    with pytest.raises(Exception):
+        op._validate(BrowserAction('open_url','t',url=url))
+
+
+def test_public_navigation_target_is_valid():
+    op=object.__new__(SafeBrowserOperator)
+    op._validate(BrowserAction('open_url','t',url='https://example.com/path'))
+
+
 def test_https_downgrade_rejected_with_dataclass_origin_contract():
     op=object.__new__(SafeBrowserOperator)
     ok,reason=op._verify(BrowserAction('open_url','t',url='https://example.com/'),_obs(),_obs(origin='http://example.com',normalized_url='http://example.com/'),{})
