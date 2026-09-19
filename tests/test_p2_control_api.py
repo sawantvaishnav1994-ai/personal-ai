@@ -282,3 +282,45 @@ def test_stage8_dashboard_cannot_directly_dispatch_tools_or_consequential_device
         headers=headers,
     )
     assert side_effect.status_code == 409
+
+
+def test_stage8_live_websocket_loses_authority_when_ai_chat_scope_is_revoked(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    device, token = registry.enroll('Phone', 'ios')
+    thread_id = runtime['continuity'].resume(device['id'])['thread']['id']
+    before = runtime['continuity'].events_for_thread(thread_id, limit=50)
+
+    with client.websocket_connect(
+        f"/device/ws/{device['id']}",
+        headers={'Authorization': f'Bearer {token}'},
+    ) as websocket:
+        registry.set_permissions(device['id'], {'workflow:read'})
+        websocket.send_json({
+            'type': 'continuity_event',
+            'kind': 'user_message',
+            'payload': {'text': 'must-not-survive-scope-revocation'},
+        })
+        try:
+            websocket.receive_json()
+            assert False, 'scope-revoked websocket should be closed before processing the message'
+        except WebSocketDisconnect as exc:
+            assert exc.code == 4403
+
+    assert runtime['continuity'].events_for_thread(thread_id, limit=50) == before
+    assert device['id'] not in runtime['device_gateway'].online()
+
+
+def test_stage8_continuity_handoff_rejects_target_without_ai_chat_scope(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    source, source_token = registry.enroll('Source', 'ios')
+    target, _ = registry.enroll('Target', 'windows')
+    registry.set_permissions(target['id'], {'device:read'})
+    thread_id = runtime['continuity'].resume(source['id'])['thread']['id']
+
+    response = client.post(
+        '/continuity/handoff',
+        json={'thread_id': thread_id, 'to_device': target['id']},
+        headers=auth_headers(source, source_token),
+    )
+    assert response.status_code == 403
+    assert runtime['continuity'].active_for_device(target['id']) is None
