@@ -760,3 +760,21 @@ def test_stage8_stale_server_reauth_blocks_owner_credential_changes(tmp_path):
 
     assert runtime['owner_access'].password_configured() is False
     assert runtime['owner_access'].recovery_codes_remaining() == 0
+
+
+def test_stage8_rotating_forwarded_addresses_cannot_bypass_global_access_limit(tmp_path):
+    client, _ = make_client(tmp_path)
+    for index in range(25):
+        response = client.post(
+            '/iphone/api/enroll',
+            json={'code': 'wrong'},
+            headers={'x-forwarded-for': f'198.51.100.{index + 1}'},
+        )
+        assert response.status_code == 401
+
+    blocked = client.post(
+        '/iphone/api/enroll',
+        json={'code': 'wrong'},
+        headers={'x-forwarded-for': '203.0.113.250'},
+    )
+    assert blocked.status_code == 429
