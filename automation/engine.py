@@ -12,6 +12,7 @@ from pathlib import Path
 from agent.executor import ConfirmationRequired, ExecutionCancelled
 from automation.budget import DEFAULT_POLICY, WorkflowBudgetError, WorkflowBudgetManager, WorkflowRecoveryRequired, normalize_policy
 from automation.conditions import evaluate_condition
+from security.projection_redaction import sanitize_external_value, sanitize_sensitive_text
 
 
 def now():
@@ -215,7 +216,7 @@ class AutomationEngine:
                     self._update_run(run_id,status='recovery_required',error=exc.user_message,completed_at=None); self.budgets.release(run_id,reason=exc.user_message); self._emit('workflow.recovery_required',run_id=run_id,workflow_id=wf['id'],reason=exc.user_message); return
                 except WorkflowBudgetError as exc: self._budget_terminal(run_id,self._run(run_id),wf,exc); return
                 except Exception as exc:
-                    rollback=self._rollback(wf,completed,context,run,run_id); self._update_run(run_id,status='failed',error=str(exc),context_json=json.dumps(context,default=str),completed_steps_json=json.dumps(completed,default=str),result_json=json.dumps({'rollback':rollback},default=str),completed_at=now()); self.budgets.release(run_id,reason='workflow failed'); self._emit('workflow.failed',run_id=run_id,workflow_id=wf['id'],error=str(exc),rollback=rollback); return
+                    rollback=self._rollback(wf,completed,context,run,run_id); safe_error=sanitize_sensitive_text(str(exc))[:1000]; self._update_run(run_id,status='failed',error=safe_error,context_json=json.dumps(context,default=str),completed_steps_json=json.dumps(completed,default=str),result_json=json.dumps({'rollback':rollback},default=str),completed_at=now()); self.budgets.release(run_id,reason='workflow failed'); self._emit('workflow.failed',run_id=run_id,workflow_id=wf['id'],error=safe_error,rollback=rollback); return
                 if self._run(run_id)['status']=='cancelled': return
                 completed.append({'step':index,'kind':step['kind'],'result':result}); context[f'step_{index+1}']=result; index+=1; self.budgets.increment_completed_steps(run_id); self._update_run(run_id,current_step=index,context_json=json.dumps(context,default=str),completed_steps_json=json.dumps(completed,default=str)); self._emit('workflow.step.completed',run_id=run_id,workflow_id=wf['id'],step=index,kind=step['kind'])
             result={'completed_steps':completed,'context':context}
@@ -407,7 +408,7 @@ class AutomationEngine:
             if condition and not evaluate_condition(condition,context): result={'executed':False,'reason':'condition_false'}; self._emit('automation.skipped',automation_id=row['id'])
             else: result={'executed':True,'reply':self.executor.chat(row['prompt'])}; self._emit('automation.completed',automation_id=row['id'])
         except ConfirmationRequired as approval: result={'executed':False,'reason':'approval_required','approval_id':approval.approval_id}; self._emit('automation.approval_required',automation_id=row['id'],approval_id=approval.approval_id,tool=approval.tool_name)
-        except Exception as exc: result={'executed':False,'error':str(exc)}; self._emit('automation.failed',automation_id=row['id'],error=type(exc).__name__)
+        except Exception as exc: result={'executed':False,'error':sanitize_sensitive_text(str(exc))[:1000]}; self._emit('automation.failed',automation_id=row['id'],error=type(exc).__name__)
         finally:
             with self._con() as con:
                 if row['interval_seconds']:
