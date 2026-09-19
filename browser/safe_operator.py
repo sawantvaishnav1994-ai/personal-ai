@@ -90,7 +90,14 @@ class SafeBrowserOperator:
         return out[:50]
 
     def execute(self,a:BrowserAction,*,approved:bool=False,reauthenticated:bool=False)->BrowserResult:
-        self._validate(a); tx=self._ensure_tx(a)
+        try:
+            self._validate(a)
+        except TargetValidationError as exc:
+            # Invalid external destinations are a policy denial, not an
+            # unhandled operator exception.  Preserve the public execution
+            # contract while still rejecting them before browser dispatch.
+            return BrowserResult('denied',exc.reason_code,a.transaction_id)
+        tx=self._ensure_tx(a)
         if tx.get('state')=='recovery_review_required':
             return BrowserResult('recovery_review_required','recovery_review_required',a.transaction_id)
         if tx.get('cancel_requested'): return self._cancel(a,'cancelled')
