@@ -189,6 +189,28 @@ def test_owner_can_manage_other_device_and_revocation_is_immediate(tmp_path):
     assert revoked.json()['revoked_sessions'] == {'pwa_sessions': 1, 'cloud_sessions': 1}
 
 
+def test_workflow_permission_revocation_cancels_device_bound_work(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+    other, _ = runtime['device_registry'].enroll('Workflow browser', 'web')
+    runtime['device_registry'].set_permissions(other['id'], {'ai:chat', 'workflow:write'})
+
+    cancelled = []
+    runtime['automations'].cancel_device_runs = (
+        lambda device_id, *, reason='device_revoked':
+        cancelled.append((device_id, reason)) or 2
+    )
+
+    response = client.patch(
+        f"/iphone/api/devices/{other['id']}/permissions",
+        json={'scopes': ['ai:chat']},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['cancelled_turns'] == 0
+    assert response.json()['cancelled_workflows'] == 2
+    assert cancelled == [(other['id'], 'workflow_permission_revoked')]
+
+
 def test_ui_preferences_are_scoped_to_the_trusted_device_and_persist(tmp_path):
     client, runtime, owner = make_client(tmp_path)
 
