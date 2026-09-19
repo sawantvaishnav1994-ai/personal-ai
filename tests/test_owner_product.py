@@ -375,3 +375,54 @@ def test_stage8_stale_reauthentication_blocks_security_controls(tmp_path):
     stop_again = client.post('/iphone/api/system/emergency-stop', json={'enabled': True})
     assert stop_again.status_code == 200
     assert runtime['tools'].emergency_stop is True
+
+
+def test_stage8_owner_manual_workflow_retry_reuses_one_durable_run(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+    created = client.post('/iphone/api/workflows', json={
+        'title': 'Idempotent owner run',
+        'trigger': {'type': 'manual'},
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert created.status_code == 200
+    workflow_id = created.json()['id']
+
+    missing = client.post(f'/iphone/api/workflows/{workflow_id}/run', json={'context': {}})
+    assert missing.status_code == 422
+
+    body = {'context': {'source': 'owner-ui'}, 'idempotency_key': 'owner-run-request-0001'}
+    first = client.post(f'/iphone/api/workflows/{workflow_id}/run', json=body)
+    second = client.post(f'/iphone/api/workflows/{workflow_id}/run', json=body)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()['run_id'] == second.json()['run_id']
+    matching = [row for row in runtime['automations'].runs(workflow_id, 20) if row['idempotency_key'] == body['idempotency_key']]
+    assert len(matching) == 1
+
+
+def test_stage8_owner_workflow_payloads_are_bounded(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    nested = {}
+    cursor = nested
+    for _ in range(12):
+        cursor['next'] = {}
+        cursor = cursor['next']
+
+    create = client.post('/iphone/api/workflows', json={
+        'title': 'nested',
+        'trigger': nested,
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert create.status_code == 413
+
+    valid = client.post('/iphone/api/workflows', json={
+        'title': 'valid',
+        'trigger': {'type': 'manual'},
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert valid.status_code == 200
+    run = client.post(
+        f"/iphone/api/workflows/{valid.json()['id']}/run",
+        json={'context': nested, 'idempotency_key': 'owner-run-request-0002'},
+    )
+    assert run.status_code == 413
