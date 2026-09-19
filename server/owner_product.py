@@ -194,6 +194,19 @@ def owner_product_router(runtime):
             'reauthenticated_at': context.reauthenticated_at if context is not None else None,
         }
 
+    def workflow_binding_matches(engine, run_id: str, auth: dict) -> bool:
+        reader = getattr(engine, 'run_binding', None)
+        if not callable(reader):
+            return False
+        binding = reader(run_id)
+        if not binding:
+            return False
+        return (
+            binding.get('owner_id') in (None, auth['owner_id'])
+            and binding.get('device_id') in (None, auth['device_id'])
+            and binding.get('session_id') in (None, auth['session_id'])
+        )
+
     def knowledge_access(device_id: str):
         classes = {'owner', 'trusted-devices'}
         if not hasattr(registry, 'authorize') or registry.authorize(device_id, 'knowledge:private'):
@@ -572,9 +585,14 @@ def owner_product_router(runtime):
 
     @router.get('/workflows')
     def workflows(pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
-        authenticate(pa_device, pa_token, 'workflow:read')
+        device_id = authenticate(pa_device, pa_token, 'workflow:read')
         engine = runtime['automations']
-        return {'workflows': engine.workflows(), 'runs': engine.runs(limit=100)}
+        auth = workflow_authority(device_id)
+        runs = [
+            row for row in engine.runs(limit=100)
+            if workflow_binding_matches(engine, row.get('id'), auth)
+        ]
+        return {'workflows': engine.workflows(), 'runs': runs}
 
     @router.post('/workflows')
     def workflow_create(body: WorkflowCreateBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
@@ -657,18 +675,22 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/approve')
     def workflow_approve(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        engine = runtime['automations']
+        auth = workflow_authority(device_id)
+        if not workflow_binding_matches(engine, run_id, auth):
+            raise HTTPException(403, 'Workflow authority mismatch')
         try:
-            run = runtime['automations']._run(run_id)
+            run = engine._run(run_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            result = runtime['automations'].approve_run(
+            result = engine.approve_run(
                 run_id,
                 approval_id,
-                **workflow_authority(device_id),
+                **auth,
             )
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
@@ -680,17 +702,20 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/reject')
     def workflow_reject(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        engine = runtime['automations']
+        authority = workflow_authority(device_id)
+        if not workflow_binding_matches(engine, run_id, authority):
+            raise HTTPException(403, 'Workflow authority mismatch')
         try:
-            run = runtime['automations']._run(run_id)
+            run = engine._run(run_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            authority = workflow_authority(device_id)
             authority.pop('reauthenticated_at', None)
-            result = runtime['automations'].reject_run(run_id, approval_id, **authority)
+            result = engine.reject_run(run_id, approval_id, **authority)
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
         except (KeyError, RuntimeError) as exc:
