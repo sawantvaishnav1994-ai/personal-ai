@@ -210,14 +210,14 @@ def test_restart_fences_inflight_consequential_dispatch_and_blocks_redispatch(tm
         dispatch_id=first.begin_dispatch('tool','external-write:stable-hash')
     before=first.status('r')
     assert before['reserved_concurrency'] is True
-    assert before['dispatch'][0]['status']=='dispatching'
+    assert before['dispatches'][0]['status']=='dispatching'
 
     reopened=WorkflowBudgetManager(path)
     recovered=reopened.status('r')
     assert recovered['reserved_concurrency'] is False
-    assert recovered['dispatch'][0]['dispatch_id']==dispatch_id
-    assert recovered['dispatch'][0]['status']=='uncertain'
-    assert recovered['dispatch'][0]['uncertainty']=='runtime_restart_before_dispatch_completion'
+    assert recovered['dispatches'][0]['dispatch_id']==dispatch_id
+    assert recovered['dispatches'][0]['status']=='uncertain'
+    assert recovered['dispatches'][0]['uncertainty']=='runtime_restart_before_dispatch_completion'
     assert 'verification/recovery required' in recovered['stop_reason'].lower()
     assert any(x.get('decision')=='recovery_required' for x in recovered['decision_history'])
 
@@ -227,5 +227,5 @@ def test_restart_fences_inflight_consequential_dispatch_and_blocks_redispatch(tm
 
     # Recovery evidence remains durable and inspectable after another restart.
     again=WorkflowBudgetManager(path).status('r')
-    assert again['dispatch'][0]['status']=='uncertain'
+    assert again['dispatches'][0]['status']=='uncertain'
     assert again['reserved_concurrency'] is False
