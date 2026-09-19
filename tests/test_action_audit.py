@@ -49,3 +49,20 @@ def test_trusted_action_audit_detects_tail_deletion_via_anchor(tmp_path):
     result = audit.verify_chain()
     assert result['ok'] is False
     assert result['reason'] == 'audit anchor mismatch'
+
+
+def test_trusted_action_audit_redacts_session_identity_without_destroying_public_ids(tmp_path):
+    audit = TrustedActionAudit(tmp_path / 'trusted-action-audit.sqlite3')
+    audit.append('approval', 'approved', {
+        'session_id': 'session-secret-123',
+        'device_id': 'device-public-123',
+        'request_id': 'request-public-123',
+        'execution_id': 'execution-public-123',
+    })
+
+    payload = audit.entries(1)[0]['payload']
+    assert payload['session_id'] == REDACTED
+    assert payload['device_id'] == 'device-public-123'
+    assert payload['request_id'] == 'request-public-123'
+    assert payload['execution_id'] == 'execution-public-123'
+    assert audit.verify_chain()['ok'] is True
