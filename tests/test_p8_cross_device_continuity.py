@@ -321,5 +321,14 @@ def test_stage8_handoff_target_revoked_at_precommit_boundary_fails_closed(tmp_pa
     monkeypatch.setattr(continuity,'set_active',revoke_before_commit)
     with pytest.raises(PermissionError,match='trusted active device'):
         sync.handoff(device_id=first['id'],session_id='s1',to_device=second['id'],thread_id=thread)
+
+    # Inspect durable state before active_for_device(), whose fallback is
+    # intentionally mutating and could otherwise manufacture the residue.
+    with continuity.lock, continuity._con() as con:
+        durable = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert durable is None or durable['active_thread_id'] is None
     assert continuity.active_for_device(second['id']) is None
     assert [e for e in continuity.events_for_thread(thread) if e['kind']=='handoff']==[]
