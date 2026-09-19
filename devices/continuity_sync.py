@@ -441,7 +441,12 @@ class ContinuitySync:
         # endpoints at the final handoff activation boundary.
         source = self._assert_device(source)
         target = self._assert_device(target)
-        self.continuity.set_active(target, thread['id'])
+
+        def handoff_authority_guard():
+            self._assert_device(source)
+            self._assert_device(target)
+
+        self.continuity.set_active(target, thread['id'], authority_guard=handoff_authority_guard)
         event = self.continuity.append(thread['id'], device_id=source, kind='handoff', payload={'from_device': source, 'to_device': target})
         self._emit('continuity.handoff', thread_id=thread['id'], from_device=source, to_device=target)
         return {
