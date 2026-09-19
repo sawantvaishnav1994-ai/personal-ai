@@ -22,6 +22,7 @@ class PairConfirm(BaseModel):
 
 class PairedCommand(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
+    request_id: str = Field(min_length=16, max_length=160)
 
 
 class SessionStart(BaseModel):
@@ -86,6 +87,7 @@ class WorkflowCreateBody(BaseModel):
 
 class WorkflowRunBody(BaseModel):
     workflow_id: str = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=16, max_length=160)
 
 
 class WorkflowPauseBody(BaseModel):
@@ -288,7 +290,7 @@ def create_app(
         x_device_id: str | None = Header(default=None),
     ):
         device_id = auth_device(authorization, x_device_id)
-        return {'reply': executor.chat(body.text, device_id=device_id)}
+        return {'reply': executor.chat(body.text, device_id=device_id, request_id=body.request_id)}
 
     # ------------------------------------------------------------------
     # P2 trusted-device capability API
@@ -426,6 +428,7 @@ def create_app(
             background=True,
             owner_id='owner',
             device_id=device_id,
+            idempotency_key=body.idempotency_key,
         )
         return {'run_id': run_id}
 

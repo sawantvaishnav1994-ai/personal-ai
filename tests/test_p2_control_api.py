@@ -16,7 +16,11 @@ from server.api import create_app
 
 
 class Executor:
+    def __init__(self):
+        self.chat_calls = []
+
     def chat(self, text, cancel_event=None, **kwargs):
+        self.chat_calls.append((text, dict(kwargs)))
         return f'reply:{text}'
 
     def approve(self, approval_id, **kwargs):
@@ -53,6 +57,7 @@ def build_client(tmp_path):
     )
     runtime = {
         'events': events,
+        'executor': executor,
         'continuity': continuity,
         'proactive': proactive,
         'automations': automations,
@@ -324,3 +329,52 @@ def test_stage8_continuity_handoff_rejects_target_without_ai_chat_scope(tmp_path
     )
     assert response.status_code == 403
     assert runtime['continuity'].active_for_device(target['id']) is None
+
+
+def test_stage8_legacy_command_requires_and_forwards_stable_request_identity(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    device, token = registry.enroll('Command device', 'android')
+    headers = auth_headers(device, token)
+
+    missing = client.post('/command', json={'text': 'do it'}, headers=headers)
+    assert missing.status_code == 422
+
+    request_id = 'request-identity-0001'
+    response = client.post(
+        '/command',
+        json={'text': 'do it', 'request_id': request_id},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert runtime['executor'].chat_calls[-1][1]['request_id'] == request_id
+    assert runtime['executor'].chat_calls[-1][1]['device_id'] == device['id']
+
+
+def test_stage8_manual_workflow_retry_reuses_one_durable_run(tmp_path):
+    client, runtime, registry = build_client(tmp_path)
+    device, token = registry.enroll('Workflow device', 'android')
+    registry.set_permissions(device['id'], registry.OWNER_SCOPES)
+    headers = auth_headers(device, token)
+    created = client.post(
+        '/workflows/create',
+        json={
+            'title': 'Idempotent manual run',
+            'trigger': {'type': 'manual'},
+            'steps': [{'kind': 'set', 'key': 'value', 'value': 1}],
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200
+    workflow_id = created.json()['workflow_id']
+
+    missing = client.post('/workflows/run', json={'workflow_id': workflow_id}, headers=headers)
+    assert missing.status_code == 422
+
+    body = {'workflow_id': workflow_id, 'idempotency_key': 'manual-run-request-0001'}
+    first = client.post('/workflows/run', json=body, headers=headers)
+    second = client.post('/workflows/run', json=body, headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()['run_id'] == first.json()['run_id']
+    runs = [row for row in runtime['automations'].runs(workflow_id, 20) if row['idempotency_key'] == body['idempotency_key']]
+    assert len(runs) == 1
