@@ -285,13 +285,16 @@ class SafeBrowserOperator:
             loc.set_input_files(a.upload_path,timeout=a.timeout_ms)
             return {'uploaded':True,'file_sha256':current_digest,'dispatch_mode':mode}
         if a.kind=='download':
-            with p.expect_download(timeout=a.timeout_ms) as event:loc.click(timeout=a.timeout_ms)
-            dl=event.value;name=sanitize_download_filename(dl.suggested_filename)
+            # Revalidate the authorized filesystem object before clicking the
+            # download target.  A path replacement must fail closed before
+            # any external side effect can begin.
             expected_root=dict((a.parameters or {}).get('_validated_download_root_identity') or {})
             current_root=self._download_root_identity(a.download_root)
             if expected_root and current_root!=expected_root:
                 raise PermissionError('download root changed after authorization')
             root=Path(current_root['resolved'])
+            with p.expect_download(timeout=a.timeout_ms) as event:loc.click(timeout=a.timeout_ms)
+            dl=event.value;name=sanitize_download_filename(dl.suggested_filename)
             dest=root/name;stem,suffix=dest.stem,dest.suffix;n=1
             while dest.exists():dest=root/f'{stem} ({n}){suffix}';n+=1
             dl.save_as(str(dest))
