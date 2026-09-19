@@ -92,10 +92,22 @@ class OperationOutcomeMixin:
             error_type=type(exc).__name__,
             outcome_state=outcome,
         )
-    def operation(self, operation_id: str):
+    def operation(self, operation_id: str, *, owner_id=None, device_id=None, session_id=None):
         operation = self._delegation(operation_id)
         if not operation:
             return None
+        if any(value is not None for value in (owner_id, device_id, session_id)):
+            if not all(value is not None for value in (owner_id, device_id, session_id)):
+                return None
+            try:
+                self._assert_owner(
+                    operation,
+                    owner_id=owner_id,
+                    device_id=device_id,
+                    session_id=session_id,
+                )
+            except PermissionError:
+                return None
         safe = dict(operation)
         safe.pop('session_id', None)
         safe.pop('security_epoch', None)
@@ -133,7 +145,7 @@ class OperationOutcomeMixin:
             'everyday_item_id': plan.get('everyday_item_id'),
             'created_at': plan.get('created_at'),
         }
-    def operations(self, *, status='all', everyday_item_id=None, limit=100):
+    def operations(self, *, status='all', everyday_item_id=None, limit=100, owner_id=None, device_id=None, session_id=None):
         if self._db is None:
             return []
         clauses = []
@@ -156,9 +168,21 @@ class OperationOutcomeMixin:
                 f'SELECT operation_id FROM operation_delegations{where} ORDER BY created_at DESC LIMIT ?',
                 params,
             ).fetchall()
-        return [self.operation(row['operation_id']) for row in rows]
-    def safe_status(self):
-        rows = self.operations(status='all', limit=1000)
+        items = [
+            self.operation(
+                row['operation_id'],
+                owner_id=owner_id,
+                device_id=device_id,
+                session_id=session_id,
+            )
+            for row in rows
+        ]
+        return [item for item in items if item is not None]
+    def safe_status(self, *, owner_id=None, device_id=None, session_id=None):
+        rows = self.operations(
+            status='all', limit=1000,
+            owner_id=owner_id, device_id=device_id, session_id=session_id,
+        )
         return {
             'active': sum(1 for row in rows if row['status'] in self.ACTIVE),
             'waiting_approval': sum(1 for row in rows if row['status'] == 'waiting_approval'),
