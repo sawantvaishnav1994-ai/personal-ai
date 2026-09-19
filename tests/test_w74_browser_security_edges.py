@@ -85,6 +85,13 @@ def test_navigation_rejects_unsafe_or_private_targets_before_dispatch(url):
         op._validate(BrowserAction('open_url','t',url=url))
 
 
+def test_execute_reports_unsafe_navigation_as_denied_without_browser_dispatch():
+    op=object.__new__(SafeBrowserOperator)
+    op.browser=type('NeverBrowser',(),{'start':lambda self: (_ for _ in ()).throw(AssertionError('browser dispatch must not start'))})()
+    r=op.execute(BrowserAction('open_url','tx-private',url='http://127.0.0.1/admin'))
+    assert r.status=='denied' and r.reason_code=='destination_not_allowed'
+
+
 def test_public_navigation_target_is_valid():
     op=object.__new__(SafeBrowserOperator)
     op._validate(BrowserAction('open_url','t',url='https://example.com/path'))
