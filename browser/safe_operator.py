@@ -190,7 +190,9 @@ class SafeBrowserOperator:
         ops=[PolicyOperation(op_class,self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'domain',{'url':url},None,url,self._safe_params(a),a.data_classification)]
         if a.upload_path:
             validate_file_metadata(a.upload_path,claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
-            ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':self._file_digest(a.upload_path)},a.data_classification))
+            upload_digest=self._file_digest(a.upload_path)
+            a.parameters['_validated_upload_sha256']=upload_digest
+            ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':upload_digest},a.data_classification))
         if a.kind=='download':
             canonical_path(a.download_root,[a.download_root])
             ops.append(PolicyOperation('download',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.download_root,'approved_roots':[a.download_root]},None,a.download_root,{'root_digest':digest(a.download_root)},a.data_classification))
@@ -264,7 +266,13 @@ class SafeBrowserOperator:
         if a.kind=='select':loc.select_option(label=a.option,timeout=a.timeout_ms);return {'selected':True,'dispatch_mode':mode}
         if a.kind=='check':loc.check(timeout=a.timeout_ms);return {'checked':True,'dispatch_mode':mode}
         if a.kind=='uncheck':loc.uncheck(timeout=a.timeout_ms);return {'unchecked':True,'dispatch_mode':mode}
-        if a.kind=='upload':loc.set_input_files(a.upload_path,timeout=a.timeout_ms);return {'uploaded':True,'file_sha256':self._file_digest(a.upload_path),'dispatch_mode':mode}
+        if a.kind=='upload':
+            expected_digest=str((a.parameters or {}).get('_validated_upload_sha256') or '')
+            current_digest=self._file_digest(a.upload_path)
+            if expected_digest and current_digest!=expected_digest:
+                raise PermissionError('upload file changed after authorization')
+            loc.set_input_files(a.upload_path,timeout=a.timeout_ms)
+            return {'uploaded':True,'file_sha256':current_digest,'dispatch_mode':mode}
         if a.kind=='download':
             with p.expect_download(timeout=a.timeout_ms) as event:loc.click(timeout=a.timeout_ms)
             dl=event.value;name=sanitize_download_filename(dl.suggested_filename);root=Path(a.download_root).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
