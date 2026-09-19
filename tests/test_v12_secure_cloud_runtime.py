@@ -8,9 +8,12 @@ class FakeMemory:
     def audit(self,*args):self.audit_rows.append(args)
     def search(self,q,limit=20):return list(self.rows)
 class FakeDevices:
-    def __init__(self):self.active=True
+    def __init__(self):
+        self.active=True
+        self.scopes={'ai:chat','device:read','memory:read'}
     def authenticate(self,device_id,token):return self.active and device_id=='dev1' and token=='device-secret'
     def is_active(self,device_id):return self.active and device_id=='dev1'
+    def authorize(self,device_id,scope):return self.is_active(device_id) and scope in self.scopes
 class FakeExecutor:
     def chat(self,text):return 'reply:'+text
     def approve(self,approval_id):return 'approved'
@@ -124,3 +127,29 @@ def test_stage7_command_and_approval_revalidate_live_session_at_use_time():
     approval = source.index('def approval(self, session, approval_id: str, decision: str):')
     assert 'session = self._live_session(session)' in source[command:command+500]
     assert 'session = self._live_session(session)' in source[approval:approval+500]
+
+
+def test_stage8_cloud_scope_is_revalidated_against_live_device_permissions(tmp_path):
+    r=relay(tmp_path)
+    issued=r.issue_session('dev1','device-secret')
+    token=issued.payload['session_token']
+    error,session=r.authenticate(token,'ai:chat')
+    assert error is None and session is not None
+
+    r.device_registry.scopes.remove('ai:chat')
+    error,session=r.authenticate(token,'ai:chat')
+    assert session is None
+    assert error.status==403
+    assert error.payload['error']=='device_permission_denied'
+
+    error,memory_session=r.authenticate(token,'memory:read')
+    assert error is None and memory_session is not None
+    assert r.sessions.authenticate(token) is not None
+
+
+def test_stage8_new_cloud_session_does_not_grant_revoked_device_scopes(tmp_path):
+    r=relay(tmp_path)
+    r.device_registry.scopes={'device:read','memory:read'}
+    issued=r.issue_session('dev1','device-secret')
+    assert issued.status==200
+    assert set(issued.payload['scopes'])=={'status:read','memory:read'}
