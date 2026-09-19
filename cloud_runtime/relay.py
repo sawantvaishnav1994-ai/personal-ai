@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from agent.durable_executor import ApprovalDispatchInProgress, ApprovalRecoveryRequired
 from agent.executor import ConfirmationRequired, ReauthenticationRequired
-from cloud_runtime.security import CloudSessionStore, OwnerAuthenticator
+from cloud_runtime.security import CloudSessionStore, DEFAULT_SCOPES, OwnerAuthenticator
 
 
 @dataclass
@@ -82,13 +82,9 @@ class SecureCloudRelay:
     def issue_session(self, device_id: str, device_token: str):
         if not self.device_registry or not self.device_registry.authenticate(device_id, device_token):
             return RelayResult(401, {'error': 'device_auth_failed'})
-        scopes = tuple(
-            scope for scope in self.sessions.DEFAULT_SCOPES
-        ) if hasattr(self.sessions, 'DEFAULT_SCOPES') else None
-        if scopes is None:
-            from cloud_runtime.security import DEFAULT_SCOPES
-            scopes = DEFAULT_SCOPES
-        allowed_scopes = tuple(scope for scope in scopes if self._device_scope_allowed(device_id, scope))
+        allowed_scopes = tuple(
+            scope for scope in DEFAULT_SCOPES if self._device_scope_allowed(device_id, scope)
+        )
         if not allowed_scopes:
             return RelayResult(403, {'error': 'device_permission_denied'})
         token, session = self.sessions.issue(device_id, scopes=allowed_scopes)
