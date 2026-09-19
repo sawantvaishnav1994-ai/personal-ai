@@ -242,6 +242,9 @@ class _RelayDevices:
     def is_active(self, device_id):
         return device_id == 'd1'
 
+    def authorize(self, device_id, scope):
+        return self.is_active(device_id) and scope == 'ai:chat'
+
 
 class _RelaySessions:
     def emergency_stopped(self):
