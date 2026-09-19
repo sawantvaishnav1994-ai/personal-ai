@@ -330,5 +330,14 @@ def test_stage8_handoff_target_revoked_at_precommit_boundary_fails_closed(tmp_pa
             (second['id'],),
         ).fetchone()
     assert durable is None or durable['active_thread_id'] is None
-    assert continuity.active_for_device(second['id']) is None
+    with pytest.raises(PermissionError,match='trusted active device'):
+        continuity.active_for_device(
+            second['id'], authority_guard=lambda: sync._assert_device(second['id'])
+        )
+    with continuity.lock, continuity._con() as con:
+        durable_after_lookup = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert durable_after_lookup is None or durable_after_lookup['active_thread_id'] is None
     assert [e for e in continuity.events_for_thread(thread) if e['kind']=='handoff']==[]
