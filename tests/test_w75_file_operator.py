@@ -77,9 +77,10 @@ def test_parent_identity_revalidation_detects_replacement(tmp_path):
     parent=root/'parent';parent.mkdir()
     destination=parent/'out.txt'
     expected_parent=parent.resolve()
+    st=expected_parent.stat(); expected_identity=(st.st_dev,st.st_ino)
     original=root/'parent-authorized'
     parent.rename(original)
     parent.mkdir()
     with pytest.raises(TargetValidationError) as exc:
-        SafeFileAdapter._revalidate_parent(destination,[str(root)],expected_parent)
+        SafeFileAdapter._revalidate_parent(destination,[str(root)],expected_parent,expected_identity)
     assert exc.value.reason_code=='path_changed'
