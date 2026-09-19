@@ -359,3 +359,59 @@ def test_stage8_verified_no_effect_retry_prohibited_stays_fenced(tmp_path):
     engine.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
     assert engine.budget_status(rid)['dispatches'][0]['status']=='uncertain'
     with pytest.raises(WorkflowBudgetError): engine.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+
+
+def _verify_recovery_effect(authority,txid,source):
+    with authority._con() as con: row=dict(con.execute('SELECT * FROM operator_dispatch_attempts WHERE transaction_id=?',(txid,)).fetchone())
+    stamp=time.time()
+    return authority.record_verification(VerificationRecord(transaction_id=txid,action_id=row['action_id'],dispatch_id=row['dispatch_id'],idempotency_key=source,operation_class=row['operation_class'],target=row['target'],destination=row['destination'],precondition={'source':source},expected_postcondition={'effect':'occurred'},observed_postcondition={'effect':'occurred'},verifier_identity='stage8-race-observer',verifier_version='1',evidence_references=('audit:race',),evidence_checksum='',verification_timestamp=stamp,verification_fresh_until=stamp+300,result='verified_success',explanation='effect independently observed',confidence=1.0))
+
+
+def test_stage8_concurrent_w7_resolution_vs_resume_never_bypasses_fence(tmp_path):
+    path,ex,engine,rid,source,txid=_uncertain_recovery_run(tmp_path); authority=ex.tools.ensure_recovery_authority(); calls_before=ex.calls
+    barrier=threading.Barrier(2); outcomes=[]
+    def resolve():
+        barrier.wait()
+        _verify_recovery_effect(authority,txid,source)
+        engine.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+        outcomes.append('resolved')
+    def resume():
+        barrier.wait()
+        try:
+            engine.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1'); outcomes.append('resumed')
+        except (WorkflowBudgetError,RuntimeError): outcomes.append('blocked')
+    a=threading.Thread(target=resolve); b=threading.Thread(target=resume); a.start(); b.start(); a.join(); b.join()
+    assert 'resolved' in outcomes
+    assert ex.calls==calls_before
+    assert engine.budget_status(rid)['dispatches'][0]['status']=='reconciled_effect'
+    # Repeated durable reconciliation is replay-safe and cannot consume the
+    # recovery result into another original dispatch.
+    engine.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert ex.calls==calls_before
+    if engine._run(rid)['status']=='recovery_required':
+        engine.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert engine._run(rid)['status']=='completed' and ex.calls==calls_before
+
+
+def test_stage8_restart_converges_from_durable_w7_resolution_before_workflow_reconcile(tmp_path):
+    path,ex,engine,rid,source,txid=_uncertain_recovery_run(tmp_path); authority=ex.tools.ensure_recovery_authority(); calls_before=ex.calls
+    _verify_recovery_effect(authority,txid,source)
+    # Crash boundary: W7 verification is committed, but AutomationEngine has
+    # not yet projected/reconciled that durable result into workflow state.
+    before=engine.budget_status(rid)
+    assert before['dispatches'][0]['status']=='uncertain'
+    restarted=AutomationEngine(path,executor=ex)
+    assert restarted._run(rid)['status']=='recovery_required'
+    with pytest.raises(WorkflowBudgetError):
+        restarted.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert ex.calls==calls_before
+    restarted.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert restarted.budget_status(rid)['dispatches'][0]['status']=='reconciled_effect'
+    assert restarted._run(rid)['current_step']==1
+    # A second restart derives the same safe state from durable W7 evidence.
+    again=AutomationEngine(path,executor=ex)
+    again.refresh_recovery(rid,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert again._run(rid)['current_step']==1
+    again.resume_run(rid,background=False,owner_id='owner',device_id='device-1',session_id='session-1')
+    assert again._run(rid)['status']=='completed'
+    assert ex.calls==calls_before
