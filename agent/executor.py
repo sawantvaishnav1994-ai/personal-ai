@@ -246,7 +246,7 @@ class AgentExecutor:
         )
         if not context:
             return (
-                'You are Personal AI. Be helpful, concise, and honest. Never claim to remember or know a source that was not provided. '
+                'You are Personal AI. Be helpful, concise, and honest. Never claim to remember or know a source that was not provided. Never invent a memory or citation. '
                 + guardrails
             )
         return (
