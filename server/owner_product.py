@@ -624,6 +624,22 @@ def owner_product_router(runtime):
         audit('workflow.cancelled', device_id=device_id, run_id=run_id)
         return result
 
+    @router.post('/workflows/runs/{run_id}/recovery/link')
+    def workflow_recovery_link(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
+        device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        try: result = runtime['automations'].link_recovery(run_id, **workflow_authority(device_id))
+        except KeyError as exc: raise HTTPException(404, 'Workflow run not found') from exc
+        except (RuntimeError, PermissionError) as exc: raise HTTPException(409, str(exc)) from exc
+        audit('workflow.recovery_linked', device_id=device_id, run_id=run_id, recovery_transaction_id=result['recovery_transaction_id'])
+        return result
+
+    @router.post('/workflows/runs/{run_id}/recovery/refresh')
+    def workflow_recovery_refresh(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
+        device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        try: return runtime['automations'].refresh_recovery(run_id, **workflow_authority(device_id))
+        except KeyError as exc: raise HTTPException(404, 'Workflow run not found') from exc
+        except (RuntimeError, PermissionError) as exc: raise HTTPException(409, str(exc)) from exc
+
     @router.post('/workflows/runs/{run_id}/resume')
     def workflow_resume(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
