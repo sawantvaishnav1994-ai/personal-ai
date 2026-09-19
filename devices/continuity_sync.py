@@ -437,6 +437,10 @@ class ContinuitySync:
         thread = self.continuity.thread(thread_id) if thread_id else self.continuity.active_for_device(source)
         if not thread or thread.get('closed_at'):
             raise KeyError('active continuity thread not found')
+        # Connection-time trust is not durable authority. Revalidate both
+        # endpoints at the final handoff activation boundary.
+        source = self._assert_device(source)
+        target = self._assert_device(target)
         self.continuity.set_active(target, thread['id'])
         event = self.continuity.append(thread['id'], device_id=source, kind='handoff', payload={'from_device': source, 'to_device': target})
         self._emit('continuity.handoff', thread_id=thread['id'], from_device=source, to_device=target)
