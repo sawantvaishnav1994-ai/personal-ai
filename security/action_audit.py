@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from security.projection_redaction import sanitize_sensitive_text
+
 
 REDACTED = '[REDACTED]'
 SENSITIVE_KEY_PARTS = (
@@ -31,11 +33,9 @@ def redact_audit_value(value: Any, key: str = '') -> Any:
         return f'<bytes:{len(value)}>'
     text = str(value) if not isinstance(value, (str, int, float, bool, type(None))) else value
     if isinstance(text, str):
-        low = text.lower().strip()
-        if low.startswith(('bearer ', 'basic ')):
-            return REDACTED
-        if '-----begin private key-----' in low or '-----begin rsa private key-----' in low:
-            return REDACTED
+        sanitized = sanitize_sensitive_text(text)
+        if sanitized != text:
+            return sanitized
     return text
 
 
