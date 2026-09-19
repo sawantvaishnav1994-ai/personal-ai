@@ -229,3 +229,34 @@ def test_restart_fences_inflight_consequential_dispatch_and_blocks_redispatch(tm
     again=WorkflowBudgetManager(path).status('r')
     assert again['dispatches'][0]['status']=='uncertain'
     assert again['reserved_concurrency'] is False
+
+
+def test_stage8_engine_resume_cannot_turn_uncertain_dispatch_into_redispatch(tmp_path):
+    path=tmp_path/'workflow.sqlite3'; ex=Executor(); engine=AutomationEngine(path,executor=ex)
+    wid=workflow(engine,steps=[{'kind':'prompt','prompt':'external consequence','retries':0}])
+    rid=engine.run_workflow(wid,background=False)
+    # Reconstruct the dangerous crash window at the completed step checkpoint:
+    # consequential dispatch ownership exists, but its durable outcome is unknown.
+    with sqlite3.connect(path) as con:
+        con.execute("UPDATE workflow_runs SET status='running',current_step=0,completed_at=NULL WHERE id=?",(rid,))
+    with engine.budgets._con() as con:
+        con.execute("DELETE FROM workflow_dispatches WHERE run_id=?",(rid,))
+        con.execute("UPDATE workflow_budget_runs SET reserved_concurrency=1,released_at=NULL,stop_reason=NULL WHERE run_id=?",(rid,))
+    with engine.budgets.enter(rid,0,0):
+        did=engine.budgets.begin_dispatch('tool','external-write:stable-hash')
+    calls_before=ex.calls
+
+    reopened=AutomationEngine(path,executor=ex)
+    assert reopened._run(rid)['status']=='recovery_required'
+    evidence=reopened.budget_status(rid)
+    assert evidence['dispatches'][0]['dispatch_id']==did
+    assert evidence['dispatches'][0]['status']=='uncertain'
+    assert evidence['dispatches'][0]['uncertainty']=='runtime_restart_before_dispatch_completion'
+    assert evidence['reserved_concurrency'] is False
+
+    with pytest.raises(WorkflowBudgetError,match='verification/recovery required'):
+        reopened.resume_run(rid,background=False)
+    assert ex.calls==calls_before
+    after=reopened.budget_status(rid)
+    assert after['dispatches'][0]['status']=='uncertain'
+    assert after['stop_reason']==evidence['stop_reason']
