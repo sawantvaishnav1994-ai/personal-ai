@@ -118,3 +118,25 @@ def test_upload_dispatch_rejects_file_changed_after_authorization(tmp_path):
     op._resolve_target=lambda page,target,action: ('dom',fake_locator)
     with pytest.raises(PermissionError,match='changed after authorization'):
         op._dispatch(action,_obs())
+
+
+def test_download_root_identity_changes_are_rejected(tmp_path):
+    root=tmp_path/'downloads'
+    root.mkdir()
+    op=object.__new__(SafeBrowserOperator)
+    authorized=op._download_root_identity(str(root))
+    original=root.with_name('downloads-authorized')
+    root.rename(original)
+    root.mkdir()
+    replacement=op._download_root_identity(str(root))
+    assert replacement!=authorized
+    action=BrowserAction('download','tx-download',target_id='download',download_root=str(root),parameters={'_validated_download_root_identity':authorized})
+    class NeverDownloadPage:
+        def expect_download(self,*args,**kwargs):
+            raise AssertionError('download must not start after root substitution')
+    op.browser=type('Browser',(),{'start':lambda self: None})()
+    op.browser.page=NeverDownloadPage()
+    op._target=lambda obs,target_id: {'target_id':target_id}
+    op._resolve_target=lambda page,target,action: ('dom',object())
+    with pytest.raises(PermissionError,match='download root changed after authorization'):
+        op._dispatch(action,_obs())
