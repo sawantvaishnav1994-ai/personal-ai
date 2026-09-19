@@ -395,8 +395,27 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id, 'workflow:read')
-        return require_runtime('automations').runs(workflow_id, max(1, min(int(limit), 500)))
+        device_id = auth_device(authorization, x_device_id, 'workflow:read')
+        engine = require_runtime('automations')
+        rows = engine.runs(workflow_id, max(1, min(int(limit), 500)))
+        binding_reader = getattr(engine, 'run_binding', None)
+        if not callable(binding_reader):
+            return rows
+        visible = []
+        for row in rows:
+            binding = binding_reader(row.get('id'))
+            if not binding:
+                continue
+            if binding.get('owner_id') not in (None, 'owner'):
+                continue
+            if binding.get('device_id') not in (None, device_id):
+                continue
+            # This legacy bearer-token transport has no browser session
+            # authority. Never expose a run that is explicitly session-bound.
+            if binding.get('session_id') is not None:
+                continue
+            visible.append(row)
+        return visible
 
     @app.post('/workflows/create')
     def workflow_create(
