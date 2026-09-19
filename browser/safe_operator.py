@@ -307,6 +307,11 @@ class SafeBrowserOperator:
         return h.hexdigest()
 
     def _validate(self,a):
+        # Validate navigation targets before any browser/network dispatch.  Policy
+        # evaluation also validates destinations, but navigation itself must fail
+        # closed even if a permissive/custom policy gateway is injected.
+        if a.kind in {'open_url','create_tab'} and a.url:
+            normalize_origin(a.url)
         allowed={'open_url','back','forward','refresh','create_tab','select_tab','close_tab','click','type','select','check','uncheck','scroll','wait_for','upload','download'}
         if a.kind not in allowed or not a.transaction_id:raise ValueError('invalid browser action')
         if a.kind in {'open_url','create_tab'} and not a.url:raise ValueError('URL required')
