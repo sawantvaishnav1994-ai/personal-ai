@@ -61,6 +61,13 @@ def register(reg, settings=None):
 
     reg.register(Tool("list_dir","List directory; params: path",list_dir,Risk.READ_ONLY))
     reg.register(Tool("read_file","Read text file; params: path",read_file,Risk.READ_ONLY))
-    reg.register(Tool("write_file","Write text file; params: path, content",write_file,Risk.REVERSIBLE))
-    reg.register(Tool("overwrite_file","Replace an existing text file; params: path, content",overwrite_file,Risk.DESTRUCTIVE))
-    reg.register(Tool("copy_file","Copy file; params: source, destination",copy_file,Risk.REVERSIBLE))
+
+    def legacy_mutation_disabled(_params):
+        raise PermissionError('legacy file mutation is disabled; use the governed desktop_file_act authority')
+
+    # Read compatibility remains bounded by owner-approved roots. Mutations are
+    # compatibility-only names so all authoritative filesystem changes flow
+    # through W7.5 trusted-context, durable transaction, verification/recovery.
+    reg.register(Tool("write_file","Legacy file write (disabled)",legacy_mutation_disabled,Risk.REVERSIBLE,prohibited=True))
+    reg.register(Tool("overwrite_file","Legacy file overwrite (disabled)",legacy_mutation_disabled,Risk.DESTRUCTIVE,prohibited=True))
+    reg.register(Tool("copy_file","Legacy file copy (disabled)",legacy_mutation_disabled,Risk.REVERSIBLE,prohibited=True))

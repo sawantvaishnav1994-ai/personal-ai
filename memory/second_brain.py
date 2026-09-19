@@ -123,7 +123,7 @@ class SecondBrain:
             if older['content'].strip().lower() == candidate.content.strip().lower():
                 continue
             old_confidence = float(older.get('confidence') or 0.0)
-            newer_supported = candidate.source in {'user', 'user-message', 'explicit-user'} and candidate.confidence + 0.05 >= old_confidence
+            newer_supported = candidate.source in {'user', 'user-message', 'explicit-user', 'explicit-owner'} and candidate.confidence + 0.05 >= old_confidence
             if candidate.type.lower() in self.VOLATILE_TYPES and newer_supported:
                 self.store.supersede(
                     older['id'],

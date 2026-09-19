@@ -72,7 +72,71 @@ def test_navigation_verification_uses_normalized_origin_objects():
     assert ok and reason=='navigation_verified'
 
 
+@pytest.mark.parametrize('url', [
+    'file:///etc/passwd',
+    'http://127.0.0.1/admin',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://[::1]/',
+    'https://user:password@example.com/',
+])
+def test_navigation_rejects_unsafe_or_private_targets_before_dispatch(url):
+    op=object.__new__(SafeBrowserOperator)
+    with pytest.raises(Exception):
+        op._validate(BrowserAction('open_url','t',url=url))
+
+
+def test_execute_reports_unsafe_navigation_as_denied_without_browser_dispatch():
+    op=object.__new__(SafeBrowserOperator)
+    op.browser=type('NeverBrowser',(),{'start':lambda self: (_ for _ in ()).throw(AssertionError('browser dispatch must not start'))})()
+    r=op.execute(BrowserAction('open_url','tx-private',url='http://127.0.0.1/admin'))
+    assert r.status=='denied' and r.reason_code=='destination_not_allowed'
+
+
+def test_public_navigation_target_is_valid():
+    op=object.__new__(SafeBrowserOperator)
+    op._validate(BrowserAction('open_url','t',url='https://example.com/path'))
+
+
 def test_https_downgrade_rejected_with_dataclass_origin_contract():
     op=object.__new__(SafeBrowserOperator)
     ok,reason=op._verify(BrowserAction('open_url','t',url='https://example.com/'),_obs(),_obs(origin='http://example.com',normalized_url='http://example.com/'),{})
     assert not ok and reason=='redirect_not_allowed'
+
+
+def test_upload_dispatch_rejects_file_changed_after_authorization(tmp_path):
+    path=tmp_path/'upload.txt'
+    path.write_text('authorized',encoding='utf-8')
+    op=object.__new__(SafeBrowserOperator)
+    expected=op._file_digest(str(path))
+    path.write_text('substituted',encoding='utf-8')
+    action=BrowserAction('upload','tx-upload',target_id='file',upload_path=str(path),parameters={'_validated_upload_sha256':expected})
+    fake_locator=type('Locator',(),{'set_input_files':lambda self,*args,**kwargs: (_ for _ in ()).throw(AssertionError('changed file must not be uploaded'))})()
+    fake_page=object()
+    op.browser=type('Browser',(),{'start':lambda self: None})()
+    op.browser.page=fake_page
+    op._target=lambda obs,target_id: {'target_id':target_id}
+    op._resolve_target=lambda page,target,action: ('dom',fake_locator)
+    with pytest.raises(PermissionError,match='changed after authorization'):
+        op._dispatch(action,_obs())
+
+
+def test_download_root_identity_changes_are_rejected(tmp_path):
+    root=tmp_path/'downloads'
+    root.mkdir()
+    op=object.__new__(SafeBrowserOperator)
+    authorized=op._download_root_identity(str(root))
+    original=root.with_name('downloads-authorized')
+    root.rename(original)
+    root.mkdir()
+    replacement=op._download_root_identity(str(root))
+    assert replacement!=authorized
+    action=BrowserAction('download','tx-download',target_id='download',download_root=str(root),parameters={'_validated_download_root_identity':authorized})
+    class NeverDownloadPage:
+        def expect_download(self,*args,**kwargs):
+            raise AssertionError('download must not start after root substitution')
+    op.browser=type('Browser',(),{'start':lambda self: None})()
+    op.browser.page=NeverDownloadPage()
+    op._target=lambda obs,target_id: {'target_id':target_id}
+    op._resolve_target=lambda page,target,action: ('dom',object())
+    with pytest.raises(PermissionError,match='download root changed after authorization'):
+        op._dispatch(action,_obs())

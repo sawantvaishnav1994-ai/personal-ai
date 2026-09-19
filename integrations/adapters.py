@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, requests
+import hashlib, json, requests
 from integrations.contracts import gmail_manifest, calendar_manifest, slack_manifest, home_assistant_manifest
 from integrations.gateway import ConnectorError
 
@@ -48,11 +48,16 @@ class GoogleCalendarAdapter(BearerREST):
     def __init__(self,token,*,gateway=None):super().__init__('https://www.googleapis.com/calendar/v3',token,gateway=gateway,connector_id='calendar')
     def list_events(self,calendar_id='primary',**params):
         ctx={k:params.pop(k) for k in list(params) if k in {'owner_id','device_id','session_id','destination','idempotency_key','cancelled','deadline'}}
-        return self.request('GET',f'calendars/{calendar_id}/events',params=params,operation=self.manifest.operation('calendar.search' if params.get('q') else 'calendar.read'),operation_parameters={'calendar_id':calendar_id,**params},destination=calendar_id,**ctx)
-    def get_event(self,event_id,calendar_id='primary',**ctx):return self.request('GET',f'calendars/{calendar_id}/events/{event_id}',operation=self.manifest.operation('calendar.read'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id},destination=calendar_id,**ctx)
-    def create_event(self,event,calendar_id='primary',**ctx):return self.request('POST',f'calendars/{calendar_id}/events',json=event,operation=self.manifest.operation('calendar.create'),operation_parameters={'calendar_id':calendar_id,'event':event},destination=calendar_id,**ctx)
-    def update_event(self,event_id,event,calendar_id='primary',**ctx):return self.request('PATCH',f'calendars/{calendar_id}/events/{event_id}',json=event,operation=self.manifest.operation('calendar.update'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id,'event':event},destination=calendar_id,**ctx)
-    def delete_event(self,event_id,calendar_id='primary',**ctx):return self.request('DELETE',f'calendars/{calendar_id}/events/{event_id}',operation=self.manifest.operation('calendar.delete'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id},destination=calendar_id,**ctx)
+        destination=ctx.pop('destination',calendar_id)
+        return self.request('GET',f'calendars/{calendar_id}/events',params=params,operation=self.manifest.operation('calendar.search' if params.get('q') else 'calendar.read'),operation_parameters={'calendar_id':calendar_id,**params},destination=destination,**ctx)
+    def get_event(self,event_id,calendar_id='primary',**ctx):
+        destination=ctx.pop('destination',calendar_id);return self.request('GET',f'calendars/{calendar_id}/events/{event_id}',operation=self.manifest.operation('calendar.read'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id},destination=destination,**ctx)
+    def create_event(self,event,calendar_id='primary',**ctx):
+        destination=ctx.pop('destination',calendar_id);return self.request('POST',f'calendars/{calendar_id}/events',json=event,operation=self.manifest.operation('calendar.create'),operation_parameters={'calendar_id':calendar_id,'event':event},destination=destination,**ctx)
+    def update_event(self,event_id,event,calendar_id='primary',**ctx):
+        destination=ctx.pop('destination',calendar_id);return self.request('PATCH',f'calendars/{calendar_id}/events/{event_id}',json=event,operation=self.manifest.operation('calendar.update'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id,'event':event},destination=destination,**ctx)
+    def delete_event(self,event_id,calendar_id='primary',**ctx):
+        destination=ctx.pop('destination',calendar_id);return self.request('DELETE',f'calendars/{calendar_id}/events/{event_id}',operation=self.manifest.operation('calendar.delete'),operation_parameters={'calendar_id':calendar_id,'event_id':event_id},destination=destination,**ctx)
     def verify_event(self,event_id,calendar_id='primary',expected=None):
         try:
             data=self.get_event(event_id,calendar_id)
@@ -69,12 +74,70 @@ class SlackAdapter(BearerREST):
     def _ok(self,data):
         if not data.get('ok'):raise IntegrationError('Slack rejected the request')
         return data
-    def auth_test(self):return self._ok(self.request('POST','auth.test'))
-    def history(self,channel,limit=50):return self._ok(self.request('GET','conversations.history',params={'channel':channel,'limit':limit}))
-    def post_message(self,channel,text):return self._ok(self.request('POST','chat.postMessage',json={'channel':channel,'text':text}))
+    def auth_test(self,**ctx):
+        return self._ok(self.request(
+            'POST','auth.test',
+            operation=self.manifest.operation('slack.read'),
+            operation_parameters={'healthcheck':True},
+            **ctx,
+        ))
+    def history(self,channel,limit=50,**ctx):
+        channel=str(channel).strip()[:200];limit=max(1,min(int(limit),100));destination=ctx.pop('destination',channel)
+        return self._ok(self.request(
+            'GET','conversations.history',
+            params={'channel':channel,'limit':limit},
+            operation=self.manifest.operation('slack.read'),
+            operation_parameters={'channel':channel,'limit':limit},
+            destination=destination,
+            **ctx,
+        ))
+    def post_message(self,channel,text,**ctx):
+        channel=str(channel).strip()[:200];text=str(text)[:40000];destination=ctx.pop('destination',channel)
+        return self._ok(self.request(
+            'POST','chat.postMessage',
+            json={'channel':channel,'text':text},
+            operation=self.manifest.operation('slack.send'),
+            operation_parameters={
+                'channel':channel,
+                'text_sha256':hashlib.sha256(text.encode()).hexdigest(),
+                'text_length':len(text),
+            },
+            destination=destination,
+            **ctx,
+        ))
 class HomeAssistantAdapter(BearerREST):
     manifest=home_assistant_manifest()
     def __init__(self,base_url,token,*,gateway=None):super().__init__(f'{base_url.rstrip("/")}/api',token,gateway=gateway,connector_id='home_assistant')
-    def states(self):return self.request('GET','states')
-    def state(self,entity_id):return self.request('GET',f'states/{entity_id}')
-    def call_service(self,domain,service,data):return self.request('POST',f'services/{domain}/{service}',json=data)
+    def states(self,**ctx):
+        return self.request(
+            'GET','states',
+            operation=self.manifest.operation('home_assistant.read'),
+            operation_parameters={'resource':'states'},
+            **ctx,
+        )
+    def state(self,entity_id,**ctx):
+        entity_id=str(entity_id).strip()[:240];destination=ctx.pop('destination',entity_id)
+        return self.request(
+            'GET',f'states/{entity_id}',
+            operation=self.manifest.operation('home_assistant.read'),
+            operation_parameters={'entity_id':entity_id},
+            destination=destination,
+            **ctx,
+        )
+    def call_service(self,domain,service,data,**ctx):
+        domain=str(domain).strip()[:120];service=str(service).strip()[:120];payload=dict(data or {})
+        entity_id=str(payload.get('entity_id') or '')[:240];destination=ctx.pop('destination',entity_id or f'{domain}.{service}')
+        safe_parameters={
+            'domain':domain,
+            'service':service,
+            'entity_id':entity_id,
+            'data_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True,default=str,separators=(',',':')).encode()).hexdigest(),
+        }
+        return self.request(
+            'POST',f'services/{domain}/{service}',
+            json=payload,
+            operation=self.manifest.operation('home_assistant.call_service'),
+            operation_parameters=safe_parameters,
+            destination=destination,
+            **ctx,
+        )

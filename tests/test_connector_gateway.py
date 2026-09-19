@@ -1,6 +1,11 @@
 import time
 import pytest, requests
 from integrations.contracts import gmail_manifest
+from integrations.adapters import SlackAdapter,HomeAssistantAdapter
+from security.request_context import TrustedRequestContext,set_trusted_request,reset_trusted_request
+from tools.integrations import register as register_integration_tools
+from tools.registry import ToolRegistry
+from types import SimpleNamespace
 from integrations.gateway import ConnectorGateway,ConnectorError,ConnectorRecoveryRequired
 from integrations.state import ConnectorStateStore
 class Vault:
@@ -66,3 +71,77 @@ def test_cursor_cycle_detection(store):
  def f(cur):return {'messages':[],'nextPageToken':'same'}
  with pytest.raises(ConnectorError) as e:g.paginate(f,op)
  assert e.value.code=='cursor_cycle'
+
+
+def test_stage8_slack_send_uses_connector_ledger_and_verification(store, tmp_path):
+    session=Session([R(200,{'ok':True,'ts':'123.456','channel':'C1'})])
+    gateway=ConnectorGateway(store,session=session,sleep=lambda x:None)
+    slack=SlackAdapter('token',gateway=gateway)
+    registry=ToolRegistry(SimpleNamespace(autonomy_mode='act',data_dir=tmp_path))
+    register_integration_tools(registry,{'slack':slack})
+    tool=registry.get('slack_send_message')
+    ctx=set_trusted_request(TrustedRequestContext('device-1','session-1'))
+    try:
+        result=tool.handler({'channel':'C1','text':'hello'})
+        verification=registry.verify_result(tool,{'channel':'C1','text':'hello'},result)
+    finally:
+        reset_trusted_request(ctx)
+
+    assert session.calls==1
+    assert verification.verified is True
+    opid=result['_personal_ai_operation_id']
+    operation=store.operation(opid)
+    assert operation['owner_id']=='owner'
+    assert operation['device_id']=='device-1'
+    assert operation['session_id']=='session-1'
+    assert operation['operation_name']=='slack.send'
+    assert operation['state']=='verified'
+    assert 'hello' not in repr(operation)
+
+
+def test_stage8_home_assistant_service_uses_ledger_and_fresh_state_verification(store, tmp_path):
+    session=Session([
+        R(200,[{'entity_id':'light.kitchen','state':'on'}]),
+        R(200,{'entity_id':'light.kitchen','state':'on'}),
+    ])
+    gateway=ConnectorGateway(store,session=session,sleep=lambda x:None)
+    home=HomeAssistantAdapter('https://home.example','token',gateway=gateway)
+    registry=ToolRegistry(SimpleNamespace(autonomy_mode='act',data_dir=tmp_path))
+    register_integration_tools(registry,{'home_assistant':home})
+    tool=registry.get('home_assistant_call_service')
+    params={'domain':'light','service':'turn_on','data':{'entity_id':'light.kitchen'}}
+    ctx=set_trusted_request(TrustedRequestContext('device-1','session-1'))
+    try:
+        result=tool.handler(params)
+        verification=registry.verify_result(tool,params,result)
+    finally:
+        reset_trusted_request(ctx)
+
+    assert session.calls==2
+    assert verification.verified is True
+    assert verification.evidence['observed_state']=='on'
+    opid=result['_personal_ai_operation_id']
+    operation=store.operation(opid)
+    assert operation['operation_name']=='home_assistant.call_service'
+    assert operation['state']=='verified'
+
+
+def test_stage8_home_assistant_unverifiable_service_requires_recovery(store, tmp_path):
+    session=Session([R(200,[])])
+    gateway=ConnectorGateway(store,session=session,sleep=lambda x:None)
+    home=HomeAssistantAdapter('https://home.example','token',gateway=gateway)
+    registry=ToolRegistry(SimpleNamespace(autonomy_mode='act',data_dir=tmp_path))
+    register_integration_tools(registry,{'home_assistant':home})
+    tool=registry.get('home_assistant_call_service')
+    params={'domain':'script','service':'turn_on','data':{}}
+    ctx=set_trusted_request(TrustedRequestContext('device-1','session-1'))
+    try:
+        result=tool.handler(params)
+        with pytest.raises(RuntimeError,match='verification failed'):
+            registry.verify_result(tool,params,result)
+    finally:
+        reset_trusted_request(ctx)
+
+    operation=store.operation(result['_personal_ai_operation_id'])
+    assert operation['state']=='recovery_review_required'
+    assert operation['retry_decision']=='no_blind_retry'

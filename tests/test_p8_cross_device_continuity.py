@@ -296,3 +296,108 @@ def test_sqlite_integrity_and_duplicate_suppression_under_repeated_sync(tmp_path
         assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert con.execute('SELECT COUNT(*) FROM continuity_sync_receipts').fetchone()[0] == 30
     assert len([e for e in continuity.events_for_thread(thread, limit=1000) if e['kind'] == 'user_message']) == 30
+
+
+def test_stage8_live_permission_removal_blocks_established_continuity(tmp_path):
+    registry, first, _, continuity, _, epoch, sync = fixture(tmp_path)
+    thread=continuity.create_thread('live',device_id=first['id'])
+    assert sync.status(device_id=first['id'],session_id='s1')['device_id']==first['id']
+    registry.set_permissions(first['id'], {'workflow:read'})
+    with pytest.raises(PermissionError,match='ai:chat'):
+        sync.reconcile(device_id=first['id'],session_id='s1',security_epoch=epoch[0],thread_id=thread,events=[
+            {'client_event_id':'revoked-1','client_sequence':1,'kind':'user_message','payload':{'text':'must not commit'}}
+        ])
+    assert [e for e in continuity.events_for_thread(thread) if e['kind']=='user_message']==[]
+
+
+def test_stage8_handoff_target_revoked_at_precommit_boundary_fails_closed(tmp_path,monkeypatch):
+    registry, first, second, continuity, _, _, sync = fixture(tmp_path)
+    thread=continuity.create_thread('handoff-race',device_id=first['id'])
+    original_set_active=continuity.set_active
+    def revoke_before_commit(device_id, thread_id, *, authority_guard=None):
+        if device_id==second['id']:
+            registry.revoke(second['id'])
+        return original_set_active(device_id,thread_id,authority_guard=authority_guard)
+    monkeypatch.setattr(continuity,'set_active',revoke_before_commit)
+    with pytest.raises(PermissionError,match='trusted active device'):
+        sync.handoff(device_id=first['id'],session_id='s1',to_device=second['id'],thread_id=thread)
+
+    # Inspect durable state before active_for_device(), whose fallback is
+    # intentionally mutating and could otherwise manufacture the residue.
+    with continuity.lock, continuity._con() as con:
+        durable = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert durable is None or durable['active_thread_id'] is None
+    with pytest.raises(PermissionError,match='trusted active device'):
+        continuity.active_for_device(
+            second['id'], authority_guard=lambda: sync._assert_device(second['id'])
+        )
+    with continuity.lock, continuity._con() as con:
+        durable_after_lookup = con.execute(
+            'SELECT active_thread_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert durable_after_lookup is None or durable_after_lookup['active_thread_id'] is None
+    assert [e for e in continuity.events_for_thread(thread) if e['kind']=='handoff']==[]
+
+def test_stage8_handoff_source_revoked_at_precommit_boundary_fails_closed(tmp_path,monkeypatch):
+    registry, first, second, continuity, _, _, sync = fixture(tmp_path)
+    thread=continuity.create_thread('handoff-source-race',device_id=first['id'])
+
+    with continuity.lock, continuity._con() as con:
+        source_before = con.execute(
+            'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+            (first['id'],),
+        ).fetchone()
+        target_before = con.execute(
+            'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert source_before is not None and source_before['active_thread_id'] == thread
+    assert target_before is None or target_before['active_thread_id'] is None
+
+    original_set_active=continuity.set_active
+    def revoke_source_before_commit(device_id, thread_id, *, authority_guard=None):
+        if device_id==second['id']:
+            registry.revoke(first['id'])
+        return original_set_active(device_id,thread_id,authority_guard=authority_guard)
+    monkeypatch.setattr(continuity,'set_active',revoke_source_before_commit)
+
+    with pytest.raises(PermissionError,match='trusted active device'):
+        sync.handoff(device_id=first['id'],session_id='s1',to_device=second['id'],thread_id=thread)
+
+    with continuity.lock, continuity._con() as con:
+        source_after = con.execute(
+            'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+            (first['id'],),
+        ).fetchone()
+        target_after = con.execute(
+            'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert dict(source_after) == dict(source_before)
+    assert target_after is None or target_after['active_thread_id'] is None
+    assert [e for e in continuity.events_for_thread(thread) if e['kind']=='handoff']==[]
+
+    # Revocation changes authorization, not the pre-existing persistence record.
+    with pytest.raises(PermissionError,match='trusted active device'):
+        continuity.active_for_device(
+            first['id'], authority_guard=lambda: sync._assert_device(first['id'])
+        )
+    with pytest.raises(PermissionError,match='trusted active device'):
+        sync.status(device_id=first['id'],session_id='s1')
+
+    # A governed target lookup must not create continuity residue after rejection.
+    with pytest.raises(PermissionError,match='trusted active device'):
+        continuity.active_for_device(
+            first['id'], authority_guard=lambda: sync._assert_device(first['id'])
+        )
+    with continuity.lock, continuity._con() as con:
+        target_final = con.execute(
+            'SELECT active_thread_id,last_event_id FROM continuity_device_state WHERE device_id=?',
+            (second['id'],),
+        ).fetchone()
+    assert target_final is None or target_final['active_thread_id'] is None
+

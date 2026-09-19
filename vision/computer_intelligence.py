@@ -67,8 +67,12 @@ class ComputerIntelligence:
 
     def plan(self,goal:str,*,observation:dict|None=None,max_steps:int=8):
         max_steps=max(1,min(int(max_steps),12)); observation=observation or self.observe(f'Describe the current UI and identify only elements relevant to this goal: {goal}'); memory=self._memory_context(goal)
-        prompt=f'''Create a cautious desktop action plan for this goal:\n{goal}\n\nCURRENT SCREEN ANALYSIS:\n{observation.get('analysis', observation)}\n\nRELEVANT PERSONAL CONTEXT:\n{json.dumps(memory, default=str)[:5000]}\n\nReturn JSON only with this shape:\n{{"summary":"...","steps":[{{"kind":"move|click|type_text|hotkey","params":{{}},"reason":"...","verify":"what should be visibly true after this action"}}]}}\nRules: at most {max_steps} steps; do not invent coordinates unless supported by screen evidence; do not submit purchases, send messages, delete data, change security settings, or type secrets unless the user's goal explicitly requires it. Prefer the smallest reversible sequence.'''
-        data=self.models.json(prompt,system='You are Personal AI computer-control planner. Return bounded JSON only.'); steps=[]
+        prompt=f'''Create a cautious desktop action plan for this goal:\n{goal}\n\nCURRENT SCREEN ANALYSIS:\n{observation.get('analysis', observation)}\n\nReturn JSON only with this shape:\n{{"summary":"...","steps":[{{"kind":"move|click|type_text|hotkey","params":{{}},"reason":"...","verify":"what should be visibly true after this action"}}]}}\nRules: at most {max_steps} steps; do not invent coordinates unless supported by screen evidence; do not submit purchases, send messages, delete data, change security settings, or type secrets unless the user's goal explicitly requires it. Prefer the smallest reversible sequence.'''
+        data=self.models.json(
+            prompt,
+            system='You are Personal AI computer-control planner. Return bounded JSON only.',
+            private_context=json.dumps(memory, default=str)[:5000],
+        ); steps=[]
         for row in list(data.get('steps',[]))[:max_steps]:
             kind=str(row.get('kind','')).strip()
             if kind not in ALLOWED_DESKTOP_ACTIONS:raise ValueError(f'unsupported computer action: {kind}')

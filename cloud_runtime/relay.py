@@ -4,8 +4,9 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
+from agent.durable_executor import ApprovalDispatchInProgress, ApprovalRecoveryRequired
 from agent.executor import ConfirmationRequired, ReauthenticationRequired
-from cloud_runtime.security import CloudSessionStore, OwnerAuthenticator
+from cloud_runtime.security import CloudSessionStore, DEFAULT_SCOPES, OwnerAuthenticator
 
 
 @dataclass
@@ -34,6 +35,14 @@ class SlidingWindowLimiter:
 class SecureCloudRelay:
     """Policy boundary between an internet-facing client and the privileged Personal AI runtime."""
 
+    DEVICE_SCOPE_MAP = {
+        'ai:chat': 'ai:chat',
+        'status:read': 'device:read',
+        'memory:read': 'memory:read',
+        'approval:read': 'ai:chat',
+        'approval:write': 'ai:chat',
+    }
+
     def __init__(self, *, executor, memory, second_brain, device_registry, sessions: CloudSessionStore, owner: OwnerAuthenticator, events=None):
         self.executor = executor
         self.memory = memory
@@ -50,6 +59,11 @@ class SecureCloudRelay:
     def _on_state(self, event):
         self._state = str(event.get('state', 'unknown'))
 
+    def _device_scope_allowed(self, device_id: str, cloud_scope: str) -> bool:
+        mapped_scope = self.DEVICE_SCOPE_MAP.get(str(cloud_scope))
+        authorize = getattr(self.device_registry, 'authorize', None) if self.device_registry is not None else None
+        return bool(mapped_scope and callable(authorize) and authorize(device_id, mapped_scope))
+
     def authenticate(self, token: str, scope: str, nonce: str | None = None):
         session = self.sessions.authenticate(token, scope)
         if not session:
@@ -57,6 +71,8 @@ class SecureCloudRelay:
         if not self.device_registry or not self.device_registry.is_active(session.device_id):
             self.sessions.revoke(session.id)
             return RelayResult(401, {'error': 'device_revoked'}), None
+        if not self._device_scope_allowed(session.device_id, scope):
+            return RelayResult(403, {'error': 'device_permission_denied'}), None
         if not self.rate.allow(session.id):
             return RelayResult(429, {'error': 'rate_limited'}), None
         if nonce is not None and not self.sessions.accept_nonce(session.id, nonce):
@@ -66,7 +82,12 @@ class SecureCloudRelay:
     def issue_session(self, device_id: str, device_token: str):
         if not self.device_registry or not self.device_registry.authenticate(device_id, device_token):
             return RelayResult(401, {'error': 'device_auth_failed'})
-        token, session = self.sessions.issue(device_id)
+        allowed_scopes = tuple(
+            scope for scope in DEFAULT_SCOPES if self._device_scope_allowed(device_id, scope)
+        )
+        if not allowed_scopes:
+            return RelayResult(403, {'error': 'device_permission_denied'})
+        token, session = self.sessions.issue(device_id, scopes=allowed_scopes)
         self.memory.audit('cloud', 'session_issued', {
             'session_id': session.id,
             'device_id': device_id,
@@ -104,7 +125,28 @@ class SecureCloudRelay:
         })
         return RelayResult(200, {'revoked': ok})
 
+    def _live_session(self, session):
+        if session is None:
+            return None
+        lookup = getattr(self.sessions, 'session', None)
+        # Compatibility session adapters used by non-cloud callers do not expose
+        # durable lookup. Real CloudSessionStore does, and is revalidated here.
+        current = lookup(session.id) if callable(lookup) else session
+        if current is None or current.device_id != getattr(session, 'device_id', None):
+            return None
+        if not self.device_registry or not self.device_registry.is_active(current.device_id):
+            revoke = getattr(self.sessions, 'revoke', None)
+            if callable(revoke):
+                revoke(current.id)
+            return None
+        return current
+
     def command(self, session, text: str, nonce: str):
+        session = self._live_session(session)
+        if session is None:
+            return RelayResult(401, {'error': 'session_expired_or_revoked'})
+        if not self._device_scope_allowed(session.device_id, 'ai:chat'):
+            return RelayResult(403, {'error': 'device_permission_denied'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         text = (text or '').strip()
@@ -133,7 +175,6 @@ class SecureCloudRelay:
                 'execution_id': exc.execution_id,
                 'tool': exc.tool_name,
                 'description': exc.description,
-                'parameters': exc.parameters,
                 'expires_at': exc.expires_at,
             }
             self.memory.audit('cloud', 'approval_required', {
@@ -178,6 +219,11 @@ class SecureCloudRelay:
         })
 
     def approval(self, session, approval_id: str, decision: str):
+        session = self._live_session(session)
+        if session is None:
+            return RelayResult(401, {'error': 'session_expired_or_revoked'})
+        if not self._device_scope_allowed(session.device_id, 'approval:write'):
+            return RelayResult(403, {'error': 'device_permission_denied'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         try:
@@ -204,8 +250,29 @@ class SecureCloudRelay:
                 'decision': decision,
             })
             return RelayResult(200, {'reply': reply, 'decision': decision})
+        except ConfirmationRequired as exc:
+            self.memory.audit('cloud', 'approval_continued_to_approval', {
+                'device_id': session.device_id,
+                'session_id': session.id,
+                'prior_approval_id': approval_id,
+                'approval_id': exc.approval_id,
+                'tool': exc.tool_name,
+            })
+            return RelayResult(202, {
+                'approval_required': True,
+                'approval_id': exc.approval_id,
+                'execution_id': exc.execution_id,
+                'tool': exc.tool_name,
+                'description': exc.description,
+                'expires_at': exc.expires_at,
+                'prior_approval_id': approval_id,
+            })
         except ReauthenticationRequired:
             return RelayResult(401, {'error': 'reauthentication_required'})
+        except ApprovalDispatchInProgress:
+            return RelayResult(409, {'error': 'approval_in_progress'})
+        except ApprovalRecoveryRequired:
+            return RelayResult(409, {'error': 'approval_recovery_required'})
         except PermissionError:
             return RelayResult(410, {'error': 'approval_unavailable'})
 
@@ -216,8 +283,10 @@ class SecureCloudRelay:
         tools = getattr(self.executor, 'tools', None)
         if tools is not None and hasattr(tools, 'set_emergency_stop'):
             tools.set_emergency_stop(enabled)
-        elif enabled and hasattr(self.executor, 'invalidate_pending_approvals'):
+        if enabled and hasattr(self.executor, 'invalidate_pending_approvals'):
             self.executor.invalidate_pending_approvals()
+        if enabled and hasattr(self.executor, 'cancel_active_turns'):
+            self.executor.cancel_active_turns(reason='emergency_stop')
         self.memory.audit('cloud', 'emergency_stop', {'enabled': enabled})
         if self.events:
             self.events.emit('emergency.stop', enabled=enabled)

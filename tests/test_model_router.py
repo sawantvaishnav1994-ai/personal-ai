@@ -242,3 +242,39 @@ def test_sensitive_content_cannot_fall_back_to_external_provider(monkeypatch):
     with pytest.raises(ModelUnavailable):
         router.chat('private fact', sensitivity='sensitive')
     assert called == ['https://gpu.example/v1/chat/completions']
+
+
+def test_model_provider_response_body_is_streamed_and_bounded(monkeypatch):
+    seen = {}
+
+    class StreamingResponse:
+        status_code = 200
+        headers = {}
+
+        def __init__(self):
+            self.closed = False
+
+        def iter_content(self, chunk_size=65536):
+            yield b'x' * 40000
+            yield b'y' * 40000
+
+        def close(self):
+            self.closed = True
+
+    response = StreamingResponse()
+
+    def request(*args, **kwargs):
+        seen['stream'] = kwargs.get('stream')
+        return response
+
+    monkeypatch.setattr(requests, 'request', request)
+    router = ModelRouter(settings(
+        self_hosted_ai_url='https://gpu.example/v1',
+        model_max_response_bytes=65536,
+    ))
+
+    with pytest.raises(InvalidModelResponse, match='size limit'):
+        router.chat('hello')
+
+    assert seen['stream'] is True
+    assert response.closed is True

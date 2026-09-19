@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -101,6 +102,7 @@ class WorkflowCreateBody(BaseModel):
 
 class WorkflowRunBody(BaseModel):
     context: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=16, max_length=160)
 
 
 class EmergencyStopBody(BaseModel):
@@ -111,6 +113,41 @@ class UiPreferencesBody(BaseModel):
     continuous_voice: bool = True
     voice_rate: float = Field(default=1.0, ge=0.75, le=1.35)
     quiet_hours: bool = True
+
+
+def _bounded_mapping(value, *, max_bytes=65536, max_depth=8, max_items=256, max_string=12000):
+    if not isinstance(value, dict):
+        raise HTTPException(422, 'Expected a JSON object')
+    nodes = 0
+    stack = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            raise HTTPException(413, 'JSON object nesting exceeds limit')
+        if isinstance(current, dict):
+            if len(current) > max_items:
+                raise HTTPException(413, 'JSON object contains too many fields')
+            for key, child in current.items():
+                if len(str(key)) > 256:
+                    raise HTTPException(413, 'JSON object key is too long')
+                stack.append((child, depth + 1))
+        elif isinstance(current, list):
+            if len(current) > max_items:
+                raise HTTPException(413, 'JSON collection contains too many items')
+            for child in current:
+                stack.append((child, depth + 1))
+        elif isinstance(current, str) and len(current) > max_string:
+            raise HTTPException(413, 'JSON string exceeds limit')
+        nodes += 1
+        if nodes > 4096:
+            raise HTTPException(413, 'JSON object is too complex')
+    try:
+        encoded = json.dumps(value, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, 'JSON object contains unsupported values') from exc
+    if len(encoded) > max_bytes:
+        raise HTTPException(413, 'JSON object exceeds maximum size')
+    return value
 
 
 def owner_product_router(runtime):
@@ -130,6 +167,22 @@ def owner_product_router(runtime):
     def audit(action: str, *, device_id: str, **payload):
         memory.audit('owner-product', action, {'device_id': device_id, **payload})
 
+    def require_fresh_reauthentication():
+        context = current_trusted_request()
+        ttl = int(getattr(runtime.get('agent_executor'), 'reauth_ttl_seconds', 300) or 300)
+        ttl = max(30, min(ttl, 900))
+        stamp = getattr(context, 'reauthenticated_at', None) if context is not None else None
+        try:
+            age = time.time() - float(stamp)
+        except (TypeError, ValueError):
+            age = ttl + 1
+        if context is None or age < 0 or age > ttl:
+            raise HTTPException(401, {
+                'code': 'reauthentication_required',
+                'message': 'Fresh owner verification is required for this security-sensitive action.',
+            })
+        return context
+
     def workflow_authority(device_id: str):
         context = current_trusted_request()
         if context is not None and context.device_id != device_id:
@@ -140,6 +193,19 @@ def owner_product_router(runtime):
             'session_id': context.session_id if context is not None else None,
             'reauthenticated_at': context.reauthenticated_at if context is not None else None,
         }
+
+    def workflow_binding_matches(engine, run_id: str, auth: dict) -> bool:
+        reader = getattr(engine, 'run_binding', None)
+        if not callable(reader):
+            return False
+        binding = reader(run_id)
+        if not binding:
+            return False
+        return (
+            binding.get('owner_id') in (None, auth['owner_id'])
+            and binding.get('device_id') in (None, auth['device_id'])
+            and binding.get('session_id') in (None, auth['session_id'])
+        )
 
     def knowledge_access(device_id: str):
         classes = {'owner', 'trusted-devices'}
@@ -371,7 +437,7 @@ def owner_product_router(runtime):
                 media_type=body.media_type,
                 source=body.source,
                 access_class=body.access_class,
-                metadata=body.metadata,
+                metadata=_bounded_mapping(body.metadata),
             )
         except (KnowledgeError, binascii.Error) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -400,7 +466,10 @@ def owner_product_router(runtime):
         if body.access_class == 'private' and 'private' not in knowledge_access(device_id):
             raise HTTPException(403, 'This device cannot mark knowledge private')
         try:
-            document = knowledge.update(document_id, **body.model_dump(exclude_none=True))
+            changes = body.model_dump(exclude_none=True)
+            if 'metadata' in changes:
+                changes['metadata'] = _bounded_mapping(changes['metadata'])
+            document = knowledge.update(document_id, **changes)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except KnowledgeError as exc:
@@ -449,14 +518,27 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        require_fresh_reauthentication()
         try:
             result = registry.set_permissions(target_device_id, body.scopes)
+            cancelled_turns = cancelled_workflows = 0
+            granted_scopes = set(result.get('scopes') or ())
+            if 'ai:chat' not in granted_scopes:
+                executor = runtime.get('executor')
+                cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
+                if callable(cancel_device_turns):
+                    cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_permission_revoked'))
+            if 'workflow:write' not in granted_scopes:
+                automations = runtime.get('automations')
+                cancel_device_runs = getattr(automations, 'cancel_device_runs', None)
+                if callable(cancel_device_runs):
+                    cancelled_workflows = int(cancel_device_runs(target_device_id, reason='workflow_permission_revoked'))
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        audit('device.permissions.updated', device_id=device_id, target_device_id=target_device_id, scopes=result['scopes'])
-        return result
+        audit('device.permissions.updated', device_id=device_id, target_device_id=target_device_id, scopes=result['scopes'], cancelled_turns=cancelled_turns, cancelled_workflows=cancelled_workflows)
+        return {**result, 'cancelled_turns': cancelled_turns, 'cancelled_workflows': cancelled_workflows}
 
     @router.post('/devices/{target_device_id}/revoke')
     def device_revoke(
@@ -466,23 +548,60 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        require_fresh_reauthentication()
         if not registry.revoke(target_device_id):
             raise HTTPException(404, 'Device not found')
-        audit('device.revoked', device_id=device_id, target_device_id=target_device_id)
-        return {'ok': True, 'revoked_device_id': target_device_id, 'current_device_revoked': target_device_id == device_id}
+        revoked_sessions = {}
+        for key in ('pwa_sessions', 'cloud_sessions'):
+            store = runtime.get(key)
+            revoke_device = getattr(store, 'revoke_device', None)
+            if callable(revoke_device):
+                revoked_sessions[key] = int(revoke_device(target_device_id))
+        gateway = runtime.get('device_gateway')
+        if gateway is not None:
+            gateway.disconnect(target_device_id)
+        executor = runtime.get('executor')
+        cancel_device_turns = getattr(executor, 'cancel_device_turns', None)
+        cancelled_turns = int(cancel_device_turns(target_device_id, reason='device_revoked')) if callable(cancel_device_turns) else 0
+        automations = runtime.get('automations')
+        cancel_device_runs = getattr(automations, 'cancel_device_runs', None)
+        cancelled_workflows = int(cancel_device_runs(target_device_id, reason='device_revoked')) if callable(cancel_device_runs) else 0
+        audit(
+            'device.revoked',
+            device_id=device_id,
+            target_device_id=target_device_id,
+            revoked_sessions=revoked_sessions,
+            cancelled_turns=cancelled_turns,
+            cancelled_workflows=cancelled_workflows,
+        )
+        return {
+            'ok': True,
+            'revoked_device_id': target_device_id,
+            'current_device_revoked': target_device_id == device_id,
+            'revoked_sessions': revoked_sessions,
+            'cancelled_turns': cancelled_turns,
+            'cancelled_workflows': cancelled_workflows,
+        }
 
     @router.get('/workflows')
     def workflows(pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
-        authenticate(pa_device, pa_token, 'workflow:read')
+        device_id = authenticate(pa_device, pa_token, 'workflow:read')
         engine = runtime['automations']
-        return {'workflows': engine.workflows(), 'runs': engine.runs(limit=100)}
+        auth = workflow_authority(device_id)
+        runs = [
+            row for row in engine.runs(limit=100)
+            if workflow_binding_matches(engine, row.get('id'), auth)
+        ]
+        return {'workflows': engine.workflows(), 'runs': runs}
 
     @router.post('/workflows')
     def workflow_create(body: WorkflowCreateBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
+            trigger = _bounded_mapping(body.trigger)
+            steps = [_bounded_mapping(step, max_bytes=32768) for step in body.steps]
             workflow_id = runtime['automations'].create_workflow(
-                body.title, body.trigger, body.steps,
+                body.title, trigger, steps,
                 next_run_at=body.next_run_at, interval_seconds=body.interval_seconds,
             )
         except (TypeError, ValueError) as exc:
@@ -494,10 +613,12 @@ def owner_product_router(runtime):
     def workflow_run(workflow_id: str, body: WorkflowRunBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
         try:
+            context = _bounded_mapping(body.context)
             run_id = runtime['automations'].run_workflow(
                 workflow_id,
-                context=body.context,
+                context=context,
                 background=True,
+                idempotency_key=body.idempotency_key,
                 **workflow_authority(device_id),
             )
         except PermissionError as exc:
@@ -521,6 +642,22 @@ def owner_product_router(runtime):
         audit('workflow.cancelled', device_id=device_id, run_id=run_id)
         return result
 
+    @router.post('/workflows/runs/{run_id}/recovery/link')
+    def workflow_recovery_link(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
+        device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        try: result = runtime['automations'].link_recovery(run_id, **workflow_authority(device_id))
+        except KeyError as exc: raise HTTPException(404, 'Workflow run not found') from exc
+        except (RuntimeError, PermissionError) as exc: raise HTTPException(409, str(exc)) from exc
+        audit('workflow.recovery_linked', device_id=device_id, run_id=run_id, recovery_transaction_id=result['recovery_transaction_id'])
+        return result
+
+    @router.post('/workflows/runs/{run_id}/recovery/refresh')
+    def workflow_recovery_refresh(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
+        device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        try: return runtime['automations'].refresh_recovery(run_id, **workflow_authority(device_id))
+        except KeyError as exc: raise HTTPException(404, 'Workflow run not found') from exc
+        except (RuntimeError, PermissionError) as exc: raise HTTPException(409, str(exc)) from exc
+
     @router.post('/workflows/runs/{run_id}/resume')
     def workflow_resume(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:write')
@@ -538,18 +675,22 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/approve')
     def workflow_approve(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        engine = runtime['automations']
+        auth = workflow_authority(device_id)
+        if not workflow_binding_matches(engine, run_id, auth):
+            raise HTTPException(403, 'Workflow authority mismatch')
         try:
-            run = runtime['automations']._run(run_id)
+            run = engine._run(run_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            result = runtime['automations'].approve_run(
+            result = engine.approve_run(
                 run_id,
                 approval_id,
-                **workflow_authority(device_id),
+                **auth,
             )
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
@@ -561,17 +702,20 @@ def owner_product_router(runtime):
     @router.post('/workflows/runs/{run_id}/reject')
     def workflow_reject(run_id: str, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'workflow:approve')
+        engine = runtime['automations']
+        authority = workflow_authority(device_id)
+        if not workflow_binding_matches(engine, run_id, authority):
+            raise HTTPException(403, 'Workflow authority mismatch')
         try:
-            run = runtime['automations']._run(run_id)
+            run = engine._run(run_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         approval_id = run.get('pending_approval_id')
         if not approval_id:
             raise HTTPException(409, 'Workflow is not waiting for approval')
         try:
-            authority = workflow_authority(device_id)
             authority.pop('reauthenticated_at', None)
-            result = runtime['automations'].reject_run(run_id, approval_id, **authority)
+            result = engine.reject_run(run_id, approval_id, **authority)
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
         except (KeyError, RuntimeError) as exc:
@@ -582,7 +726,18 @@ def owner_product_router(runtime):
     @router.post('/system/emergency-stop')
     def emergency_stop(body: EmergencyStopBody, pa_device: str | None = Cookie(default=None), pa_token: str | None = Cookie(default=None)):
         device_id = authenticate(pa_device, pa_token, 'device:admin')
+        if not body.enabled:
+            require_fresh_reauthentication()
         runtime['tools'].set_emergency_stop(body.enabled)
+        # ToolRegistry is the canonical E-stop authority and advances the
+        # security epoch. Also cancel active canonical turns so this owner
+        # surface converges with the cloud owner E-stop semantics.
+        executor = runtime.get('executor')
+        if body.enabled and executor is not None and hasattr(executor, 'cancel_active_turns'):
+            executor.cancel_active_turns(reason='emergency_stop')
+        events = runtime.get('events')
+        if events is not None:
+            events.emit('emergency.stop', enabled=body.enabled)
         autonomy = runtime.get('advanced_autonomy')
         if autonomy is not None:
             autonomy.emergency_stop('owner requested from trusted device') if body.enabled else autonomy.clear_emergency_stop()
@@ -601,7 +756,7 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'qualification:record')
-        environment = {**body.environment, 'device_id': device_id, 'surface': 'ios-pwa'}
+        environment = {**_bounded_mapping(body.environment), 'device_id': device_id, 'surface': 'ios-pwa'}
         try:
             session_id = runtime['p3_qualification'].start_session(
                 body.stage,
@@ -621,14 +776,15 @@ def owner_product_router(runtime):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = authenticate(pa_device, pa_token, 'qualification:record')
-        evidence = {**body.evidence, 'device_id': device_id}
+        evidence = {**_bounded_mapping(body.evidence), 'device_id': device_id}
+        metrics = _bounded_mapping(body.metrics)
         try:
             trial = runtime['p3_qualification'].record_trial(
                 session_id,
                 body.task,
                 passed=body.passed,
                 latency_ms=body.latency_ms,
-                metrics=body.metrics,
+                metrics=metrics,
                 evidence=evidence,
             )
         except (KeyError, ValueError) as exc:

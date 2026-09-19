@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import zipfile
 
 import pytest
 from PIL import Image
@@ -148,3 +149,24 @@ def test_reverting_to_historical_checksum_is_valid_and_restart_safe(tmp_path):
     restarted = store(tmp_path)
     history = restarted.history(v3['lineage_id'])
     assert [item['version'] for item in history] == [3, 2, 1]
+
+
+def test_office_archive_expansion_and_paths_are_bounded(tmp_path):
+    knowledge = store(tmp_path)
+    original_member_limit = KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES
+    KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES = 1024
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('[Content_Types].xml', '<Types/>')
+        archive.writestr('word/document.xml', 'x' * 2048)
+    with pytest.raises(KnowledgeError, match='member exceeds'):
+        knowledge.ingest(filename='oversized.docx', data=output.getvalue())
+
+    KnowledgeStore.MAX_ARCHIVE_MEMBER_BYTES = original_member_limit
+
+    traversal = io.BytesIO()
+    with zipfile.ZipFile(traversal, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('[Content_Types].xml', '<Types/>')
+        archive.writestr('../escape.xml', '<x/>')
+    with pytest.raises(KnowledgeError, match='unsafe path'):
+        knowledge.ingest(filename='unsafe.docx', data=traversal.getvalue())

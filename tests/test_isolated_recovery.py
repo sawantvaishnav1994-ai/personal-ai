@@ -53,8 +53,11 @@ def test_isolated_operational_backup_restore_reopens_all_state(tmp_path):
     assert result['encrypted'] is True
     assert _rows(target / 'assistant.sqlite3', 'memory_rows') == [('m1', 'preference'), ('m2', 'commitment')]
     assert _rows(target / 'continuity.sqlite3', 'message_rows') == [('c1', 'hello'), ('c2', 'continue')]
-    assert _rows(target / 'trusted-actions.sqlite3', 'approval_rows') == [('a1', 'checkpoint')]
+    assert 'trusted-actions.sqlite3' in result['skipped_security_state']
+    assert not (target / 'trusted-actions.sqlite3').exists()
     assert (target / 'preferences.json').read_text(encoding='utf-8') == '{"voice":true}'
     assert (target / 'unrelated.txt').read_text(encoding='utf-8') == 'preserve'
     for rel, digest in expected.items():
+        if rel in set(result['skipped_security_state']):
+            continue
         assert _sha(target / rel) == digest

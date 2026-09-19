@@ -107,31 +107,30 @@ def test_p8_encrypted_backup_restore_preserves_sync_identity_and_revocation(tmp_
 
     restored = BackupService(target, root_key_store=FixedKeyStore()).restore(archive)
     assert restored['ok'] is True and restored['encrypted'] is True
-    for name in ('continuity.sqlite3', 'devices.sqlite3'):
-        with sqlite3.connect(target / name) as con:
-            assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    assert 'devices.sqlite3' in restored['skipped_security_state']
+    assert not (target / 'devices.sqlite3').exists()
+    with sqlite3.connect(target / 'continuity.sqlite3') as con:
+        assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        assert con.execute('SELECT COUNT(*) FROM continuity_sync_receipts').fetchone()[0] == 5
 
+    # Durable continuity and replay evidence are recoverable, but device trust is
+    # intentionally not. A disaster restore must require fresh device enrollment.
     restored_registry, restored_continuity, restored_sync = _sync(target)
-    assert restored_registry.is_active(first['id']) is True
-    assert restored_registry.is_active(second['id']) is True
+    assert restored_registry.is_active(first['id']) is False
+    assert restored_registry.is_active(second['id']) is False
     assert restored_registry.is_active(revoked['id']) is False
     assert restored_continuity.active_for_device(second['id'])['id'] == thread
     messages = [row for row in restored_continuity.events_for_thread(thread) if row['kind'] == 'user_message']
     assert [row['payload']['text'] for row in messages] == [f'message-{i}' for i in range(1, 6)]
 
-    duplicate_after_restore = restored_sync.reconcile(
-        device_id=first['id'], session_id='restored-session', security_epoch=7, thread_id=thread,
-        events=[_event('event-3', 3, 'message-3')], limit=2,
-    )
-    assert duplicate_after_restore['duplicate_client_event_ids'] == ['event-3']
-    new_event = restored_sync.reconcile(
-        device_id=first['id'], session_id='restored-session', security_epoch=7, thread_id=thread,
-        events=[_event('event-6', 6, 'message-6')], limit=2,
-    )
-    assert new_event['accepted_client_event_ids'] == ['event-6']
-    with restored_sync._con() as con:
-        assert con.execute('SELECT COUNT(*) FROM continuity_sync_receipts').fetchone()[0] == 6
-        assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    try:
+        restored_sync.reconcile(
+            device_id=first['id'], session_id='restored-session', security_epoch=7, thread_id=thread,
+            events=[_event('event-3', 3, 'message-3')], limit=2,
+        )
+        assert False, 'archived device trust must not survive restore'
+    except PermissionError:
+        pass
 
 
 def test_p8_indexed_storage_and_bounded_retrieval(tmp_path):

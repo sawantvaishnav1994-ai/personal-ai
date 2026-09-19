@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from agent.executor import ReauthenticationRequired
-from desktop.operator_context import OperatorRequestContext, reset_operator_request, set_operator_request
+from core.personal_ai_runtime import TurnReplayBlocked
 from models.router import ModelError
 from security.request_context import current_trusted_request
+from server.logical_request_middleware import current_logical_request_id
 
 
 class OwnerReauthenticationRequired(ModelError):
@@ -12,11 +13,19 @@ class OwnerReauthenticationRequired(ModelError):
     user_message = 'This critical action requires a recent owner verification. Verify your owner password or passkey and try again.'
 
 
-class SessionBoundExecutor:
-    """Bind PWA executor calls and consequential operator work to the authenticated session."""
+class CanonicalTurnInProgress(ModelError):
+    code = 'turn_in_progress'
+    status_code = 409
+    user_message = 'This request is already in progress or waiting for its governed continuation.'
 
-    def __init__(self, executor):
+
+class SessionBoundExecutor:
+    """Bind an authenticated browser session to the canonical Personal AI runtime."""
+
+    def __init__(self, executor, *, continuity=None, surface: str = 'pwa'):
         self._executor = executor
+        self._surface = str(surface or 'pwa')
+        self._continuity = continuity
 
     def __getattr__(self, name):
         return getattr(self._executor, name)
@@ -40,83 +49,67 @@ class SessionBoundExecutor:
         except ReauthenticationRequired as exc:
             raise OwnerReauthenticationRequired(exc.reason) from exc
 
-    def _security_epoch(self) -> int:
-        approvals = getattr(self._executor, 'approvals', None)
-        current = getattr(approvals, 'current_security_epoch', None)
-        return int(current()) if callable(current) else 0
-
-    def _approval_context(self, approval_id: str) -> dict:
-        lookup = getattr(self._executor, 'approval_context', None)
-        return dict(lookup(approval_id) or {}) if callable(lookup) else {}
-
-    def _operator_context(self, context, metadata):
-        return OperatorRequestContext(
-            owner_id=str(metadata.get('owner_id') or 'owner'),
-            device_id=context.device_id,
-            session_id=context.session_id,
-            security_epoch=self._security_epoch(),
-            conversation_id=str(metadata.get('conversation_id') or ''),
-            workflow_id=str(metadata.get('workflow_id') or ''),
-            reauthenticated_at=context.reauthenticated_at,
-        )
-
-    def _bound(self, context, metadata, callback):
-        token = set_operator_request(self._operator_context(context, metadata))
-        try:
-            return callback()
-        finally:
-            reset_operator_request(token)
+    @staticmethod
+    def _owner_only(kwargs):
+        owner = str(kwargs.get('owner_id') or 'owner')
+        if owner != 'owner':
+            raise PermissionError('authenticated Personal AI surfaces are owner-only')
 
     def chat(self, text, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        metadata = dict(kwargs)
+        self._owner_only(kwargs)
         call_kwargs = dict(kwargs)
-        call_kwargs.pop('workflow_id', None)
+        call_kwargs['owner_id'] = 'owner'
         call_kwargs['device_id'] = context.device_id
         call_kwargs['session_id'] = context.session_id
         call_kwargs['reauthenticated_at'] = context.reauthenticated_at
-        metadata.update(call_kwargs)
-        return self._bound(
-            context,
-            metadata,
-            lambda: self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs)),
+        call_kwargs.setdefault('surface', self._surface)
+        logical_request_id = current_logical_request_id()
+        if logical_request_id:
+            explicit = call_kwargs.get('request_id')
+            if explicit is not None and str(explicit) != logical_request_id:
+                raise PermissionError('logical request identity mismatch')
+            call_kwargs['request_id'] = logical_request_id
+        try:
+            return self._translate_reauth(lambda: self._executor.chat(text, **call_kwargs))
+        except TurnReplayBlocked as exc:
+            raise CanonicalTurnInProgress(str(exc)) from exc
+
+    def cancel_turn(self, request_id: str | None = None):
+        context = self._context()
+        logical_request_id = current_logical_request_id()
+        request_id = str(request_id or logical_request_id or '').strip()
+        if not request_id:
+            return None
+        cancel = getattr(self._executor, 'cancel_turn', None)
+        if not callable(cancel):
+            return None
+        return cancel(
+            request_id,
+            owner_id='owner',
+            device_id=context.device_id,
+            session_id=context.session_id,
         )
 
     def approve(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        approval_context = self._approval_context(approval_id)
-        metadata = dict(kwargs)
-        metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
-        metadata.setdefault('owner_id', 'owner')
-        call_kwargs = {key: value for key, value in kwargs.items() if key in {'device_id', 'session_id', 'owner_id', 'reauthenticated_at'}}
-        call_kwargs['device_id'] = context.device_id
-        call_kwargs['session_id'] = context.session_id
-        call_kwargs['reauthenticated_at'] = context.reauthenticated_at
-        return self._bound(
-            context,
-            metadata,
-            lambda: self._translate_reauth(lambda: self._executor.approve(approval_id, **call_kwargs)),
-        )
+        self._owner_only(kwargs)
+        call_kwargs = {
+            'owner_id': 'owner',
+            'device_id': context.device_id,
+            'session_id': context.session_id,
+            'reauthenticated_at': context.reauthenticated_at,
+        }
+        return self._translate_reauth(lambda: self._executor.approve(approval_id, **call_kwargs))
 
     def reject(self, approval_id: str, **kwargs):
         context = self._context()
         self._check_device(kwargs.get('device_id'), context)
-        approval_context = self._approval_context(approval_id)
-        metadata = dict(kwargs)
-        metadata.setdefault('conversation_id', approval_context.get('conversation_id') or '')
-        metadata.setdefault('owner_id', 'owner')
-        paused = self._executor._load_paused(approval_id) if hasattr(self._executor, '_load_paused') else None
-        tool = None; params = None
-        if paused:
-            step = paused['plan']['steps'][paused['index']]
-            tool = self._executor.tools.get(step['tool'])
-            params = step.get('parameters', {})
-        call_kwargs = {key: value for key, value in kwargs.items() if key in {'device_id', 'session_id'}}
-        call_kwargs['device_id'] = context.device_id
-        call_kwargs['session_id'] = context.session_id
-        result = self._bound(context, metadata, lambda: self._executor.reject(approval_id, **call_kwargs))
-        if tool is not None and tool.on_reject is not None:
-            tool.on_reject(params or {})
-        return result
+        self._owner_only(kwargs)
+        return self._executor.reject(
+            approval_id,
+            device_id=context.device_id,
+            session_id=context.session_id,
+        )

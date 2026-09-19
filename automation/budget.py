@@ -81,7 +81,7 @@ def normalize_policy(policy: dict | None) -> dict:
 class WorkflowBudgetManager:
     def __init__(self, path: Path, *, events=None, audit=None):
         self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.events = events; self.audit = audit; self._install_lock = threading.RLock(); self._init_db()
+        self.events = events; self.audit = audit; self._install_lock = threading.RLock(); self._init_db(); self._recover_uncertain_dispatches()
     def _con(self):
         con = sqlite3.connect(self.path, timeout=30, isolation_level=None); con.row_factory = sqlite3.Row; con.execute('PRAGMA busy_timeout=30000'); return con
     def _init_db(self):
@@ -106,6 +106,29 @@ class WorkflowBudgetManager:
             cols = {r['name'] for r in con.execute('PRAGMA table_info(workflow_budget_runs)')}
             if 'estimated_input_tokens' not in cols:
                 con.execute('ALTER TABLE workflow_budget_runs ADD COLUMN estimated_input_tokens INTEGER NOT NULL DEFAULT 0')
+    def _recover_uncertain_dispatches(self):
+        """Fence dispatches whose process died before a durable outcome was recorded."""
+        stamp = _now()
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            rows = con.execute("SELECT dispatch_id,run_id FROM workflow_dispatches WHERE status='dispatching'").fetchall()
+            if rows:
+                con.executemany(
+                    "UPDATE workflow_dispatches SET status='uncertain',uncertainty='runtime_restart_before_dispatch_completion',updated_at=? WHERE dispatch_id=?",
+                    [(stamp, row['dispatch_id']) for row in rows],
+                )
+                for run_id in sorted({row['run_id'] for row in rows}):
+                    row = con.execute('SELECT decision_history_json FROM workflow_budget_runs WHERE run_id=?',(run_id,)).fetchone()
+                    if not row:
+                        continue
+                    hist = json.loads(row['decision_history_json'] or '[]')
+                    hist.append({'at':stamp,'decision':'recovery_required','reason':'uncertain dispatch recovered after runtime restart'})
+                    con.execute(
+                        "UPDATE workflow_budget_runs SET stop_reason=?,reserved_concurrency=0,released_at=COALESCE(released_at,?),decision_history_json=?,updated_at=? WHERE run_id=?",
+                        ('Uncertain dispatch after runtime restart; verification/recovery required',stamp,json.dumps(hist),stamp,run_id),
+                    )
+            con.commit()
+
     @staticmethod
     def _deadline(policy, started):
         end = started + int(policy['max_runtime_seconds'])
@@ -242,6 +265,25 @@ class WorkflowBudgetManager:
     def finish_dispatch(self,dispatch_id,*,status='completed',uncertainty=None):
         if not dispatch_id: return
         with self._con() as con: con.execute('BEGIN IMMEDIATE'); con.execute('UPDATE workflow_dispatches SET status=?,uncertainty=?,updated_at=? WHERE dispatch_id=?',(status,uncertainty,_now(),dispatch_id)); con.commit()
+    def reconcile_uncertain_dispatch(self, run_id, dispatch_id, *, resolution):
+        """Clear the workflow fence only from an externally verified recovery outcome."""
+        allowed={'verified_effect','verified_no_effect'}
+        if resolution not in allowed: raise WorkflowRecoveryRequired('workflow recovery outcome is not eligible for reconciliation')
+        stamp=_now()
+        with self._con() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row=con.execute("SELECT status FROM workflow_dispatches WHERE dispatch_id=? AND run_id=?",(dispatch_id,run_id)).fetchone()
+            if not row: con.rollback(); raise KeyError('workflow dispatch not found')
+            if row['status'] not in {'uncertain','reconciled_effect','verified_no_effect'}: con.rollback(); raise WorkflowRecoveryRequired('workflow dispatch is not awaiting recovery')
+            new_status='reconciled_effect' if resolution=='verified_effect' else 'verified_no_effect'
+            con.execute("UPDATE workflow_dispatches SET status=?,uncertainty=NULL,updated_at=? WHERE dispatch_id=?",(new_status,stamp,dispatch_id))
+            remaining=con.execute("SELECT COUNT(*) c FROM workflow_dispatches WHERE run_id=? AND status='uncertain'",(run_id,)).fetchone()['c']
+            if not remaining:
+                con.execute("UPDATE workflow_budget_runs SET stop_reason=NULL,updated_at=? WHERE run_id=?",(stamp,run_id))
+            con.commit()
+        self._record_decision(run_id,'recovery_reconciled',resolution,dispatch_type='recovery')
+        return self.status(run_id)
+
     def record_input_estimate(self,payload):
         ctx=current_budget_context()
         if ctx is None or ctx.manager is not self: return 0

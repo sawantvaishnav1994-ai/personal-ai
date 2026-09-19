@@ -96,6 +96,10 @@ class ModelRouter:
         self.audit = audit
         self.timeout = max(1.0, float(getattr(settings, 'model_request_timeout_seconds', 120)))
         self.health_timeout = max(0.5, float(getattr(settings, 'model_health_timeout_seconds', 5)))
+        self.max_response_bytes = max(
+            64 * 1024,
+            min(64 * 1024 * 1024, int(getattr(settings, 'model_max_response_bytes', 32 * 1024 * 1024))),
+        )
         self.allow_external_sensitive = bool(getattr(settings, 'allow_external_for_sensitive', False))
         self.local_first = bool(getattr(settings, 'model_local_first', True))
         self.providers = self._build_providers()
@@ -317,14 +321,72 @@ class ModelRouter:
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise InvalidModelResponse('Invalid chat completion response', provider=provider.id) from exc
 
+    @staticmethod
+    def _close_response(response) -> None:
+        close = getattr(response, 'close', None)
+        if callable(close):
+            close()
+
+    def _bounded_response(self, response, provider: Provider):
+        limit = self.max_response_bytes
+        headers = getattr(response, 'headers', None)
+        if headers is not None:
+            raw_length = headers.get('Content-Length') or headers.get('content-length')
+            if raw_length:
+                try:
+                    if int(raw_length) > limit:
+                        self._close_response(response)
+                        raise InvalidModelResponse('Model provider response exceeded the configured size limit', provider=provider.id)
+                except ValueError:
+                    pass
+
+        iterator = getattr(response, 'iter_content', None)
+        if not callable(iterator):
+            content = getattr(response, 'content', b'') or b''
+            if len(content) > limit:
+                self._close_response(response)
+                raise InvalidModelResponse('Model provider response exceeded the configured size limit', provider=provider.id)
+            return response
+
+        chunks = []
+        total = 0
+        try:
+            for chunk in iterator(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > limit:
+                    raise InvalidModelResponse('Model provider response exceeded the configured size limit', provider=provider.id)
+                chunks.append(chunk)
+        except requests.Timeout as exc:
+            raise ModelTimeout(provider=provider.id) from exc
+        except requests.ConnectionError as exc:
+            raise ModelUnavailable(provider=provider.id) from exc
+        except requests.RequestException as exc:
+            raise ModelError(provider=provider.id) from exc
+        finally:
+            self._close_response(response)
+
+        response._content = b''.join(chunks)
+        response._content_consumed = True
+        return response
+
     def _request(self, provider: Provider, method: str, path: str, *, timeout: float | None = None, **kwargs):
         headers = dict(kwargs.pop('headers', {}) or {})
+        kwargs.pop('stream', None)
         if 'json' in kwargs:
             headers.setdefault('Content-Type', 'application/json')
         if provider.api_key:
             headers['Authorization'] = f'Bearer {provider.api_key}'
         try:
-            response = requests.request(method, f'{provider.base_url}{path}', headers=headers, timeout=timeout or self.timeout, **kwargs)
+            response = requests.request(
+                method,
+                f'{provider.base_url}{path}',
+                headers=headers,
+                timeout=timeout or self.timeout,
+                stream=True,
+                **kwargs,
+            )
         except requests.Timeout as exc:
             raise ModelTimeout(provider=provider.id) from exc
         except requests.ConnectionError as exc:
@@ -332,8 +394,10 @@ class ModelRouter:
         except requests.RequestException as exc:
             raise ModelError(provider=provider.id) from exc
         if response.status_code in {401, 403}:
+            self._close_response(response)
             raise ModelAuthenticationError(provider=provider.id)
         if response.status_code == 429:
+            response = self._bounded_response(response, provider)
             error_code = self._response_error_code(response)
             if error_code == 'credit_balance_exhausted':
                 raise ModelCreditsExhausted(provider=provider.id)
@@ -345,12 +409,15 @@ class ModelRouter:
                 raise ModelSpendLimitReached(provider=provider.id)
             raise ModelRateLimited(provider=provider.id)
         if response.status_code in {408, 504}:
+            self._close_response(response)
             raise ModelTimeout(provider=provider.id)
         if response.status_code >= 500:
+            self._close_response(response)
             raise ModelUnavailable(provider=provider.id)
         if response.status_code >= 400:
+            self._close_response(response)
             raise ModelError(f'Provider returned HTTP {response.status_code}', provider=provider.id)
-        return response
+        return self._bounded_response(response, provider)
 
     @staticmethod
     def _response_error_code(response) -> str:

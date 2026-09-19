@@ -90,3 +90,12 @@ def test_model_outage_is_not_retried_as_an_unplanned_chat(tmp_path):
     with pytest.raises(ModelUnavailable):
         executor.chat('hello')
     assert models.calls == 1
+
+
+def test_stage7_canonical_continuity_authority_boundary_is_explicit():
+    source = Path('app/main.py').read_text(encoding='utf-8')
+    start = source.index('    def append_continuity(')
+    end = source.index("    events.subscribe('conversation.user'", start)
+    helper = source[start:end]
+    assert 'Canonical request-aware surfaces persist their own conversation events.' in helper
+    assert 'if not text or conversation_id:return' in helper

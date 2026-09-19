@@ -90,7 +90,14 @@ class SafeBrowserOperator:
         return out[:50]
 
     def execute(self,a:BrowserAction,*,approved:bool=False,reauthenticated:bool=False)->BrowserResult:
-        self._validate(a); tx=self._ensure_tx(a)
+        try:
+            self._validate(a)
+        except TargetValidationError as exc:
+            # Invalid external destinations are a policy denial, not an
+            # unhandled operator exception.  Preserve the public execution
+            # contract while still rejecting them before browser dispatch.
+            return BrowserResult('denied',exc.reason_code,a.transaction_id)
+        tx=self._ensure_tx(a)
         if tx.get('state')=='recovery_review_required':
             return BrowserResult('recovery_review_required','recovery_review_required',a.transaction_id)
         if tx.get('cancel_requested'): return self._cancel(a,'cancelled')
@@ -178,14 +185,27 @@ class SafeBrowserOperator:
         if tx['state'] in {'policy_check','approval_required'}: self.transactions.transition(txid,'permitted')
         elif tx['state']!='permitted': raise RuntimeError(f'invalid browser transaction state {tx["state"]}')
 
+    @staticmethod
+    def _download_root_identity(path):
+        raw=Path(path).expanduser()
+        if not raw.exists() or not raw.is_dir() or raw.is_symlink():
+            raise PermissionError('download root must be an existing regular directory')
+        resolved=raw.resolve(strict=True)
+        st=resolved.stat()
+        return {'resolved':str(resolved),'dev':int(st.st_dev),'ino':int(st.st_ino)}
+
     def _policy_ops(self,a,obs,op_class):
         url=a.url or obs['raw']['normalized_url']; rawobs=obs['raw']
         ops=[PolicyOperation(op_class,self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'domain',{'url':url},None,url,self._safe_params(a),a.data_classification)]
         if a.upload_path:
             validate_file_metadata(a.upload_path,claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
-            ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':self._file_digest(a.upload_path)},a.data_classification))
+            upload_digest=self._file_digest(a.upload_path)
+            a.parameters['_validated_upload_sha256']=upload_digest
+            ops.append(PolicyOperation('external_upload',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.upload_path,'approved_roots':list(a.parameters.get('approved_roots') or []),'file_for_validation':a.upload_path,'claimed_mime':a.claimed_mime,'max_bytes':int(a.parameters.get('max_bytes') or 50*1024*1024)},None,a.upload_path,{'file_digest':upload_digest},a.data_classification))
         if a.kind=='download':
-            canonical_path(a.download_root,[a.download_root])
+            root_identity=self._download_root_identity(a.download_root)
+            a.parameters['_validated_download_root_identity']=root_identity
+            canonical_path(root_identity['resolved'],[root_identity['resolved']])
             ops.append(PolicyOperation('download',self.binding.owner_id,self.binding.device_id,self.binding.session_id,self.binding.security_epoch,'path',{'path':a.download_root,'approved_roots':[a.download_root]},None,a.download_root,{'root_digest':digest(a.download_root)},a.data_classification))
         return ops
 
@@ -257,13 +277,39 @@ class SafeBrowserOperator:
         if a.kind=='select':loc.select_option(label=a.option,timeout=a.timeout_ms);return {'selected':True,'dispatch_mode':mode}
         if a.kind=='check':loc.check(timeout=a.timeout_ms);return {'checked':True,'dispatch_mode':mode}
         if a.kind=='uncheck':loc.uncheck(timeout=a.timeout_ms);return {'unchecked':True,'dispatch_mode':mode}
-        if a.kind=='upload':loc.set_input_files(a.upload_path,timeout=a.timeout_ms);return {'uploaded':True,'file_sha256':self._file_digest(a.upload_path),'dispatch_mode':mode}
+        if a.kind=='upload':
+            expected_digest=str((a.parameters or {}).get('_validated_upload_sha256') or '')
+            current_digest=self._file_digest(a.upload_path)
+            if expected_digest and current_digest!=expected_digest:
+                raise PermissionError('upload file changed after authorization')
+            loc.set_input_files(a.upload_path,timeout=a.timeout_ms)
+            return {'uploaded':True,'file_sha256':current_digest,'dispatch_mode':mode}
         if a.kind=='download':
+            # Revalidate the authorized filesystem object before clicking the
+            # download target.  A path replacement must fail closed before
+            # any external side effect can begin.
+            expected_root=dict((a.parameters or {}).get('_validated_download_root_identity') or {})
+            current_root=self._download_root_identity(a.download_root)
+            if expected_root and current_root!=expected_root:
+                raise PermissionError('download root changed after authorization')
+            root=Path(current_root['resolved'])
             with p.expect_download(timeout=a.timeout_ms) as event:loc.click(timeout=a.timeout_ms)
-            dl=event.value;name=sanitize_download_filename(dl.suggested_filename);root=Path(a.download_root).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
+            dl=event.value;name=sanitize_download_filename(dl.suggested_filename)
             dest=root/name;stem,suffix=dest.stem,dest.suffix;n=1
             while dest.exists():dest=root/f'{stem} ({n}){suffix}';n+=1
-            dl.save_as(str(dest));canonical_path(str(dest),[str(root)]);validate_file_metadata(str(dest),claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
+            dl.save_as(str(dest))
+            try:
+                canonical_path(str(dest),[str(root)])
+                validate_file_metadata(str(dest),claimed_mime=a.claimed_mime,max_bytes=int(a.parameters.get('max_bytes') or 50*1024*1024))
+            except Exception:
+                # A rejected or malformed download must not survive validation
+                # as an untrusted file inside an owner-approved directory.
+                try:
+                    if dest.exists() and dest.is_file():
+                        dest.unlink()
+                except OSError:
+                    pass
+                raise
             return {'download_sha256':self._file_digest(str(dest)),'download_size':dest.stat().st_size,'download_name':dest.name,'dispatch_mode':mode}
         raise ValueError('unsupported action')
 
@@ -307,6 +353,11 @@ class SafeBrowserOperator:
         return h.hexdigest()
 
     def _validate(self,a):
+        # Validate navigation targets before any browser/network dispatch.  Policy
+        # evaluation also validates destinations, but navigation itself must fail
+        # closed even if a permissive/custom policy gateway is injected.
+        if a.kind in {'open_url','create_tab'} and a.url:
+            normalize_origin(a.url)
         allowed={'open_url','back','forward','refresh','create_tab','select_tab','close_tab','click','type','select','check','uncheck','scroll','wait_for','upload','download'}
         if a.kind not in allowed or not a.transaction_id:raise ValueError('invalid browser action')
         if a.kind in {'open_url','create_tab'} and not a.url:raise ValueError('URL required')

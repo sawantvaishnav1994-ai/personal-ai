@@ -35,7 +35,8 @@ class Events:
 
 
 class Registry:
-    pass
+    def is_active(self, device_id):
+        return True
 
 
 class P7Gate:

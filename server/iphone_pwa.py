@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import time
 import threading
@@ -32,6 +33,7 @@ from webauthn.helpers.structs import (
 from agent.executor import ConfirmationRequired, ExecutionCancelled
 from models.router import ModelError
 from security.owner_access import OwnerAccessStore
+from security.request_context import current_trusted_request
 
 
 class OwnerEnrollBody(BaseModel):
@@ -123,7 +125,7 @@ class IphonePwaState:
                 self._cancel.pop(device_id, None)
 
 
-def iphone_pwa_router(runtime, settings):
+def iphone_pwa_router(runtime, settings, *, include_legacy_runtime_routes: bool = True):
     router = APIRouter(prefix='/iphone', tags=['iphone-pwa'])
     state = IphonePwaState()
     web_dir = Path(settings.base_dir) / 'pwa'
@@ -137,6 +139,9 @@ def iphone_pwa_router(runtime, settings):
     pending_approvals_lock = threading.RLock()
     failed_access_attempts: dict[str, list[float]] = {}
     access_attempts_lock = threading.RLock()
+    access_failure_window_seconds = 300
+    per_client_failure_limit = 5
+    global_method_failure_limit = 25
 
     def device_cookie_kwargs():
         cookie_days = max(1, min(int(getattr(settings, 'iphone_device_cookie_days', 365)), 3650))
@@ -164,28 +169,47 @@ def iphone_pwa_router(runtime, settings):
         rp_id = host.rsplit(':', 1)[0] if host.count(':') == 1 else host.strip('[]')
         return rp_id, f'{proto}://{host}'
 
-    def access_attempt_key(request: Request, method: str):
+    def access_attempt_keys(request: Request, method: str):
         forwarded = request.headers.get('x-forwarded-for', '').split(',')[0].strip()
-        address = forwarded or (request.client.host if request.client else 'unknown')
-        return f'{method}:{address}'
+        try:
+            address = str(ipaddress.ip_address(forwarded)) if forwarded else ''
+        except ValueError:
+            address = ''
+        if not address:
+            peer = request.client.host if request.client else 'unknown'
+            try:
+                address = str(ipaddress.ip_address(peer))
+            except ValueError:
+                address = str(peer or 'unknown')[:80]
+        method = str(method)[:40]
+        return (f'client:{method}:{address}', f'global:{method}')
 
     def allow_access_attempt(request: Request, method: str):
-        key = access_attempt_key(request, method)
-        cutoff = time.monotonic() - 300
+        keys = access_attempt_keys(request, method)
+        cutoff = time.monotonic() - access_failure_window_seconds
         with access_attempts_lock:
-            attempts = [stamp for stamp in failed_access_attempts.get(key, []) if stamp >= cutoff]
-            failed_access_attempts[key] = attempts
-        if len(attempts) >= 5:
+            for stored_key in list(failed_access_attempts):
+                attempts = [stamp for stamp in failed_access_attempts[stored_key] if stamp >= cutoff]
+                if attempts:
+                    failed_access_attempts[stored_key] = attempts
+                else:
+                    failed_access_attempts.pop(stored_key, None)
+            client_attempts = failed_access_attempts.get(keys[0], [])
+            global_attempts = failed_access_attempts.get(keys[1], [])
+        if len(client_attempts) >= per_client_failure_limit or len(global_attempts) >= global_method_failure_limit:
             raise HTTPException(429, 'Too many unsuccessful attempts. Wait five minutes and try again.')
-        return key
+        return keys
 
-    def failed_access_attempt(key: str):
+    def failed_access_attempt(keys):
+        stamp = time.monotonic()
         with access_attempts_lock:
-            failed_access_attempts.setdefault(key, []).append(time.monotonic())
+            for key in keys:
+                failed_access_attempts.setdefault(key, []).append(stamp)
 
-    def clear_access_attempts(key: str):
+    def clear_access_attempts(keys):
         with access_attempts_lock:
-            failed_access_attempts.pop(key, None)
+            for key in keys:
+                failed_access_attempts.pop(key, None)
 
     def trust_browser(response: Response, name: str, platform: str = 'web-pwa'):
         device, token = registry.enroll(str(name or 'Owner browser').strip()[:120], platform)
@@ -207,6 +231,25 @@ def iphone_pwa_router(runtime, settings):
         if hasattr(registry, 'authorize') and not registry.authorize(device_id, 'ai:chat'):
             raise HTTPException(403, 'This device is not permitted to use conversation or voice')
         return device_id
+
+    def require_fresh_owner_verification(device_id: str):
+        # The production cloud app installs PwaSessionMiddleware and provides
+        # pwa_sessions. Isolated compatibility routers may intentionally omit it.
+        if runtime.get('pwa_sessions') is None:
+            return
+        context = current_trusted_request()
+        ttl = int(getattr(runtime.get('agent_executor'), 'reauth_ttl_seconds', 300) or 300)
+        ttl = max(30, min(ttl, 900))
+        stamp = getattr(context, 'reauthenticated_at', None) if context is not None else None
+        try:
+            age = time.time() - float(stamp)
+        except (TypeError, ValueError):
+            age = ttl + 1
+        if context is None or context.device_id != device_id or age < 0 or age > ttl:
+            raise HTTPException(401, {
+                'code': 'reauthentication_required',
+                'message': 'Fresh owner verification is required for this security-sensitive action.',
+            })
 
     def emit(name: str, **payload):
         if events:
@@ -367,6 +410,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         try:
             owner_access.set_password(body.password)
         except ValueError as exc:
@@ -394,6 +438,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         codes = owner_access.regenerate_recovery_codes()
         emit('owner.recovery.regenerated', device_id=device_id, count=len(codes))
         return {'codes': codes, 'message': 'Save these codes now. Each code works only once.'}
@@ -417,6 +462,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         require_https(request)
         rp_id, origin = request_identity(request)
         exclude = [
@@ -450,6 +496,7 @@ def iphone_pwa_router(runtime, settings):
         pa_token: str | None = Cookie(default=None),
     ):
         device_id = auth_device(pa_device, pa_token)
+        require_fresh_owner_verification(device_id)
         require_https(request)
         challenge = owner_access.consume_challenge(body.challenge_id, 'registration', device_id=device_id)
         if not challenge:
@@ -639,8 +686,30 @@ def iphone_pwa_router(runtime, settings):
             state.finish(device_id, cancel_event)
 
     def claim_pending_approval(approval_id: str, device_id: str):
+        # The in-memory map is presentation/correlation state only. Canonical
+        # approval existence and binding live in the durable Stage-2 authority,
+        # so a router reload or lost response must not make a valid ticket vanish.
         with pending_approvals_lock:
             pending = pending_approvals.get(approval_id)
+        canonical = None
+        lookup = getattr(executor, 'approval_context', None)
+        if callable(lookup):
+            try:
+                canonical = lookup(approval_id)
+            except Exception:
+                canonical = None
+        if canonical is not None:
+            if canonical.get('device_id') not in (None, device_id):
+                raise HTTPException(404, {
+                    'code': 'approval_not_found',
+                    'message': 'This approval is missing, expired, or belongs to another device.',
+                })
+            if pending is None:
+                pending = {
+                    'device_id': device_id,
+                    'tool': canonical.get('tool'),
+                    'conversation_id': canonical.get('conversation_id'),
+                }
         if not pending or pending['device_id'] != device_id:
             raise HTTPException(404, {
                 'code': 'approval_not_found',
@@ -923,5 +992,26 @@ def iphone_pwa_router(runtime, settings):
         if recorder is None:
             raise HTTPException(503, 'Voice qualification recorder unavailable')
         return {'sessions': recorder.sessions()}
+
+    if not include_legacy_runtime_routes:
+        # Stage 3/Stage 2 canonical routers own these production paths. Keep the
+        # historical handlers available only for isolated compatibility/P3 tests,
+        # never as order-dependent competing cloud authorities.
+        canonical_runtime_routes = {
+            ('POST', '/iphone/api/voice/turn'),
+            ('POST', '/iphone/api/approval/{approval_id}/approve'),
+            ('POST', '/iphone/api/approval/{approval_id}/reject'),
+            ('GET', '/iphone/api/conversations'),
+            ('GET', '/iphone/api/conversations/{conversation_id}'),
+            ('POST', '/iphone/api/voice/barge'),
+            ('POST', '/iphone/api/voice/client-event'),
+        }
+        router.routes[:] = [
+            route for route in router.routes
+            if not any(
+                (method, getattr(route, 'path', '')) in canonical_runtime_routes
+                for method in (getattr(route, 'methods', None) or ())
+            )
+        ]
 
     return router

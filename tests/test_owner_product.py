@@ -1,7 +1,9 @@
 from types import SimpleNamespace
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from automation.engine import AutomationEngine
 from devices.registry import DeviceRegistry
@@ -10,11 +12,19 @@ from memory.second_brain import SecondBrain
 from memory.store import MemoryStore
 from qualification.program import P3QualificationProgram
 from server.owner_product import owner_product_router
+from security.request_context import TrustedRequestContext, set_trusted_request, reset_trusted_request
 
 
 class Executor:
+    def __init__(self):
+        self.cancelled = []
+
     def chat(self, prompt, cancel_event=None, **kwargs):
         return f'done:{prompt}'
+
+    def cancel_active_turns(self, *, reason='emergency_stop'):
+        self.cancelled.append(reason)
+        return 1
 
 
 class Models:
@@ -28,19 +38,45 @@ class Tools:
     def all(self):
         return []
 
+    def set_emergency_stop(self, enabled):
+        self.emergency_stop = bool(enabled)
+        return self.emergency_stop
 
-def make_client(tmp_path):
+
+class SessionStoreProbe:
+    def __init__(self):
+        self.revoked_devices = []
+
+    def revoke_device(self, device_id):
+        self.revoked_devices.append(device_id)
+        return 1
+
+
+class GatewayProbe:
+    def __init__(self):
+        self.disconnected = []
+
+    def disconnect(self, device_id):
+        self.disconnected.append(device_id)
+
+
+def make_client(tmp_path, *, reauthenticated_at=None):
     registry = DeviceRegistry(tmp_path / 'devices.sqlite3')
     device, token = registry.enroll('Owner iPhone', 'ios-pwa')
     registry.set_permissions(device['id'], registry.OWNER_SCOPES)
     memory = MemoryStore(tmp_path / 'memory.sqlite3')
-    automations = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=Executor())
+    executor = Executor()
+    automations = AutomationEngine(tmp_path / 'workflows.sqlite3', executor=executor)
     runtime = {
         'device_registry': registry,
         'memory': memory,
         'second_brain': SecondBrain(memory),
         'knowledge': KnowledgeStore(tmp_path / 'knowledge.sqlite3', tmp_path / 'objects'),
         'automations': automations,
+        'executor': executor,
+        'pwa_sessions': SessionStoreProbe(),
+        'cloud_sessions': SessionStoreProbe(),
+        'device_gateway': GatewayProbe(),
         'p3_qualification': P3QualificationProgram(tmp_path / 'qualification.sqlite3'),
         'models': Models(),
         'tools': Tools(),
@@ -48,6 +84,16 @@ def make_client(tmp_path):
         'future_intelligence': SimpleNamespace(status=lambda: {}),
     }
     app = FastAPI()
+    fresh_at = time.time() if reauthenticated_at is None else reauthenticated_at
+    class TrustedContextMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            device_id = request.cookies.get('pa_device') or device['id']
+            token = set_trusted_request(TrustedRequestContext(device_id, 'test-session', fresh_at))
+            try:
+                return await call_next(request)
+            finally:
+                reset_trusted_request(token)
+    app.add_middleware(TrustedContextMiddleware)
     app.include_router(owner_product_router(runtime))
     client = TestClient(app, base_url='https://testserver')
     client.cookies.set('pa_device', device['id'])
@@ -137,6 +183,32 @@ def test_owner_can_manage_other_device_and_revocation_is_immediate(tmp_path):
     revoked = client.post(f"/iphone/api/devices/{other['id']}/revoke", json={'confirm': True})
     assert revoked.status_code == 200
     assert runtime['device_registry'].authenticate(other['id'], other_token) is False
+    assert runtime['pwa_sessions'].revoked_devices == [other['id']]
+    assert runtime['cloud_sessions'].revoked_devices == [other['id']]
+    assert runtime['device_gateway'].disconnected == [other['id']]
+    assert revoked.json()['revoked_sessions'] == {'pwa_sessions': 1, 'cloud_sessions': 1}
+
+
+def test_workflow_permission_revocation_cancels_device_bound_work(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+    other, _ = runtime['device_registry'].enroll('Workflow browser', 'web')
+    runtime['device_registry'].set_permissions(other['id'], {'ai:chat', 'workflow:write'})
+
+    cancelled = []
+    runtime['automations'].cancel_device_runs = (
+        lambda device_id, *, reason='device_revoked':
+        cancelled.append((device_id, reason)) or 2
+    )
+
+    response = client.patch(
+        f"/iphone/api/devices/{other['id']}/permissions",
+        json={'scopes': ['ai:chat']},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['cancelled_turns'] == 0
+    assert response.json()['cancelled_workflows'] == 2
+    assert cancelled == [(other['id'], 'workflow_permission_revoked')]
 
 
 def test_ui_preferences_are_scoped_to_the_trusted_device_and_persist(tmp_path):
@@ -264,3 +336,202 @@ def test_retention_removes_memory_and_vector(tmp_path):
     assert result['matched'] == 1
     assert store.get(memory_id) is None
     assert vector.deleted == [memory_id]
+
+
+def test_stage8_owner_emergency_stop_cancels_canonical_turns(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+
+    stopped = client.post('/iphone/api/system/emergency-stop', json={'enabled': True})
+    assert stopped.status_code == 200
+    assert runtime['tools'].emergency_stop is True
+    assert runtime['executor'].cancelled == ['emergency_stop']
+
+    resumed = client.post('/iphone/api/system/emergency-stop', json={'enabled': False})
+    assert resumed.status_code == 200
+    assert runtime['tools'].emergency_stop is False
+    assert runtime['executor'].cancelled == ['emergency_stop']
+
+
+def test_stage8_stale_reauthentication_blocks_security_controls(tmp_path):
+    client, runtime, _ = make_client(tmp_path, reauthenticated_at=time.time() - 1000)
+    other, _ = runtime['device_registry'].enroll('Other', 'web')
+
+    permissions = client.patch(
+        f"/iphone/api/devices/{other['id']}/permissions",
+        json={'scopes': ['ai:chat']},
+    )
+    assert permissions.status_code == 401
+    assert permissions.json()['detail']['code'] == 'reauthentication_required'
+
+    revoke = client.post(f"/iphone/api/devices/{other['id']}/revoke", json={'confirm': True})
+    assert revoke.status_code == 401
+    assert runtime['device_registry'].is_active(other['id']) is True
+
+    runtime['tools'].set_emergency_stop(True)
+    release = client.post('/iphone/api/system/emergency-stop', json={'enabled': False})
+    assert release.status_code == 401
+    assert runtime['tools'].emergency_stop is True
+
+    stop_again = client.post('/iphone/api/system/emergency-stop', json={'enabled': True})
+    assert stop_again.status_code == 200
+    assert runtime['tools'].emergency_stop is True
+
+
+def test_stage8_owner_manual_workflow_retry_reuses_one_durable_run(tmp_path):
+    client, runtime, _ = make_client(tmp_path)
+    created = client.post('/iphone/api/workflows', json={
+        'title': 'Idempotent owner run',
+        'trigger': {'type': 'manual'},
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert created.status_code == 200
+    workflow_id = created.json()['id']
+
+    missing = client.post(f'/iphone/api/workflows/{workflow_id}/run', json={'context': {}})
+    assert missing.status_code == 422
+
+    body = {'context': {'source': 'owner-ui'}, 'idempotency_key': 'owner-run-request-0001'}
+    first = client.post(f'/iphone/api/workflows/{workflow_id}/run', json=body)
+    second = client.post(f'/iphone/api/workflows/{workflow_id}/run', json=body)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()['run_id'] == second.json()['run_id']
+    matching = [row for row in runtime['automations'].runs(workflow_id, 20) if row['idempotency_key'] == body['idempotency_key']]
+    assert len(matching) == 1
+
+
+def test_stage8_owner_workflow_payloads_are_bounded(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    nested = {}
+    cursor = nested
+    for _ in range(12):
+        cursor['next'] = {}
+        cursor = cursor['next']
+
+    create = client.post('/iphone/api/workflows', json={
+        'title': 'nested',
+        'trigger': nested,
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert create.status_code == 413
+
+    valid = client.post('/iphone/api/workflows', json={
+        'title': 'valid',
+        'trigger': {'type': 'manual'},
+        'steps': [{'kind': 'set', 'key': 'ok', 'value': True}],
+    })
+    assert valid.status_code == 200
+    run = client.post(
+        f"/iphone/api/workflows/{valid.json()['id']}/run",
+        json={'context': nested, 'idempotency_key': 'owner-run-request-0002'},
+    )
+    assert run.status_code == 413
+
+
+def test_stage8_owner_structured_metadata_is_bounded(tmp_path):
+    client, _, _ = make_client(tmp_path)
+    nested = {}
+    cursor = nested
+    for _ in range(12):
+        cursor['next'] = {}
+        cursor = cursor['next']
+
+    knowledge = client.post('/iphone/api/knowledge', json={
+        'filename': 'bounded.txt',
+        'text': 'safe content',
+        'metadata': nested,
+    })
+    assert knowledge.status_code == 413
+
+    qualification = client.post('/iphone/api/qualification/stages', json={
+        'stage': 'P3.5',
+        'evidence_class': 'real_device',
+        'environment': nested,
+    })
+    assert qualification.status_code == 413
+
+
+def test_stage8_owner_workflow_read_respects_persisted_device_session_binding(tmp_path):
+    client, runtime, owner = make_client(tmp_path)
+    owner_token = client.cookies.get('pa_token')
+    engine = runtime['automations']
+    workflow_id = engine.create_workflow(
+        'Stage8 owner-bound visibility',
+        {'type': 'manual'},
+        [{'kind': 'set', 'key': 'stage8', 'value': 'owner-only-run'}],
+    )
+    run_id = engine.run_workflow(
+        workflow_id,
+        background=False,
+        owner_id='owner',
+        device_id=owner['id'],
+        session_id='test-session',
+        idempotency_key='stage8-owner-visibility-run',
+    )
+
+    own = client.get('/iphone/api/workflows')
+    assert own.status_code == 200
+    assert run_id in {row['id'] for row in own.json()['runs']}
+
+    foreign, foreign_token = runtime['device_registry'].enroll('Foreign workflow browser', 'web')
+    runtime['device_registry'].set_permissions(
+        foreign['id'],
+        {'workflow:read', 'workflow:approve'},
+    )
+    client.cookies.set('pa_device', foreign['id'])
+    client.cookies.set('pa_token', foreign_token)
+
+    foreign_list = client.get('/iphone/api/workflows')
+    assert foreign_list.status_code == 200
+    assert run_id not in {row['id'] for row in foreign_list.json()['runs']}
+
+    foreign_approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    foreign_reject = client.post(f'/iphone/api/workflows/runs/{run_id}/reject')
+    for response in (foreign_approve, foreign_reject):
+        assert response.status_code == 403
+        assert run_id not in response.text
+        assert 'not waiting' not in response.text.lower()
+
+    # Positive control: the correctly bound owner gets the real run-state answer.
+    client.cookies.set('pa_device', owner['id'])
+    client.cookies.set('pa_token', owner_token)
+    own_approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    assert own_approve.status_code == 409
+    assert 'not waiting' in own_approve.text.lower()
+
+
+def test_stage8_owner_workflow_approval_state_hidden_from_foreign_device(tmp_path):
+    client, runtime, owner = make_client(tmp_path)
+    owner_token = client.cookies.get('pa_token')
+    engine = runtime['automations']
+    workflow_id = engine.create_workflow(
+        'Stage8 owner-bound approval state',
+        {'type': 'manual'},
+        [{'kind': 'set', 'key': 'stage8', 'value': 'completed'}],
+    )
+    run_id = engine.run_workflow(
+        workflow_id,
+        background=False,
+        owner_id='owner',
+        device_id=owner['id'],
+        session_id='test-session',
+        idempotency_key='stage8-owner-approval-state',
+    )
+
+    foreign, foreign_token = runtime['device_registry'].enroll('Foreign approval browser', 'web')
+    runtime['device_registry'].set_permissions(foreign['id'], {'workflow:approve'})
+    client.cookies.set('pa_device', foreign['id'])
+    client.cookies.set('pa_token', foreign_token)
+
+    approve = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    reject = client.post(f'/iphone/api/workflows/runs/{run_id}/reject')
+    for response in (approve, reject):
+        assert response.status_code == 403
+        assert run_id not in response.text
+        assert 'not waiting' not in response.text.lower()
+
+    client.cookies.set('pa_device', owner['id'])
+    client.cookies.set('pa_token', owner_token)
+    own = client.post(f'/iphone/api/workflows/runs/{run_id}/approve')
+    assert own.status_code == 409
+    assert 'not waiting' in own.text.lower()

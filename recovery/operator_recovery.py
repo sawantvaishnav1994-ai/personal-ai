@@ -257,6 +257,15 @@ class RecoveryAuthority:
             raise KeyError(transaction_id)
         return dict(row)
 
+    def transaction_binding(self, transaction_id: str) -> dict | None:
+        """Read the canonical W7.1 owner/device/session binding without exposing plan/content."""
+        with self._con() as con:
+            row = con.execute(
+                'SELECT owner_id,device_id,session_id,security_epoch FROM operator_transactions WHERE transaction_id=?',
+                (str(transaction_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
     def _assert_action(self, con, transaction_id: str, action_id: str):
         row = con.execute('SELECT * FROM operator_actions WHERE action_id=? AND transaction_id=?', (action_id, transaction_id)).fetchone()
         if not row:

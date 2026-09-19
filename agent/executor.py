@@ -10,6 +10,7 @@ from agent.planner import Planner
 from models.router import ModelError
 from security.action_audit import TrustedActionAudit
 from security.approvals import ApprovalManager, parameter_hash
+from security.projection_redaction import sanitize_external_value
 from tools.registry import Risk
 
 
@@ -206,8 +207,9 @@ class AgentExecutor:
             answer = self.models.chat(
                 text,
                 history=history[:-1],
-                system=self._grounded_system(context),
+                system=self._grounded_system(''),
                 sensitivity=sensitivity,
+                private_context=context,
             )
             self._observe('model.chat_ms', start)
             self._check_cancel(cancel_event)
@@ -245,7 +247,7 @@ class AgentExecutor:
         )
         if not context:
             return (
-                'You are Personal AI. Be helpful, concise, and honest. Never claim to remember or know a source that was not provided. '
+                'You are Personal AI. Be helpful, concise, and honest. Never claim to remember or know a source that was not provided. Never invent a memory or citation. '
                 + guardrails
             )
         return (
@@ -624,19 +626,22 @@ class AgentExecutor:
         self._check_cancel(cancel_event)
         start = time.perf_counter()
         if results:
+            projected_results = sanitize_external_value(results)
             answer = self.models.chat(
-                f"User request: {text}\nTool results: {json.dumps(results, default=str)[:12000]}\n"
+                f"User request: {text}\nTool results: {json.dumps(projected_results, default=str)[:12000]}\n"
                 f"Retrieved context: {grounding}\n"
                 "Report verified actions as completed. For verified=false results, explicitly say the action was attempted but not verified; never imply success. Mention rollback availability when relevant.",
-                system=self._grounded_system(grounding),
-                sensitivity=sensitivity,
+                system=self._grounded_system(''),
+                sensitivity='sensitive',
+                private_context=grounding,
             )
         else:
             answer = self.models.chat(
                 text,
                 history=history[:-1],
-                system=self._grounded_system(grounding),
+                system=self._grounded_system(''),
                 sensitivity=sensitivity,
+                private_context=grounding,
             )
         self._observe('model.chat_ms', start)
         self._check_cancel(cancel_event)
