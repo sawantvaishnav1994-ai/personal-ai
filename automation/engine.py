@@ -13,6 +13,7 @@ from agent.executor import ConfirmationRequired, ExecutionCancelled
 from automation.budget import DEFAULT_POLICY, WorkflowBudgetError, WorkflowBudgetManager, WorkflowRecoveryRequired, normalize_policy
 from automation.conditions import evaluate_condition
 from security.projection_redaction import sanitize_external_value, sanitize_sensitive_text
+from desktop.operator_transactions import OperatorBinding, OperatorTransactionStore
 
 
 def now():
@@ -73,6 +74,8 @@ class AutomationEngine:
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
             con.execute('CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id,started_at)')
             con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency ON workflow_runs(workflow_id,idempotency_key) WHERE idempotency_key IS NOT NULL')
+            for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
+                if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
 
     def _halt_for_emergency_stop(self):
         with self._con() as con:
@@ -323,6 +326,59 @@ class AutomationEngine:
                 cancelled+=1
                 self._update_run(row['id'],error=str(reason)[:160])
         return cancelled
+    def _recovery_authority(self):
+        tools=getattr(self.executor,'tools',None)
+        getter=getattr(tools,'ensure_recovery_authority',None) if tools is not None else None
+        if not callable(getter): raise RuntimeError('W7 recovery authority is unavailable')
+        return getter(),tools
+
+    def link_recovery(self,run_id,*,owner_id=None,device_id=None,session_id=None):
+        run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
+        if run['status']!='recovery_required': raise RuntimeError('workflow run is not waiting for recovery')
+        budget=self.budgets.status(run_id); uncertain=[d for d in budget['dispatches'] if d['status']=='uncertain']
+        if not uncertain: raise RuntimeError('workflow has no uncertain dispatch to reconcile')
+        if len(uncertain)!=1: raise RuntimeError('workflow has multiple uncertain dispatches; manual recovery review required')
+        source=uncertain[0]; authority,tools=self._recovery_authority(); txid=str(run.get('recovery_transaction_id') or uuid.uuid5(uuid.NAMESPACE_URL,f'personal-ai:workflow-recovery:{run_id}:{source["dispatch_id"]}'))
+        store=OperatorTransactionStore(authority.path); epoch=int(tools.current_security_epoch())
+        binding=OperatorBinding(str(run.get('owner_id') or 'owner'),str(run.get('device_id') or ''),str(run.get('session_id') or ''),epoch,workflow_id=str(run['workflow_id']))
+        plan={'steps':[{'kind':'workflow_uncertain_dispatch','run_id':run_id,'step_index':int(source['step_index']),'source_dispatch_id':source['dispatch_id'],'action_identity':source['action_identity']} ]}
+        store.propose(txid,binding,goal='Reconcile uncertain workflow dispatch',action_plan=plan)
+        tx=store.transaction(txid)
+        if tx['state']=='proposed': store.transition(txid,'policy_check'); store.transition(txid,'permitted'); store.transition(txid,'executing')
+        import hashlib
+        action_id=f'{txid}:0'; store.start_action(txid,0,kind='workflow_uncertain_dispatch',parameter_hash=hashlib.sha256(source['action_identity'].encode()).hexdigest(),expected_postcondition='recover externally observed outcome before workflow continuation',target_identity=source['action_identity'])
+        authority.ensure_recovery(txid,state='recovery_review_required',reason='workflow_dispatch_outcome_uncertain')
+        lease=authority.acquire_lease(txid,'workflow-recovery-link')
+        try:
+            dispatch=authority.begin_dispatch(txid,action_id,operation_class='application_input',target=source['action_identity'],destination='',idempotency_key=source['dispatch_id'],worker_id='workflow-recovery-link',fencing_token=lease['fencing_token'])
+            authority.mark_dispatched(dispatch['dispatch_id'],worker_id='workflow-recovery-link',fencing_token=lease['fencing_token'])
+        finally: authority.release_lease(txid,'workflow-recovery-link',lease['fencing_token'])
+        authority.set_state(txid,'recovery_review_required',reason='workflow_dispatch_outcome_uncertain',current_action_id=action_id,checkpoint={'workflow_id':run['workflow_id'],'run_id':run_id,'step_index':int(source['step_index']),'source_dispatch_id':source['dispatch_id']})
+        self._update_run(run_id,recovery_transaction_id=txid,recovery_source_dispatch_id=source['dispatch_id'])
+        self._emit('workflow.recovery_linked',run_id=run_id,workflow_id=run['workflow_id'],recovery_transaction_id=txid)
+        return {'run_id':run_id,'recovery_transaction_id':txid,'recovery':authority.owner_view(txid)}
+
+    def refresh_recovery(self,run_id,*,owner_id=None,device_id=None,session_id=None):
+        run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
+        txid=str(run.get('recovery_transaction_id') or '')
+        if not txid: raise RuntimeError('workflow is not linked to W7 recovery')
+        authority,_=self._recovery_authority(); view=authority.owner_view(txid); latest=authority.latest_verification(txid)
+        state=str(view.get('recovery_state') or '')
+        if latest and latest['result']=='verified_success':
+            self.budgets.reconcile_uncertain_dispatch(run_id,run['recovery_source_dispatch_id'],resolution='verified_effect')
+            completed=json.loads(run.get('completed_steps_json') or '[]'); step=int(run['current_step'])
+            if not any(int(x.get('step',-1))==step for x in completed): completed.append({'step':step,'kind':'prompt','reply':'External effect verified through W7 recovery','recovered':True})
+            self._update_run(run_id,status='recovery_required',current_step=step+1,completed_steps_json=json.dumps(completed),error='W7 verified prior effect; owner may resume from next checkpoint',completed_at=None)
+        elif latest and latest['result']=='verified_no_effect':
+            decision=authority.retry_decision(txid,latest['action_id'])
+            if decision.get('allowed'):
+                self.budgets.reconcile_uncertain_dispatch(run_id,run['recovery_source_dispatch_id'],resolution='verified_no_effect')
+                self._update_run(run_id,status='recovery_required',error='W7 verified no effect; owner may resume under retry policy',completed_at=None)
+        elif state in {'abandoned_by_owner','cancelled'}:
+            self._update_run(run_id,status='cancelled',error='workflow recovery terminated by governed W7 decision',completed_at=now())
+            self.budgets.release(run_id,reason='W7 recovery terminated')
+        return {'run_id':run_id,'status':self._run(run_id)['status'],'recovery':view}
+
     def resume_run(self,run_id,*,background=True,owner_id=None,device_id=None,session_id=None):
         run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
         if run['status'] not in {'recovery_required','interrupted'}: raise RuntimeError('workflow run is not waiting for recovery')
