@@ -70,3 +70,16 @@ def test_destination_collision_never_overwrites(tmp_path):
     src=tmp_path/'src.txt';dst=tmp_path/'dst.txt';src.write_text('new');dst.write_text('old')
     with pytest.raises(FileExistsError):SafeFileAdapter().copy(str(src),str(dst),[str(tmp_path)])
     assert dst.read_text()=='old'
+
+
+def test_parent_identity_revalidation_detects_replacement(tmp_path):
+    root=tmp_path/'root';root.mkdir()
+    parent=root/'parent';parent.mkdir()
+    destination=parent/'out.txt'
+    expected_parent=parent.resolve()
+    original=root/'parent-authorized'
+    parent.rename(original)
+    parent.mkdir()
+    with pytest.raises(TargetValidationError) as exc:
+        SafeFileAdapter._revalidate_parent(destination,[str(root)],expected_parent)
+    assert exc.value.reason_code=='path_changed'
