@@ -240,7 +240,11 @@ class ContinuityService:
             ).fetchone()
         return self.thread(row['id']) if row else None
 
-    def active_for_device(self, device_id: str):
+    def active_for_device(self, device_id: str, *, authority_guard=None):
+        # Governed callers may require current authority even when no device
+        # state exists. Check before the fallback can manufacture activation.
+        if authority_guard is not None:
+            authority_guard()
         with self.lock, self._con() as con:
             row = con.execute('SELECT active_thread_id FROM continuity_device_state WHERE device_id=?', (device_id,)).fetchone()
         if row and row['active_thread_id']:
@@ -249,7 +253,7 @@ class ContinuityService:
                 return thread
         latest = self.latest_thread()
         if latest:
-            self.set_active(device_id, latest['id'])
+            self.set_active(device_id, latest['id'], authority_guard=authority_guard)
         return latest
 
     def resume(self, device_id: str, *, thread_id: str | None = None, event_limit: int = 30):
