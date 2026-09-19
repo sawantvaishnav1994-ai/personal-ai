@@ -75,7 +75,7 @@ class AutomationEngine:
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
             con.execute('CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id,started_at)')
             con.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_idempotency ON workflow_runs(workflow_id,idempotency_key) WHERE idempotency_key IS NOT NULL')
-            for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT'}.items():
+            for name,definition in {'recovery_transaction_id':'TEXT','recovery_source_dispatch_id':'TEXT','recovery_consumed_verification_id':'TEXT'}.items():
                 if name not in run_cols: con.execute(f'ALTER TABLE workflow_runs ADD COLUMN {name} {definition}')
 
     def _halt_for_emergency_stop(self):
@@ -366,10 +366,13 @@ class AutomationEngine:
         authority,_=self._recovery_authority(); view=authority.owner_view(txid); latest=authority.latest_verification(txid)
         state=str(view.get('recovery_state') or '')
         if latest and latest['result']=='verified_success':
-            self.budgets.reconcile_uncertain_dispatch(run_id,run['recovery_source_dispatch_id'],resolution='verified_effect')
-            completed=json.loads(run.get('completed_steps_json') or '[]'); step=int(run['current_step'])
-            if not any(int(x.get('step',-1))==step for x in completed): completed.append({'step':step,'kind':'prompt','reply':'External effect verified through W7 recovery','recovered':True})
-            self._update_run(run_id,status='recovery_required',current_step=step+1,completed_steps_json=json.dumps(completed),error='W7 verified prior effect; owner may resume from next checkpoint',completed_at=None)
+            verification_id=str(latest['verification_id'])
+            if str(run.get('recovery_consumed_verification_id') or '')!=verification_id:
+                self.budgets.reconcile_uncertain_dispatch(run_id,run['recovery_source_dispatch_id'],resolution='verified_effect')
+                completed=json.loads(run.get('completed_steps_json') or '[]'); step=int(run['current_step'])
+                if not any(x.get('recovery_verification_id')==verification_id for x in completed):
+                    completed.append({'step':step,'kind':'prompt','reply':'External effect verified through W7 recovery','recovered':True,'recovery_verification_id':verification_id})
+                self._update_run(run_id,status='recovery_required',current_step=step+1,completed_steps_json=json.dumps(completed),recovery_consumed_verification_id=verification_id,error='W7 verified prior effect; owner may resume from next checkpoint',completed_at=None)
         elif latest and latest['result']=='verified_no_effect':
             decision=authority.retry_decision(txid,latest['action_id'])
             if decision.get('allowed'):
