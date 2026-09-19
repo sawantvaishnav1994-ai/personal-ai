@@ -29,11 +29,16 @@ class Planner:
 
 
 class Devices:
+    SCOPES = {'ai:chat', 'device:read', 'memory:read'}
+
     def authenticate(self, device_id, token):
         return device_id == 'device-1' and token == 'device-secret'
 
     def is_active(self, device_id):
         return device_id == 'device-1'
+
+    def authorize(self, device_id, scope):
+        return self.is_active(device_id) and scope in self.SCOPES
 
 
 class Events:
