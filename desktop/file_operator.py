@@ -177,6 +177,10 @@ class SafeFileAdapter:
         src=self._safe(source,roots,must_exist=True,mutation=True); dst=self._safe(destination,roots)
         if dst.exists(): raise FileExistsError('destination_exists')
         source_hash=self.checksum(src) if src.is_file() else ''
+        parent=dst.parent
+        pst=parent.stat(); parent_identity=(pst.st_dev,pst.st_ino)
+        self._revalidate_parent(dst,roots,parent,parent_identity)
+        if dst.exists(): raise FileExistsError('destination_exists')
         os.replace(src,dst)
         ok=dst.exists() and not src.exists() and (not source_hash or self.checksum(dst)==source_hash)
         return FileResult('completed',ok,'reversible',{'source_sha256':source_hash,'destination':str(dst)})
@@ -190,6 +194,9 @@ class SafeFileAdapter:
         candidate=tr/src.name; n=1
         while candidate.exists(): candidate=tr/f'{src.stem} ({n}){src.suffix}'; n+=1
         source_hash=self.checksum(src) if src.is_file() else ''
+        pst=tr.stat(); parent_identity=(pst.st_dev,pst.st_ino)
+        self._revalidate_parent(candidate,roots,tr,parent_identity)
+        if candidate.exists(): raise FileExistsError('destination_exists')
         os.replace(src,candidate)
         return FileResult('completed',candidate.exists() and not src.exists(),'compensating_action_available',{'trash_path':str(candidate),'source_sha256':source_hash})
 
