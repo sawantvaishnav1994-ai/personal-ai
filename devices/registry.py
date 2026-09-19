@@ -15,6 +15,7 @@ class DeviceRegistry:
             c.execute('''CREATE TABLE IF NOT EXISTS device_metadata(device_id TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(device_id,key),FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE)''')
             c.execute('''CREATE TABLE IF NOT EXISTS device_permissions(device_id TEXT PRIMARY KEY,scopes_json TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE)''')
             c.execute('''INSERT INTO device_permissions(device_id,scopes_json,updated_at) SELECT d.id,?,? FROM devices d LEFT JOIN device_permissions p ON p.device_id=d.id WHERE d.platform='ios-pwa' AND p.device_id IS NULL''',(json.dumps(sorted(self.OWNER_SCOPES)),now()))
+            c.execute('''INSERT INTO device_permissions(device_id,scopes_json,updated_at) SELECT d.id,?,? FROM devices d LEFT JOIN device_permissions p ON p.device_id=d.id WHERE d.platform!='ios-pwa' AND p.device_id IS NULL''',(json.dumps(sorted(self.DEFAULT_SCOPES)),now()))
     def _con(self):c=sqlite3.connect(self.path);c.row_factory=sqlite3.Row;return c
     def enroll(self,name,platform):
         did=str(uuid.uuid4());token,salt,h=new_bearer_secret()
@@ -45,7 +46,7 @@ class DeviceRegistry:
         return cur.rowcount==1
     def permissions(self,device_id):
         with self._con() as c:row=c.execute('SELECT scopes_json,updated_at FROM device_permissions WHERE device_id=?',(device_id,)).fetchone()
-        if not row:return {'scopes':sorted(self.DEFAULT_SCOPES),'updated_at':None}
+        if not row:return {'scopes':[],'updated_at':None}
         try:scopes=sorted({str(x) for x in json.loads(row['scopes_json'])})
         except Exception:scopes=[]
         return {'scopes':scopes,'updated_at':row['updated_at']}
