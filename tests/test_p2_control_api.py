@@ -128,6 +128,7 @@ def test_p2_api_continuity_resume_handoff_and_sync(tmp_path):
 def test_p2_api_workflow_proactive_and_benchmark_require_device_identity(tmp_path):
     client, _, registry = build_client(tmp_path)
     device, token = registry.enroll('Phone', 'android')
+    registry.set_permissions(device['id'], registry.OWNER_SCOPES)
     headers = auth_headers(device, token)
 
     workflow = client.post(
@@ -246,3 +247,38 @@ def test_stage8_legacy_api_rejects_nested_and_oversized_payloads(tmp_path):
         headers=headers,
     )
     assert too_many_steps.status_code == 422
+
+
+def test_stage8_legacy_control_routes_enforce_current_device_scopes(tmp_path):
+    client, _, registry = build_client(tmp_path)
+    device, token = registry.enroll('Limited device', 'android')
+    headers = auth_headers(device, token)
+
+    registry.set_permissions(device['id'], {'ai:chat', 'workflow:read'})
+    denied = client.post(
+        '/workflows/create',
+        json={'title': 'blocked', 'trigger': {'type': 'manual'}, 'steps': [{'kind': 'prompt', 'prompt': 'x'}]},
+        headers=headers,
+    )
+    assert denied.status_code == 403
+    assert client.get('/workflows', headers=headers).status_code == 200
+
+    registry.set_permissions(device['id'], {'workflow:write'})
+    assert client.get('/workflows', headers=headers).status_code == 403
+
+
+def test_stage8_dashboard_cannot_directly_dispatch_tools_or_consequential_device_actions(tmp_path):
+    client, _, registry = build_client(tmp_path)
+    owner, token = registry.enroll('Owner device', 'ios-pwa')
+    registry.set_permissions(owner['id'], registry.OWNER_SCOPES)
+    headers = auth_headers(owner, token)
+
+    direct_tool = client.post('/dashboard/tool', json={'tool': 'anything', 'parameters': {}}, headers=headers)
+    assert direct_tool.status_code == 409
+
+    side_effect = client.post(
+        f"/dashboard/device/{owner['id']}/command",
+        json={'action': 'open_url', 'parameters': {'url': 'https://example.com'}, 'timeout': 1},
+        headers=headers,
+    )
+    assert side_effect.status_code == 409

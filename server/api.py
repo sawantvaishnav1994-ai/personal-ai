@@ -157,12 +157,14 @@ def create_app(
         runtime['cloud_sessions'] = sessions
         runtime['cloud_relay'] = cloud
 
-    def auth_device(authorization, device_id):
+    def auth_device(authorization, device_id, scope='ai:chat'):
         if not device_registry or not device_id:
             raise HTTPException(401, 'Device identity required')
         token = (authorization or '').removeprefix('Bearer ').strip()
         if not token or not device_registry.authenticate(device_id, token):
             raise HTTPException(401, 'Unauthorized')
+        if hasattr(device_registry, 'authorize') and not device_registry.authorize(device_id, scope):
+            raise HTTPException(403, f'Device is not permitted to use {scope}')
         return device_id
 
     def require_runtime(name: str):
@@ -379,7 +381,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'workflow:read')
         return require_runtime('automations').workflows()
 
     @app.get('/workflows/runs')
@@ -389,7 +391,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'workflow:read')
         return require_runtime('automations').runs(workflow_id, max(1, min(int(limit), 500)))
 
     @app.post('/workflows/create')
@@ -398,7 +400,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'workflow:write')
         trigger = bounded_mapping(body.trigger)
         steps = [bounded_mapping(step, max_bytes=32768) for step in body.steps]
         workflow_id = require_runtime('automations').create_workflow(
@@ -416,7 +418,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        device_id = auth_device(authorization, x_device_id)
+        device_id = auth_device(authorization, x_device_id, 'workflow:write')
         run_id = require_runtime('automations').run_workflow(
             body.workflow_id,
             background=True,
@@ -431,7 +433,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'workflow:write')
         return require_runtime('automations').pause_workflow(body.workflow_id, body.paused)
 
     @app.post('/workflows/approval')
@@ -440,7 +442,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        device_id = auth_device(authorization, x_device_id)
+        device_id = auth_device(authorization, x_device_id, 'workflow:approve')
         engine = require_runtime('automations')
         decision = body.decision.strip().lower()
         if decision == 'approve':
@@ -464,7 +466,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'qualification:read')
         benchmark = require_runtime('benchmark')
         return {'capabilities': benchmark.latest(), 'tasks': benchmark.task_matrix()}
 
@@ -474,7 +476,7 @@ def create_app(
         authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ):
-        auth_device(authorization, x_device_id)
+        auth_device(authorization, x_device_id, 'qualification:record')
         benchmark = require_runtime('benchmark')
         if body.capability.strip().lower() == 'all':
             return benchmark.run_all()
