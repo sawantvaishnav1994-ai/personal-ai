@@ -35,6 +35,14 @@ class SlidingWindowLimiter:
 class SecureCloudRelay:
     """Policy boundary between an internet-facing client and the privileged Personal AI runtime."""
 
+    DEVICE_SCOPE_MAP = {
+        'ai:chat': 'ai:chat',
+        'status:read': 'device:read',
+        'memory:read': 'memory:read',
+        'approval:read': 'ai:chat',
+        'approval:write': 'ai:chat',
+    }
+
     def __init__(self, *, executor, memory, second_brain, device_registry, sessions: CloudSessionStore, owner: OwnerAuthenticator, events=None):
         self.executor = executor
         self.memory = memory
@@ -51,6 +59,11 @@ class SecureCloudRelay:
     def _on_state(self, event):
         self._state = str(event.get('state', 'unknown'))
 
+    def _device_scope_allowed(self, device_id: str, cloud_scope: str) -> bool:
+        mapped_scope = self.DEVICE_SCOPE_MAP.get(str(cloud_scope))
+        authorize = getattr(self.device_registry, 'authorize', None) if self.device_registry is not None else None
+        return bool(mapped_scope and callable(authorize) and authorize(device_id, mapped_scope))
+
     def authenticate(self, token: str, scope: str, nonce: str | None = None):
         session = self.sessions.authenticate(token, scope)
         if not session:
@@ -58,6 +71,8 @@ class SecureCloudRelay:
         if not self.device_registry or not self.device_registry.is_active(session.device_id):
             self.sessions.revoke(session.id)
             return RelayResult(401, {'error': 'device_revoked'}), None
+        if not self._device_scope_allowed(session.device_id, scope):
+            return RelayResult(403, {'error': 'device_permission_denied'}), None
         if not self.rate.allow(session.id):
             return RelayResult(429, {'error': 'rate_limited'}), None
         if nonce is not None and not self.sessions.accept_nonce(session.id, nonce):
@@ -67,7 +82,16 @@ class SecureCloudRelay:
     def issue_session(self, device_id: str, device_token: str):
         if not self.device_registry or not self.device_registry.authenticate(device_id, device_token):
             return RelayResult(401, {'error': 'device_auth_failed'})
-        token, session = self.sessions.issue(device_id)
+        scopes = tuple(
+            scope for scope in self.sessions.DEFAULT_SCOPES
+        ) if hasattr(self.sessions, 'DEFAULT_SCOPES') else None
+        if scopes is None:
+            from cloud_runtime.security import DEFAULT_SCOPES
+            scopes = DEFAULT_SCOPES
+        allowed_scopes = tuple(scope for scope in scopes if self._device_scope_allowed(device_id, scope))
+        if not allowed_scopes:
+            return RelayResult(403, {'error': 'device_permission_denied'})
+        token, session = self.sessions.issue(device_id, scopes=allowed_scopes)
         self.memory.audit('cloud', 'session_issued', {
             'session_id': session.id,
             'device_id': device_id,
@@ -125,6 +149,8 @@ class SecureCloudRelay:
         session = self._live_session(session)
         if session is None:
             return RelayResult(401, {'error': 'session_expired_or_revoked'})
+        if not self._device_scope_allowed(session.device_id, 'ai:chat'):
+            return RelayResult(403, {'error': 'device_permission_denied'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         text = (text or '').strip()
@@ -200,6 +226,8 @@ class SecureCloudRelay:
         session = self._live_session(session)
         if session is None:
             return RelayResult(401, {'error': 'session_expired_or_revoked'})
+        if not self._device_scope_allowed(session.device_id, 'approval:write'):
+            return RelayResult(403, {'error': 'device_permission_denied'})
         if self.sessions.emergency_stopped():
             return RelayResult(423, {'error': 'emergency_stop_active'})
         try:
