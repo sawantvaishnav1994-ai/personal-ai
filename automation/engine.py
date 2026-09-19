@@ -273,15 +273,17 @@ class AutomationEngine:
 
     def approve_run(self,run_id,approval_id,*,owner_id=None,device_id=None,session_id=None,reauthenticated_at=None):
         run=self._run(run_id)
+        self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
         if run['status']!='waiting_approval' or run['pending_approval_id']!=approval_id: raise PermissionError('run is not waiting for this approval')
-        self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id); self.budgets.check(run_id,next_step=int(run['current_step'])); authority=self._authority_kwargs(run)
+        self.budgets.check(run_id,next_step=int(run['current_step'])); authority=self._authority_kwargs(run)
         if reauthenticated_at is not None: authority['reauthenticated_at']=reauthenticated_at
         with self.budgets.enter(run_id,int(run['current_step']),0,'approval_resume'): result=self.executor.approve(approval_id,**authority)
         self._update_run(run_id,status='queued',pending_approval_id=None); self._workflow_pool.submit(self._continue_run,run_id,approved_result=result); return {'run_id':run_id,'approval_id':approval_id,'resumed':True}
     def reject_run(self,run_id,approval_id,*,owner_id=None,device_id=None,session_id=None):
         run=self._run(run_id)
+        self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
         if run['status']!='waiting_approval' or run['pending_approval_id']!=approval_id: raise PermissionError('run is not waiting for this approval')
-        self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id); self.executor.reject(approval_id,**self._authority_kwargs(run)); self._update_run(run_id,status='cancelled',pending_approval_id=None,completed_at=now(),error='user rejected approval'); self.budgets.mark_cancelled(run_id,'Cancelled by owner'); self._emit('workflow.cancelled',run_id=run_id,workflow_id=run['workflow_id'],reason='approval_rejected'); return {'run_id':run_id,'cancelled':True}
+        self.executor.reject(approval_id,**self._authority_kwargs(run)); self._update_run(run_id,status='cancelled',pending_approval_id=None,completed_at=now(),error='user rejected approval'); self.budgets.mark_cancelled(run_id,'Cancelled by owner'); self._emit('workflow.cancelled',run_id=run_id,workflow_id=run['workflow_id'],reason='approval_rejected'); return {'run_id':run_id,'cancelled':True}
     def cancel_run(self,run_id,*,owner_id=None,device_id=None,session_id=None):
         run=self._run(run_id); self._assert_authority(run,owner_id=owner_id,device_id=device_id,session_id=session_id)
         if run['status'] in self.TERMINAL: return {'run_id':run_id,'cancelled':run['status']=='cancelled','status':run['status']}
